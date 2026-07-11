@@ -1,0 +1,69 @@
+# ChronoScalp strategy/risk configuration.
+# Safe to version-control — no secrets here (secrets live only in .env).
+
+symbols:
+  - "XAUUSD"
+  - "EURUSD"
+  # Add "XAUEUR" here too if your broker offers the direct cross instrument.
+
+timeframes:
+  higher_trend: ["M10", "M5"]   # must agree before any trade is permitted
+  entry_trigger: ["M3", "M1"]   # entry timing / trigger confirmation
+
+indicators:
+  ema_period_trend: 50
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  bollinger_period: 20
+  bollinger_std_dev: 2.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  atr_period: 14
+
+strategy:
+  require_trend_alignment: true      # M10 and M5 must agree
+  use_smc_confluence: true           # require SMC context (order block / FVG / sweep) alongside indicators
+  min_signal_confidence: 0.55
+
+sessions:
+  timezone: "GMT"
+  windows:
+    london: { start: "08:00", end: "11:00" }
+    new_york: { start: "13:30", end: "16:30" }
+  trade_outside_sessions: false
+
+news_filter:
+  enabled: true
+  blackout_minutes_before: 30
+  blackout_minutes_after: 30
+  high_impact_only: true
+
+risk:
+  # Hard constraints — see CLAUDE.md / .cursor/rules/project.mdc.
+  # Do not raise these without deliberately re-reading docs/ARCHITECTURE.md
+  # "Win-rate expectations" section first.
+  max_risk_per_trade_pct: 1.0
+  min_reward_risk_ratio: 1.5
+  max_daily_loss_pct: 3.0
+  max_concurrent_positions: 2
+  use_kelly_sizing: false          # if true, Kelly fraction is still hard-capped at max_risk_per_trade_pct
+  breakeven_at_r_multiple: 1.0
+  trailing_stop_atr_multiple: 1.5
+
+spread_filter:
+  enabled: true
+  max_spread_pips:
+    XAUUSD: 35
+    EURUSD: 2.0
+
+execution:
+  broker: "paper"    # "paper" | "mt5"
+  slippage_pips: 0.5
+  poll_interval_seconds: 5
+
+backtest:
+  initial_balance: 10000
+  commission_per_lot: 7.0
+  data_dir: "data/history"

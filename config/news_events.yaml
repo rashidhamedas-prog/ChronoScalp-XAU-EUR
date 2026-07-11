@@ -1,0 +1,20 @@
+# Manual high-impact news calendar (fallback when NEWS_API_KEY is not set).
+# All timestamps are UTC/GMT ISO-8601. Keep this list updated weekly, e.g.
+# from https://www.forexfactory.com/calendar (manual entry) or your broker's
+# economic calendar. These example entries are illustrative placeholders —
+# replace with real upcoming event dates before relying on this filter.
+
+- timestamp: "2026-08-07T12:30:00"
+  currency: "USD"
+  impact: "high"
+  title: "Non-Farm Payrolls (NFP)"
+
+- timestamp: "2026-08-12T12:30:00"
+  currency: "USD"
+  impact: "high"
+  title: "CPI (Consumer Price Index)"
+
+- timestamp: "2026-08-06T11:45:00"
+  currency: "EUR"
+  impact: "high"
+  title: "ECB Interest Rate Decision"

@@ -1,0 +1,37 @@
+# Core
+pandas>=2.2,<2.3
+numpy>=1.26,<2.0          # pinned <2.0: pandas-ta relies on np.NaN, removed in numpy 2.x
+pandas-ta>=0.3.14b0
+
+# Config / env
+pydantic>=2.7
+pydantic-settings>=2.3
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# Scheduling / resilience
+APScheduler>=3.10
+tenacity>=8.3
+
+# Logging / monitoring
+loguru>=0.7
+sentry-sdk>=2.5
+
+# HTTP (news calendar, future REST broker)
+requests>=2.31
+
+# Broker SDK — Windows only, see docs/ARCHITECTURE.md
+MetaTrader5>=5.0.45; platform_system == "Windows"
+
+# ML (Phase 6 — optional, not required for Phase 1-5)
+scikit-learn>=1.5
+xgboost>=2.0
+
+# Reporting
+matplotlib>=3.9
+
+# Dev / test / lint
+pytest>=8.2
+pytest-cov>=5.0
+ruff>=0.5
+black>=24.4

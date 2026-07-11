@@ -1,0 +1,51 @@
+---
+description: ChronoScalp XAU/EUR project rules — always apply
+alwaysApply: true
+---
+
+# ChronoScalp XAU/EUR — Cursor Project Rules
+
+Multi-timeframe algorithmic scalping bot for XAUUSD / EURUSD. Full context
+lives in `README.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and
+`CLAUDE.md` (this file mirrors CLAUDE.md — keep both in sync when either
+changes).
+
+## Hard constraints — do not violate these while generating or editing code
+
+1. Never loosen risk management to chase a higher backtest win rate. Max 1%
+   equity risk per trade and minimum 1:1.5 R:R (`config/settings.yaml`) are
+   fixed constraints, not tuning parameters.
+2. Never remove or weaken the `CHRONOSCALP_CONFIRM_LIVE` gate in
+   `scripts/run_live.py` that blocks accidental live trading.
+3. Broker SDKs (`MetaTrader5`, future REST clients) may only be imported
+   inside `src/chronoscalp/execution/*_broker.py`. Strategy, risk, and filter
+   modules depend on the `Broker` interface in `execution/broker.py`, never a
+   concrete SDK.
+4. The `MetaTrader5` pip package is Windows-only. Don't write code that
+   assumes it imports on Linux/macOS.
+5. New strategy or risk logic needs a corresponding `tests/` file.
+
+## Style
+
+- Python 3.11+, full type hints, docstrings on public functions.
+- `loguru` for logging, never bare `print()`.
+- Timeframes always use the `Timeframe` enum (`src/chronoscalp/utils/types.py`).
+- Strategy/risk parameters belong in `config/*.yaml`; secrets belong only in
+  `.env` (never commit secrets).
+- Format with `black`, lint with `ruff` before treating a change as done.
+
+## End-of-task checklist (project owner's standing instruction)
+
+After finishing a coding task in this repo:
+
+1. `pytest -q` and `ruff check src tests` — both must pass.
+2. `git add -A && git commit -m "<concise message>"`.
+3. `git push` to `origin` — the repo lives at
+   `github.com/rashidhamedas-prog/ChronoScalp-XAU-EUR` (see README §Getting Started).
+4. Update `docs/ROADMAP.md`'s phase checklist if the change completes or
+   starts a roadmap item.
+
+## Current phase
+
+See `docs/ROADMAP.md` for the authoritative phase-by-phase status before
+starting new work.

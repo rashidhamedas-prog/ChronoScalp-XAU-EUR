@@ -1,0 +1,30 @@
+# Per-symbol contract specifications used by risk sizing, backtesting, and
+# the paper broker's fill simulation. Adjust to match your actual broker's
+# contract specs (check your broker's symbol specification sheet).
+
+XAUUSD:
+  pip_size: 0.01          # 1 pip = $0.01 move for most gold quote conventions
+  contract_size: 100      # 1 standard lot = 100 oz
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 50
+  typical_spread_pips: 20
+  pip_value_per_lot: 1.0  # USD value of 1 pip move for 1.0 lot (broker-dependent, verify)
+
+EURUSD:
+  pip_size: 0.0001
+  contract_size: 100000   # 1 standard lot = 100,000 units
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 1.0
+  pip_value_per_lot: 10.0
+
+XAUEUR:
+  pip_size: 0.01
+  contract_size: 100
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 50
+  typical_spread_pips: 30
+  pip_value_per_lot: 1.0
