@@ -40,5 +40,6 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] Docker packaging (`docker/Dockerfile`, `docker/docker-compose.yml`)
 - [x] Structured logging + optional Sentry integration
 - [x] CI (lint + tests on push)
+- [x] **Phase A safety (execution reliability):** MT5 spread points→pips fix, shared MT5 connector, dynamic order filling mode, position ticket verification after `order_send`, bar-close-only entry gate, signal deduplication, persistent state + broker reconciliation, paper-live SL/TP simulation, `max_concurrent_positions` enforcement, daily PnL tracking on close (`orchestration/`, `execution/mt5_utils.py`, `execution/position_logic.py`)
 - [ ] OANDA REST broker implementation, if Linux-native live deployment is chosen over Windows VPS + MT5
 - [ ] Alerting (Telegram/Discord webhook on trade open/close, daily loss-limit hit, connection loss) — recommended next addition for unattended operation

@@ -52,6 +52,10 @@ class MT5Connector:
         self._terminal_path = terminal_path
         self._connected = False
 
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
     def connect(self) -> bool:
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
@@ -129,6 +133,16 @@ class MT5Connector:
         if info is None:
             return None
         return float(info.spread)
+
+    def symbol_point(self, symbol: str) -> float | None:
+        """Broker price point size (needed to convert spread points → pips)."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return None
+        return float(info.point)
 
 
 # --------------------------------------------------------------------------

@@ -62,6 +62,9 @@ execution:
   broker: "paper"    # "paper" | "mt5"
   slippage_pips: 0.5
   poll_interval_seconds: 5
+  trade_on_bar_close_only: true   # evaluate entries once per completed trigger bar
+  state_dir: "data/state"         # persistent open tickets + dedup keys
+  magic_number: 20260711          # MT5 magic — must match live positions
 
 backtest:
   initial_balance: 10000

@@ -20,6 +20,11 @@ from datetime import datetime
 import pandas as pd
 
 from chronoscalp.execution.paper_broker import PaperBroker
+from chronoscalp.execution.position_logic import (
+    apply_breakeven_or_trailing,
+    check_sl_tp_hit,
+    exit_price_for_hit,
+)
 from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.logging_setup import logger
@@ -201,35 +206,23 @@ def _manage_open_position(broker: PaperBroker, risk_manager: RiskManager, ticket
     if position is None:
         return None
 
-    hit_sl = (
-        bar["low"] <= position.stop_loss
-        if position.direction == SignalType.BUY
-        else bar["high"] >= position.stop_loss
-    )
-    hit_tp = (
-        bar["high"] >= position.take_profit
-        if position.direction == SignalType.BUY
-        else bar["low"] <= position.take_profit
-    )
-
-    if hit_sl or hit_tp:
-        exit_price = position.stop_loss if hit_sl else position.take_profit
+    hit = check_sl_tp_hit(position, float(bar["high"]), float(bar["low"]))
+    if hit.triggered:
+        exit_price = exit_price_for_hit(position, hit)
         trade = broker.close_position(
-            ticket, exit_price=exit_price, at=t.to_pydatetime(), reason="stop_loss" if hit_sl else "take_profit"
+            ticket, exit_price=exit_price, at=t.to_pydatetime(), reason=hit.exit_reason()
         )
         result.trades.append(trade)
         risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=t.to_pydatetime())
         result.equity_curve.append((t.to_pydatetime(), broker.get_balance()))
         return None
 
-    # breakeven / trailing stop management
-    new_sl = risk_manager.breakeven_stop(position, bar["close"])
+    atr_value = float(bar["atr"]) if "atr" in bar and not pd.isna(bar["atr"]) else None
+    new_sl = apply_breakeven_or_trailing(risk_manager, position, float(bar["close"]), atr_value)
     if new_sl is not None:
         broker.modify_sl_tp(ticket, new_sl, position.take_profit)
-        position.breakeven_moved = True
-    elif "atr" in bar and not pd.isna(bar["atr"]):
-        trailing_sl = risk_manager.trailing_stop(position, bar["close"], bar["atr"])
-        if trailing_sl is not None:
-            broker.modify_sl_tp(ticket, trailing_sl, position.take_profit)
+        if new_sl == position.entry_price:
+            position.breakeven_moved = True
+        position.stop_loss = new_sl
 
     return ticket
