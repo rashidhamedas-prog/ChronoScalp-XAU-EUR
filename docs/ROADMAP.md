@@ -6,7 +6,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] MT5 connector: multi-symbol, multi-timeframe OHLCV fetch (`data/mt5_connector.py`)
 - [x] Missing-bar / gap handling
 - [x] Historical fetch CLI (`scripts/fetch_history.py`)
-- [ ] Tick-level spread history capture (currently uses configured static spread cap; live spread sampling is a good next step)
+- [x] Tick-level spread history capture (`data/spread_sampler.py`, `spread_filter.sample_live_spread`)
 
 ## Phase 2 — Multi-timeframe feature extraction ✅
 - [x] EMA(50), RSI(14) on M10/M5 for trend detection (`indicators/technical.py`)
@@ -16,7 +16,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 ## Phase 3 — Session & news filtering ✅
 - [x] London (08:00–11:00 GMT) / New York (13:30–16:30 GMT) session windows (`filters/session_filter.py`, configurable in `config/settings.yaml`)
 - [x] News blackout filter interface + manual/CSV calendar fallback (`filters/news_filter.py`)
-- [ ] Live economic-calendar API integration (needs an API key — see `.env.example`; ships with a manual-event-list fallback so it works with zero external dependencies)
+- [x] Live economic-calendar API integration via Finnhub (`filters/news_filter.py::_fetch_events_from_api`, `NEWS_API_KEY` in `.env`)
 
 ## Phase 4 — Risk management & position sizing ✅
 - [x] Equity-percentage position sizing, capped at 1%/trade (`risk/position_sizing.py`)
@@ -31,7 +31,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 
 ## Phase 6 — Advanced techniques 🟡
 - [x] SMC structure detection: swing points, BOS/CHoCH, order blocks, FVGs, liquidity sweeps (`smc/structure.py`)
-- [ ] ML setup-probability scoring — hook exists (`strategy/multi_timeframe.py::score_setup_probability`), model training pipeline not yet built. Needs: (1) run backtest to generate labeled setups, (2) feature-engineer indicator+SMC state at signal time, (3) train/validate a classifier out-of-sample, (4) only then wire into live filtering as an additional confidence gate, never as the sole signal source
+- [x] ML setup-probability scoring — training pipeline (`ml/dataset.py`, `ml/model.py`, `scripts/train_ml_model.py`), feature extraction, optional live gate via `ml.enabled` + `strategy.min_signal_confidence` (never sole signal source)
 - [x] Fast breakeven + trailing stop (Phase 4, listed here too since the brief grouped it under "advanced techniques")
 - [x] Hard spread-filter constraint
 

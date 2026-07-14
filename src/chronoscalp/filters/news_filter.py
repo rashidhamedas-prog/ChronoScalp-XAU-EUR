@@ -15,7 +15,7 @@ Like SessionFilter, this is veto-only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -102,11 +102,72 @@ def _load_manual_events(path: str | Path) -> list[NewsEvent]:
 
 
 def _fetch_events_from_api(api_key: str) -> list[NewsEvent] | None:
-    """Extension point: implement against your chosen economic-calendar
-    provider. Intentionally not wired to a specific vendor — pick one that
-    fits your budget/reliability needs and implement the HTTP call + mapping
-    to NewsEvent here. Must return None (not raise) on any failure so the
-    caller falls back to the manual events file.
-    """
-    logger.debug("_fetch_events_from_api() is a stub — using manual events file instead")
-    return None
+    """Fetch high-impact events from Finnhub economic calendar (last 7d + next 14d)."""
+    import requests
+
+    today = date.today()
+    params = {
+        "from": (today - timedelta(days=7)).isoformat(),
+        "to": (today + timedelta(days=14)).isoformat(),
+        "token": api_key,
+    }
+    try:
+        response = requests.get(
+            "https://finnhub.io/api/v1/calendar/economic",
+            params=params,
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            logger.warning(
+                "Finnhub calendar HTTP {}: {}", response.status_code, response.text[:200]
+            )
+            return None
+        payload = response.json()
+    except requests.RequestException as exc:
+        logger.warning("Finnhub calendar request failed: {}", exc)
+        return None
+
+    raw_events = payload.get("economicCalendar") or payload.get("data") or []
+    if not raw_events:
+        return None
+
+    country_to_currency = {
+        "US": "USD",
+        "EU": "EUR",
+        "DE": "EUR",
+        "GB": "GBP",
+        "JP": "JPY",
+        "AU": "AUD",
+        "CA": "CAD",
+        "CH": "CHF",
+        "NZ": "NZD",
+    }
+
+    events: list[NewsEvent] = []
+    for item in raw_events:
+        impact_raw = str(item.get("impact", item.get("importance", ""))).lower()
+        if impact_raw not in ("high", "3", "3.0"):
+            continue
+
+        country = str(item.get("country", item.get("region", ""))).upper()
+        currency = country_to_currency.get(country, country[:3] if country else "ALL")
+
+        time_str = item.get("time") or item.get("date")
+        if not time_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(time_str).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+
+        events.append(
+            NewsEvent(
+                timestamp=ts,
+                currency=currency,
+                impact="high",
+                title=str(item.get("event", item.get("title", "economic release"))),
+            )
+        )
+
+    logger.info("Fetched {} high-impact events from Finnhub", len(events))
+    return events or None

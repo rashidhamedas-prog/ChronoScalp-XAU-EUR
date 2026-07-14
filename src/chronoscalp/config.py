@@ -105,6 +105,10 @@ class Settings:
     def resilience(self) -> dict[str, Any]:
         return dict(self.raw.get("resilience", {}))
 
+    @property
+    def ml(self) -> dict[str, Any]:
+        return dict(self.raw.get("ml", {}))
+
     def symbol_spec(self, symbol: str) -> dict[str, Any]:
         spec = self.symbols_raw.get(symbol)
         if spec is None:

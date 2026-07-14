@@ -17,6 +17,8 @@ from datetime import datetime
 import pandas as pd
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.ml.features import extract_setup_features
+from chronoscalp.ml.scorer import is_configured, predict_setup_probability
 from chronoscalp.utils.types import Signal, SignalType, Timeframe, TrendDirection
 
 
@@ -131,7 +133,16 @@ def generate_entry_signal(
         entry_price=entry_price,
         stop_loss=stop_loss,
         take_profit=take_profit,
-        confidence=score_setup_probability({"trend": trend.value, "reason": reason_parts}),
+        confidence=score_setup_probability(
+            extract_setup_features(
+                trigger_row=last,
+                trend=trend,
+                signal_type=signal_type,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+        ),
         reason=", ".join(reason_parts),
         timeframe=timeframe,
     )
@@ -149,14 +160,8 @@ def generate_entry_signal(
 
 
 def score_setup_probability(features: dict) -> float:
-    """Phase 6 ML hook (see docs/ARCHITECTURE.md "ML setup-scoring (stub)").
-
-    Currently returns a neutral confidence. Replace with a trained
-    scikit-learn/xgboost classifier's predict_proba() once a labeled
-    backtest dataset exists — do not wire a model into live trading without
-    its own out-of-sample validation (CLAUDE.md rule #5).
-    """
-    return 0.5
+    """Return P(setup wins) from the loaded ML model, or 0.5 if none configured."""
+    return predict_setup_probability(features)
 
 
 def _no_signal(symbol: str, timeframe: Timeframe) -> Signal:
@@ -185,6 +190,8 @@ class MultiTimeframeStrategy:
         data_by_timeframe: dict[Timeframe, pd.DataFrame],
         higher_timeframes: list[Timeframe],
         trigger_timeframe: Timeframe,
+        *,
+        ignore_confidence_gate: bool = False,
     ) -> Signal:
         ema_period = self.indicators_cfg.get("ema_period_trend", 50)
         higher_trends = [
@@ -202,10 +209,28 @@ class MultiTimeframeStrategy:
         if trigger_df is None:
             return _no_signal(symbol, trigger_timeframe)
 
-        return generate_entry_signal(
+        signal = generate_entry_signal(
             symbol=symbol,
             trigger_df=trigger_df,
             trend=trend,
             timeframe=trigger_timeframe,
             use_smc_confluence=self.strategy_cfg.get("use_smc_confluence", True),
         )
+
+        min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))
+        if (
+            not ignore_confidence_gate
+            and is_configured()
+            and signal.is_actionable
+            and min_conf > 0
+            and signal.confidence < min_conf
+        ):
+            logger.debug(
+                "{} signal rejected: confidence {:.2f} < min {:.2f}",
+                symbol,
+                signal.confidence,
+                min_conf,
+            )
+            return _no_signal(symbol, trigger_timeframe)
+
+        return signal

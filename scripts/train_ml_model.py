@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run a backtest from local CSV history (data/history/, produced by
-scripts/fetch_history.py). Works on any OS — no MT5/broker connection needed.
+"""Train the setup-probability classifier from CSV history.
 
 Usage:
-    python scripts/run_backtest.py --symbol XAUUSD --from 2024-01-01 --to 2026-01-01
+    python scripts/train_ml_model.py --symbol XAUUSD
+    python scripts/train_ml_model.py --symbol XAUUSD --output data/models/setup_classifier.joblib
+
+After out-of-sample validation, set ``ml.enabled: true`` in config/settings.yaml.
 """
 
 from __future__ import annotations
@@ -16,36 +18,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from chronoscalp.backtest.engine import run_backtest  # noqa: E402
 from chronoscalp.config import get_settings  # noqa: E402
 from chronoscalp.data.mt5_connector import load_history_csv  # noqa: E402
 from chronoscalp.indicators.technical import enrich_with_indicators  # noqa: E402
 from chronoscalp.logging_setup import logger  # noqa: E402
-from chronoscalp.ml.scorer import configure_scorer  # noqa: E402
+from chronoscalp.ml.dataset import build_labeled_dataset  # noqa: E402
+from chronoscalp.ml.model import SetupClassifier  # noqa: E402
 from chronoscalp.smc.structure import enrich_with_smc  # noqa: E402
 from chronoscalp.utils.types import Timeframe  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backtest ChronoScalp against local CSV history")
+    parser = argparse.ArgumentParser(description="Train ChronoScalp setup classifier")
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--from", dest="date_from", type=str, default=None)
     parser.add_argument("--to", dest="date_to", type=str, default=None)
-    parser.add_argument(
-        "--data-dir", default=None, help="Defaults to config/settings.yaml backtest.data_dir"
-    )
-    parser.add_argument(
-        "--report", default=None, help="Optional path to write a JSON summary report"
-    )
+    parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--output", default=None, help="Model output path (.joblib)")
+    parser.add_argument("--report", default=None, help="Optional JSON training report path")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     settings = get_settings()
-    if settings.ml.get("enabled"):
-        configure_scorer(settings.ml.get("model_path"))
     data_dir = args.data_dir or settings.backtest.get("data_dir", "data/history")
+    output = args.output or settings.ml.get("model_path", "data/models/setup_classifier.joblib")
 
     higher_tfs = [Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]]
     trigger_tf = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
@@ -73,13 +71,12 @@ def main() -> None:
             macd_signal=ind_cfg.get("macd_signal", 9),
             atr_period=ind_cfg.get("atr_period", 14),
         )
-        df = enrich_with_smc(df)
-        data_by_tf[tf] = df
+        data_by_tf[tf] = enrich_with_smc(df)
 
     start = datetime.fromisoformat(args.date_from) if args.date_from else None
     end = datetime.fromisoformat(args.date_to) if args.date_to else None
 
-    result = run_backtest(
+    dataset = build_labeled_dataset(
         symbol=args.symbol,
         data_by_timeframe=data_by_tf,
         higher_timeframes=higher_tfs,
@@ -89,35 +86,30 @@ def main() -> None:
         end=end,
     )
 
-    summary = result.summary()
-    print(json.dumps(summary, indent=2, default=str))
+    if len(dataset) < 20:
+        logger.error(
+            "Insufficient labeled samples ({}) — fetch more history or widen date range",
+            len(dataset),
+        )
+        sys.exit(1)
+
+    classifier = SetupClassifier()
+    report = classifier.train(dataset)
+    classifier.save(output)
+
+    payload = {
+        "symbol": args.symbol,
+        "samples": len(dataset),
+        "model_path": output,
+        **report.to_dict(),
+    }
+    print(json.dumps(payload, indent=2))
 
     if args.report:
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         with open(args.report, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "summary": summary,
-                    "trades": [
-                        {
-                            "symbol": t.symbol,
-                            "direction": t.direction.value,
-                            "entry_price": t.entry_price,
-                            "exit_price": t.exit_price,
-                            "volume": t.volume,
-                            "open_time": t.open_time.isoformat(),
-                            "close_time": t.close_time.isoformat(),
-                            "pnl": t.pnl,
-                            "r_multiple": t.r_multiple,
-                            "exit_reason": t.exit_reason,
-                        }
-                        for t in result.trades
-                    ],
-                },
-                f,
-                indent=2,
-            )
-        logger.info("Report written to {}", args.report)
+            json.dump(payload, f, indent=2)
+        logger.info("Training report written to {}", args.report)
 
 
 if __name__ == "__main__":

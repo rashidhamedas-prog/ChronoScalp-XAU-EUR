@@ -54,9 +54,15 @@ risk:
 
 spread_filter:
   enabled: true
+  sample_live_spread: true        # append spread observations to data/spread_history/
+  spread_history_dir: "data/spread_history"
   max_spread_pips:
     XAUUSD: 35
     EURUSD: 2.0
+
+ml:
+  enabled: false                  # set true after training + OOS validation
+  model_path: "data/models/setup_classifier.joblib"
 
 execution:
   broker: "paper"    # "paper" | "mt5"

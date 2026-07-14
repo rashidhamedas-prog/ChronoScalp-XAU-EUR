@@ -10,6 +10,7 @@ XAUUSD:
   max_lot: 50
   typical_spread_pips: 20
   pip_value_per_lot: 1.0  # USD value of 1 pip move for 1.0 lot (broker-dependent, verify)
+  news_currency: USD      # for news blackout filter (XAUUSD → USD events)
 
 EURUSD:
   pip_size: 0.0001
@@ -19,6 +20,7 @@ EURUSD:
   max_lot: 100
   typical_spread_pips: 1.0
   pip_value_per_lot: 10.0
+  news_currency: EUR
 
 XAUEUR:
   pip_size: 0.01

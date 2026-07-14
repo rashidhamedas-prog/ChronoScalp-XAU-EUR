@@ -20,6 +20,7 @@ import pandas as pd
 
 from chronoscalp.config import Settings, get_settings
 from chronoscalp.data.mt5_connector import MT5Connector
+from chronoscalp.data.spread_sampler import SpreadSampler
 from chronoscalp.execution.mt5_broker import MT5Broker
 from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC
 from chronoscalp.execution.paper_broker import PaperBroker
@@ -32,6 +33,7 @@ from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.logging_setup import logger
+from chronoscalp.ml.scorer import configure_scorer
 from chronoscalp.orchestration.alerts import AlertLevel, AlertNotifier
 from chronoscalp.orchestration.bar_scheduler import (
     BarCloseGate,
@@ -140,6 +142,20 @@ class TradingBot:
                 logger.warning("Skipping invalid last_evaluated_bar for {}: {}", symbol, bar_iso)
 
         self.signal_deduper = SignalDeduper(set(self.state_store.state.processed_signals))
+
+        ml_cfg = settings.ml
+        if ml_cfg.get("enabled"):
+            configure_scorer(ml_cfg.get("model_path"))
+
+        spread_cfg = settings.spread_filter
+        self.spread_sampler = SpreadSampler(
+            directory=spread_cfg.get("spread_history_dir", "data/spread_history"),
+            enabled=bool(spread_cfg.get("sample_live_spread", False)),
+        )
+
+    def _news_currency(self, symbol: str) -> str | None:
+        spec = self.settings.symbols_raw.get(symbol, {})
+        return spec.get("news_currency")
 
     def start(self) -> None:
         if not self.connector.connect():
@@ -268,6 +284,9 @@ class TradingBot:
 
         for symbol in self.settings.symbols:
             try:
+                spread_pips = self.broker.get_current_spread_pips(symbol)
+                self.spread_sampler.record(symbol, spread_pips, at=now)
+
                 self._manage_open_position(symbol, now)
                 if not allow_new_entries:
                     continue
@@ -279,7 +298,7 @@ class TradingBot:
 
                 if not self.session_filter.is_within_session(now):
                     continue
-                if self.news_filter.is_blackout(now):
+                if self.news_filter.is_blackout(now, currency=self._news_currency(symbol)):
                     continue
 
                 data_by_tf = self._fetch_and_enrich(symbol)
@@ -316,7 +335,6 @@ class TradingBot:
                 if self.signal_deduper.already_processed(dedup_key):
                     continue
 
-                spread_pips = self.broker.get_current_spread_pips(symbol)
                 if not self.risk_manager.validate_signal(signal, spread_pips):
                     continue
 
