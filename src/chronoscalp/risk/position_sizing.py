@@ -155,7 +155,9 @@ class RiskManager:
 
         return True
 
-    def position_size_for(self, signal: Signal, equity: float, win_rate_estimate: float = 0.6) -> float:
+    def position_size_for(
+        self, signal: Signal, equity: float, win_rate_estimate: float = 0.6
+    ) -> float:
         symbol_spec = self.symbols_cfg[signal.symbol]
         risk_pct = self.risk_cfg.get("max_risk_per_trade_pct", 1.0)
 
@@ -193,7 +195,9 @@ class RiskManager:
             return position.entry_price
         return None
 
-    def trailing_stop(self, position: Position, current_price: float, atr_value: float) -> float | None:
+    def trailing_stop(
+        self, position: Position, current_price: float, atr_value: float
+    ) -> float | None:
         """ATR-based trailing stop. Returns a new SL only if it's tighter
         than the current one (never widens risk)."""
         multiple = self.risk_cfg.get("trailing_stop_atr_multiple", 1.5)

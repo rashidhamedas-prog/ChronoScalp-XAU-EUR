@@ -59,6 +59,8 @@ def apply_breakeven_or_trailing(
     return None
 
 
-def sl_tp_hit_at(position: Position, bar_high: float, bar_low: float, at: datetime) -> tuple[SlTpHit, datetime]:
+def sl_tp_hit_at(
+    position: Position, bar_high: float, bar_low: float, at: datetime
+) -> tuple[SlTpHit, datetime]:
     """Convenience wrapper keeping the evaluation timestamp explicit for callers."""
     return check_sl_tp_hit(position, bar_high, bar_low), at

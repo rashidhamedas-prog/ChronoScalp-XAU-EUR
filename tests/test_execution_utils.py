@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -28,7 +28,7 @@ def test_check_sl_tp_hit_buy_stop_loss():
         entry_price=2000.0,
         stop_loss=1990.0,
         take_profit=2025.0,
-        open_time=datetime.now(tz=timezone.utc),
+        open_time=datetime.now(tz=UTC),
     )
     hit = check_sl_tp_hit(position, bar_high=2005.0, bar_low=1989.0)
     assert hit.hit_sl is True
@@ -45,7 +45,7 @@ def test_check_sl_tp_hit_sell_take_profit():
         entry_price=1.1000,
         stop_loss=1.1010,
         take_profit=1.0970,
-        open_time=datetime.now(tz=timezone.utc),
+        open_time=datetime.now(tz=UTC),
     )
     hit = check_sl_tp_hit(position, bar_high=1.1005, bar_low=1.0965)
     assert hit.hit_tp is True

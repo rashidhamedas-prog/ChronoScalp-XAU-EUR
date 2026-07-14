@@ -27,7 +27,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 ## Phase 5 — Backtesting & optimization 🟡
 - [x] Event-driven backtest engine with spread/slippage modeling (`backtest/engine.py`)
 - [x] Equity curve, win rate, profit factor, max drawdown, expectancy reporting
-- [ ] Grid-search / walk-forward optimization over indicator parameters (extension point: `backtest/engine.py::run_backtest()` is pure and side-effect free, so wrapping it in a parameter sweep is a small addition — do not hardcode optimized params back into `config/settings.yaml` without walk-forward validation, to avoid overfitting)
+- [x] Grid-search / walk-forward optimization over indicator parameters (`backtest/optimizer.py`, `scripts/run_optimize.py` — results are JSON-only, never auto-written to `config/settings.yaml`)
 
 ## Phase 6 — Advanced techniques 🟡
 - [x] SMC structure detection: swing points, BOS/CHoCH, order blocks, FVGs, liquidity sweeps (`smc/structure.py`)
@@ -42,4 +42,5 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] CI (lint + tests on push)
 - [x] **Phase A safety (execution reliability):** MT5 spread points→pips fix, shared MT5 connector, dynamic order filling mode, position ticket verification after `order_send`, bar-close-only entry gate, signal deduplication, persistent state + broker reconciliation, paper-live SL/TP simulation, `max_concurrent_positions` enforcement, daily PnL tracking on close (`orchestration/`, `execution/mt5_utils.py`, `execution/position_logic.py`)
 - [x] **Phase B resilience:** kill switch (`CHRONOSCALP_STOP_TRADING` / `data/state/STOP_TRADING`), circuit breaker after consecutive loop errors, Telegram/Discord alerting on trade open/close, daily loss limit, connection loss, and critical faults (`orchestration/kill_switch.py`, `circuit_breaker.py`, `alerts.py`)
+- [x] **Periodic reconciliation:** broker ↔ state sync every N seconds in live loop (`resilience.reconcile_interval_seconds`)
 - [ ] OANDA REST broker implementation, if Linux-native live deployment is chosen over Windows VPS + MT5

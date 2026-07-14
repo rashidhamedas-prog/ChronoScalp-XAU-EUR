@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from chronoscalp.filters.session_filter import SessionFilter, SessionWindow
 
 
 def _dt(hour: int, minute: int = 0) -> datetime:
-    return datetime(2026, 7, 11, hour, minute, tzinfo=timezone.utc)
+    return datetime(2026, 7, 11, hour, minute, tzinfo=UTC)
 
 
 def test_session_window_contains_normal_range():
@@ -40,6 +40,9 @@ def test_session_filter_from_config():
 
 
 def test_session_filter_trade_outside_sessions_true_always_allows():
-    cfg = {"windows": {"london": {"start": "08:00", "end": "11:00"}}, "trade_outside_sessions": True}
+    cfg = {
+        "windows": {"london": {"start": "08:00", "end": "11:00"}},
+        "trade_outside_sessions": True,
+    }
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(20, 0))

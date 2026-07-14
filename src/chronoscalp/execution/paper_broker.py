@@ -7,7 +7,7 @@ paper results are a meaningful approximation of live execution costs.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
@@ -18,7 +18,9 @@ class PaperBroker:
     fills. Not a subclass — Python's structural `Protocol` typing means this
     satisfies `Broker` by having matching methods."""
 
-    def __init__(self, symbols_cfg: dict, starting_balance: float = 10_000.0, slippage_pips: float = 0.5) -> None:
+    def __init__(
+        self, symbols_cfg: dict, starting_balance: float = 10_000.0, slippage_pips: float = 0.5
+    ) -> None:
         self.symbols_cfg = symbols_cfg
         self.balance = starting_balance
         self.slippage_pips = slippage_pips
@@ -41,7 +43,9 @@ class PaperBroker:
     def get_current_spread_pips(self, symbol: str) -> float:
         return float(self.symbols_cfg[symbol]["typical_spread_pips"])
 
-    def place_order(self, signal: Signal, volume: float, fill_price: float | None = None) -> Position:
+    def place_order(
+        self, signal: Signal, volume: float, fill_price: float | None = None
+    ) -> Position:
         spec = self.symbols_cfg[signal.symbol]
         pip_size = spec["pip_size"]
         slip = self.slippage_pips * pip_size
@@ -56,13 +60,18 @@ class PaperBroker:
             entry_price=fill,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
-            open_time=signal.timestamp if signal.timestamp else datetime.now(tz=timezone.utc),
+            open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
         )
         self._positions[position.ticket] = position
         self._next_ticket += 1
         logger.info(
             "[paper] Opened {} {} vol={} @ {:.5f} (SL={:.5f} TP={:.5f})",
-            signal.symbol, signal.signal_type.value, volume, fill, signal.stop_loss, signal.take_profit,
+            signal.symbol,
+            signal.signal_type.value,
+            volume,
+            fill,
+            signal.stop_loss,
+            signal.take_profit,
         )
         return position
 
@@ -74,7 +83,13 @@ class PaperBroker:
         position.take_profit = take_profit
         return True
 
-    def close_position(self, ticket: int, exit_price: float | None = None, at: datetime | None = None, reason: str = "manual") -> TradeResult:
+    def close_position(
+        self,
+        ticket: int,
+        exit_price: float | None = None,
+        at: datetime | None = None,
+        reason: str = "manual",
+    ) -> TradeResult:
         position = self._positions.pop(ticket, None)
         if position is None:
             raise RuntimeError(f"No open paper position for ticket {ticket}")
@@ -102,13 +117,18 @@ class PaperBroker:
             exit_price=close_price,
             volume=position.volume,
             open_time=position.open_time,
-            close_time=at or datetime.now(tz=timezone.utc),
+            close_time=at or datetime.now(tz=UTC),
             pnl=pnl,
             r_multiple=r_multiple,
             exit_reason=reason,
         )
         logger.info(
             "[paper] Closed {} {} @ {:.5f} pnl={:.2f} r={:.2f} reason={}",
-            position.symbol, position.direction.value, close_price, pnl, r_multiple, reason,
+            position.symbol,
+            position.direction.value,
+            close_price,
+            pnl,
+            r_multiple,
+            reason,
         )
         return result

@@ -63,7 +63,9 @@ class TradingBot:
 
         self.settings = settings
         self.mode = mode
-        self.higher_timeframes = [Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]]
+        self.higher_timeframes = [
+            Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]
+        ]
         self.trigger_timeframe = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
         self.trade_on_bar_close = bool(settings.execution.get("trade_on_bar_close_only", True))
         self.max_concurrent = int(settings.risk.get("max_concurrent_positions", 2))
@@ -123,6 +125,8 @@ class TradingBot:
         self.alerts = AlertNotifier.from_settings(settings.alerting, settings.secrets)
         self._alert_on_daily_loss = bool(resilience_cfg.get("alert_on_daily_loss_limit", True))
         self._alert_on_connection_loss = bool(resilience_cfg.get("alert_on_connection_loss", True))
+        self._reconcile_interval = int(resilience_cfg.get("reconcile_interval_seconds", 60))
+        self._last_reconcile_at: datetime | None = None
         self._daily_loss_alerted = False
         self._connection_loss_alerted = False
         self._kill_switch_alerted = False
@@ -139,11 +143,14 @@ class TradingBot:
 
     def start(self) -> None:
         if not self.connector.connect():
-            raise RuntimeError("Failed to connect to MT5 for market data. Is the terminal running and logged in?")
+            raise RuntimeError(
+                "Failed to connect to MT5 for market data. Is the terminal running and logged in?"
+            )
         if not self.broker.connect():
             raise RuntimeError("Failed to connect broker")
 
         self._reconcile_state_with_broker()
+        self._last_reconcile_at = datetime.now(tz=UTC)
 
         poll_seconds = int(self.settings.execution.get("poll_interval_seconds", 5))
         logger.info(
@@ -182,7 +189,8 @@ class TradingBot:
             self._persist_state()
             self.connector.shutdown()
 
-    def _reconcile_state_with_broker(self) -> None:
+    def _reconcile_state_with_broker(self, *, alert_on_change: bool = False) -> None:
+        previous = dict(self.open_tickets)
         if self.mode == "live":
             managed = self.broker.get_managed_positions()
         else:
@@ -191,6 +199,25 @@ class TradingBot:
         broker_map = {p.symbol: p.ticket for p in managed}
         self.state_store.reconcile_open_tickets(broker_map)
         self.open_tickets = dict(self.state_store.state.open_tickets)
+
+        if alert_on_change and previous != self.open_tickets:
+            self.alerts.notify(
+                "State reconciled",
+                f"before={previous} after={self.open_tickets}",
+                AlertLevel.WARNING,
+            )
+
+    def _maybe_reconcile(self, now: datetime) -> None:
+        if self._reconcile_interval <= 0:
+            return
+        if self._last_reconcile_at is None:
+            self._reconcile_state_with_broker(alert_on_change=True)
+            self._last_reconcile_at = now
+            return
+        elapsed = (now - self._last_reconcile_at).total_seconds()
+        if elapsed >= self._reconcile_interval:
+            self._reconcile_state_with_broker(alert_on_change=True)
+            self._last_reconcile_at = now
 
     def _persist_state(self) -> None:
         self.state_store.state.open_tickets = dict(self.open_tickets)
@@ -202,6 +229,7 @@ class TradingBot:
 
     def tick(self) -> None:
         now = datetime.now(tz=UTC)
+        self._maybe_reconcile(now)
         tick_had_failure = False
         failure_context = ""
 
@@ -282,7 +310,9 @@ class TradingBot:
                 if completed_bar is None:
                     completed_bar = last_completed_bar_time(trigger_df) or now
 
-                dedup_key = signal_dedup_key(symbol, self.trigger_timeframe, completed_bar, signal.signal_type)
+                dedup_key = signal_dedup_key(
+                    symbol, self.trigger_timeframe, completed_bar, signal.signal_type
+                )
                 if self.signal_deduper.already_processed(dedup_key):
                     continue
 

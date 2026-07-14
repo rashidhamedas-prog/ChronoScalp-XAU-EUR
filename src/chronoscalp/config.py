@@ -108,9 +108,7 @@ class Settings:
     def symbol_spec(self, symbol: str) -> dict[str, Any]:
         spec = self.symbols_raw.get(symbol)
         if spec is None:
-            raise KeyError(
-                f"No contract spec for symbol '{symbol}' in config/symbols.yaml"
-            )
+            raise KeyError(f"No contract spec for symbol '{symbol}' in config/symbols.yaml")
         return dict(spec)
 
 

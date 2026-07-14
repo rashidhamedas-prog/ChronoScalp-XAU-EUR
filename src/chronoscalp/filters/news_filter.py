@@ -48,7 +48,9 @@ class NewsFilter:
         self.enabled = enabled
 
     @classmethod
-    def from_config(cls, news_cfg: dict[str, Any], events_yaml_path: str | Path, api_key: str = "") -> "NewsFilter":
+    def from_config(
+        cls, news_cfg: dict[str, Any], events_yaml_path: str | Path, api_key: str = ""
+    ) -> NewsFilter:
         events = _load_manual_events(events_yaml_path)
         if api_key:
             try:

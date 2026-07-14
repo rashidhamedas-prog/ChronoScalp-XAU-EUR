@@ -75,6 +75,7 @@ alerting:
 
 resilience:
   max_consecutive_errors: 5       # circuit breaker trips after this many loop failures
+  reconcile_interval_seconds: 60  # periodic broker ↔ state sync (0 = startup only)
   alert_on_daily_loss_limit: true
   alert_on_connection_loss: true
 

@@ -4,7 +4,7 @@ docs/ARCHITECTURE.md and chronoscalp.data.mt5_connector for details.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from chronoscalp.data.mt5_connector import MT5Connector, _require_windows
 from chronoscalp.execution.mt5_utils import (
@@ -74,12 +74,14 @@ class MT5Broker:
                 Position(
                     ticket=p.ticket,
                     symbol=p.symbol,
-                    direction=SignalType.BUY if p.type == mt5.POSITION_TYPE_BUY else SignalType.SELL,
+                    direction=(
+                        SignalType.BUY if p.type == mt5.POSITION_TYPE_BUY else SignalType.SELL
+                    ),
                     volume=p.volume,
                     entry_price=p.price_open,
                     stop_loss=p.sl,
                     take_profit=p.tp,
-                    open_time=datetime.fromtimestamp(p.time, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(p.time, tz=UTC),
                 )
             )
         return positions
@@ -92,7 +94,9 @@ class MT5Broker:
         spec = self._symbols_cfg.get(symbol, {})
         pip_size = float(spec.get("pip_size", 0.0))
         if pip_size <= 0:
-            logger.warning("No pip_size for {} in symbols.yaml — returning raw spread points", symbol)
+            logger.warning(
+                "No pip_size for {} in symbols.yaml — returning raw spread points", symbol
+            )
             return float(spread_points)
 
         point = self._connector.symbol_point(symbol)
@@ -106,7 +110,9 @@ class MT5Broker:
         _require_windows()
         import MetaTrader5 as mt5
 
-        order_type = mt5.ORDER_TYPE_BUY if signal.signal_type == SignalType.BUY else mt5.ORDER_TYPE_SELL
+        order_type = (
+            mt5.ORDER_TYPE_BUY if signal.signal_type == SignalType.BUY else mt5.ORDER_TYPE_SELL
+        )
         tick = mt5.symbol_info_tick(signal.symbol)
         if tick is None:
             raise RuntimeError(f"No tick data for {signal.symbol}: {mt5.last_error()}")
@@ -153,7 +159,7 @@ class MT5Broker:
             entry_price=price,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
-            open_time=datetime.now(tz=timezone.utc),
+            open_time=datetime.now(tz=UTC),
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:
@@ -190,7 +196,9 @@ class MT5Broker:
 
         tick = mt5.symbol_info_tick(position.symbol)
         close_price = tick.bid if position.type == mt5.POSITION_TYPE_BUY else tick.ask
-        order_type = mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        order_type = (
+            mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        )
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -217,8 +225,8 @@ class MT5Broker:
             entry_price=position.price_open,
             exit_price=close_price,
             volume=position.volume,
-            open_time=datetime.fromtimestamp(position.time, tz=timezone.utc),
-            close_time=datetime.now(tz=timezone.utc),
+            open_time=datetime.fromtimestamp(position.time, tz=UTC),
+            close_time=datetime.now(tz=UTC),
             pnl=pnl,
         )
 

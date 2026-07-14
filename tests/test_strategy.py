@@ -37,6 +37,12 @@ def test_determine_trend_neutral_on_insufficient_data():
 
 
 def test_trends_aligned_requires_unanimous_agreement():
-    assert trends_aligned([TrendDirection.BULLISH, TrendDirection.BULLISH]) == TrendDirection.BULLISH
-    assert trends_aligned([TrendDirection.BULLISH, TrendDirection.BEARISH]) == TrendDirection.NEUTRAL
-    assert trends_aligned([TrendDirection.NEUTRAL, TrendDirection.NEUTRAL]) == TrendDirection.NEUTRAL
+    assert (
+        trends_aligned([TrendDirection.BULLISH, TrendDirection.BULLISH]) == TrendDirection.BULLISH
+    )
+    assert (
+        trends_aligned([TrendDirection.BULLISH, TrendDirection.BEARISH]) == TrendDirection.NEUTRAL
+    )
+    assert (
+        trends_aligned([TrendDirection.NEUTRAL, TrendDirection.NEUTRAL]) == TrendDirection.NEUTRAL
+    )

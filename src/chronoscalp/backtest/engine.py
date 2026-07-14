@@ -85,9 +85,11 @@ class BacktestResult:
             "max_drawdown_pct": self.max_drawdown_pct,
             "starting_equity": self.starting_equity,
             "final_equity": round(self.final_equity, 2),
-            "return_pct": round((self.final_equity / self.starting_equity - 1) * 100, 2)
-            if self.starting_equity
-            else 0.0,
+            "return_pct": (
+                round((self.final_equity / self.starting_equity - 1) * 100, 2)
+                if self.starting_equity
+                else 0.0
+            ),
         }
 
 
@@ -149,9 +151,7 @@ def run_backtest(
 
         # --- manage any open position first: did SL/TP get hit on this bar? ---
         if open_ticket is not None:
-            open_ticket = _manage_open_position(
-                broker, risk_manager, open_ticket, bar, t, result
-            )
+            open_ticket = _manage_open_position(broker, risk_manager, open_ticket, bar, t, result)
 
         if open_ticket is not None:
             continue  # only one position at a time in this simplified engine
@@ -161,9 +161,7 @@ def run_backtest(
         if news_filter.is_blackout(t.to_pydatetime()):
             continue
 
-        sliced = {
-            tf: _as_of(df, t) for tf, df in data_by_timeframe.items()
-        }
+        sliced = {tf: _as_of(df, t) for tf, df in data_by_timeframe.items()}
         signal = strategy.evaluate(
             symbol=symbol,
             data_by_timeframe=sliced,
@@ -188,7 +186,9 @@ def run_backtest(
 
     if open_ticket is not None:
         last_bar = trigger_df.iloc[-1]
-        trade = broker.close_position(open_ticket, exit_price=last_bar["close"], reason="backtest_end")
+        trade = broker.close_position(
+            open_ticket, exit_price=last_bar["close"], reason="backtest_end"
+        )
         result.trades.append(trade)
         risk_manager.daily_tracker.record_trade_pnl(trade.pnl)
 
@@ -201,8 +201,17 @@ def run_backtest(
     return result
 
 
-def _manage_open_position(broker: PaperBroker, risk_manager: RiskManager, ticket: int, bar: pd.Series, t: pd.Timestamp, result: BacktestResult) -> int | None:
-    position = broker._positions.get(ticket)  # noqa: SLF001 - backtest engine is allowed intimate access to the paper broker
+def _manage_open_position(
+    broker: PaperBroker,
+    risk_manager: RiskManager,
+    ticket: int,
+    bar: pd.Series,
+    t: pd.Timestamp,
+    result: BacktestResult,
+) -> int | None:
+    position = broker._positions.get(
+        ticket
+    )  # noqa: SLF001 - backtest engine is allowed intimate access to the paper broker
     if position is None:
         return None
 

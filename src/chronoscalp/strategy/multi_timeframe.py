@@ -20,7 +20,9 @@ from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Signal, SignalType, Timeframe, TrendDirection
 
 
-def determine_trend(df: pd.DataFrame, ema_col: str = "ema_50", rsi_overbought: float = 70, rsi_oversold: float = 30) -> TrendDirection:
+def determine_trend(
+    df: pd.DataFrame, ema_col: str = "ema_50", rsi_overbought: float = 70, rsi_oversold: float = 30
+) -> TrendDirection:
     """Trend from the latest bar of an indicator-enriched higher-timeframe
     DataFrame: price vs EMA slope + RSI regime."""
     if df.empty or len(df) < 2:
@@ -57,9 +59,13 @@ def _smc_confirms(row: pd.Series, direction: TrendDirection) -> bool:
     signal's direction on the trigger timeframe. Only checked when
     strategy.use_smc_confluence is true in config."""
     if direction == TrendDirection.BULLISH:
-        return bool(row.get("bullish_ob") or row.get("fvg_bullish") or row.get("liquidity_sweep_low"))
+        return bool(
+            row.get("bullish_ob") or row.get("fvg_bullish") or row.get("liquidity_sweep_low")
+        )
     if direction == TrendDirection.BEARISH:
-        return bool(row.get("bearish_ob") or row.get("fvg_bearish") or row.get("liquidity_sweep_high"))
+        return bool(
+            row.get("bearish_ob") or row.get("fvg_bearish") or row.get("liquidity_sweep_high")
+        )
     return False
 
 
@@ -133,7 +139,9 @@ def generate_entry_signal(
     if signal.risk_reward_ratio < min_reward_risk_ratio:
         logger.debug(
             "{} signal discarded: R:R {:.2f} below minimum {:.2f}",
-            symbol, signal.risk_reward_ratio, min_reward_risk_ratio,
+            symbol,
+            signal.risk_reward_ratio,
+            min_reward_risk_ratio,
         )
         return _no_signal(symbol, timeframe)
 

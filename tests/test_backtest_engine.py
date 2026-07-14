@@ -27,9 +27,11 @@ def _enriched_by_tf() -> dict[Timeframe, pd.DataFrame]:
         if tf == Timeframe.M1:
             df = base
         else:
-            df = base.resample(f"{tf.minutes}min").agg(
-                {"open": "first", "high": "max", "low": "min", "close": "last"}
-            ).dropna()
+            df = (
+                base.resample(f"{tf.minutes}min")
+                .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+                .dropna()
+            )
         df = enrich_with_indicators(df)
         result[tf] = enrich_with_smc(df)
     return result

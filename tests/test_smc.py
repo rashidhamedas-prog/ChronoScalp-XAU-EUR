@@ -34,7 +34,13 @@ def test_detect_fair_value_gaps_flags_real_gap():
         {
             "open": [10, 10, 12, 13, 13],
             "high": [10.2, 10.2, 13, 13.5, 13.5],  # candle[0].high=10.2
-            "low": [9.8, 9.8, 11.8, 13.1, 13.1],   # candle[2].low=11.8 > candle[0].high=10.2 -> bullish FVG at i=2
+            "low": [
+                9.8,
+                9.8,
+                11.8,
+                13.1,
+                13.1,
+            ],  # candle[2].low=11.8 > candle[0].high=10.2 -> bullish FVG at i=2
             "close": [10, 10.1, 12.8, 13.3, 13.4],
         },
         index=index,
@@ -47,9 +53,16 @@ def test_enrich_with_smc_returns_all_expected_columns():
     df = _zigzag_df()
     enriched = enrich_with_smc(df)
     expected = {
-        "swing_high", "swing_low", "structure_event", "trend",
-        "bullish_ob", "bearish_ob", "fvg_bullish", "fvg_bearish",
-        "liquidity_sweep_high", "liquidity_sweep_low",
+        "swing_high",
+        "swing_low",
+        "structure_event",
+        "trend",
+        "bullish_ob",
+        "bearish_ob",
+        "fvg_bullish",
+        "fvg_bearish",
+        "liquidity_sweep_high",
+        "liquidity_sweep_low",
     }
     assert expected.issubset(set(enriched.columns))
     assert len(enriched) == len(df)

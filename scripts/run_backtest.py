@@ -30,8 +30,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--from", dest="date_from", type=str, default=None)
     parser.add_argument("--to", dest="date_to", type=str, default=None)
-    parser.add_argument("--data-dir", default=None, help="Defaults to config/settings.yaml backtest.data_dir")
-    parser.add_argument("--report", default=None, help="Optional path to write a JSON summary report")
+    parser.add_argument(
+        "--data-dir", default=None, help="Defaults to config/settings.yaml backtest.data_dir"
+    )
+    parser.add_argument(
+        "--report", default=None, help="Optional path to write a JSON summary report"
+    )
     return parser.parse_args()
 
 
@@ -42,7 +46,10 @@ def main() -> None:
 
     higher_tfs = [Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]]
     trigger_tf = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
-    all_needed = sorted(set(higher_tfs + [Timeframe(tf) for tf in settings.raw["timeframes"]["entry_trigger"]]), key=lambda t: t.minutes)
+    all_needed = sorted(
+        set(higher_tfs + [Timeframe(tf) for tf in settings.raw["timeframes"]["entry_trigger"]]),
+        key=lambda t: t.minutes,
+    )
 
     ind_cfg = settings.indicators
     data_by_tf = {}

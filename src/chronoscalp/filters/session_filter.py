@@ -36,7 +36,7 @@ class SessionFilter:
         self.trade_outside_sessions = trade_outside_sessions
 
     @classmethod
-    def from_config(cls, sessions_cfg: dict) -> "SessionFilter":
+    def from_config(cls, sessions_cfg: dict) -> SessionFilter:
         windows = []
         for name, spec in sessions_cfg.get("windows", {}).items():
             start = _parse_hhmm(spec["start"])

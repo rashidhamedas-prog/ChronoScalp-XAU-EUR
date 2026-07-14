@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -30,7 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch MT5 historical OHLCV data to CSV")
     parser.add_argument("--symbol", required=True)
     parser.add_argument(
-        "--timeframes", nargs="+", default=["M1", "M3", "M5", "M10"], choices=[tf.value for tf in Timeframe]
+        "--timeframes",
+        nargs="+",
+        default=["M1", "M3", "M5", "M10"],
+        choices=[tf.value for tf in Timeframe],
     )
     parser.add_argument("--years", type=float, default=2.0)
     parser.add_argument("--data-dir", default="data/history")
@@ -48,16 +51,20 @@ def main() -> None:
         terminal_path=settings.secrets.mt5_terminal_path,
     )
     if not connector.connect():
-        logger.error("Could not connect to MT5 — is the terminal installed, running, and logged in?")
+        logger.error(
+            "Could not connect to MT5 — is the terminal installed, running, and logged in?"
+        )
         sys.exit(1)
 
-    end = datetime.now(tz=timezone.utc)
+    end = datetime.now(tz=UTC)
     start = end - timedelta(days=int(args.years * 365))
 
     try:
         for tf_name in args.timeframes:
             tf = Timeframe(tf_name)
-            logger.info("Fetching {} {} from {} to {}...", args.symbol, tf.value, start.date(), end.date())
+            logger.info(
+                "Fetching {} {} from {} to {}...", args.symbol, tf.value, start.date(), end.date()
+            )
             df = connector.fetch_ohlcv_range(args.symbol, tf, start, end)
             if df.empty:
                 logger.warning("No data returned for {} {}", args.symbol, tf.value)

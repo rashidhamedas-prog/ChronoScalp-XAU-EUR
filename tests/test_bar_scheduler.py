@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -27,8 +27,8 @@ def test_last_completed_bar_time_requires_two_rows():
 
 def test_bar_close_gate_only_fires_once_per_bar():
     gate = BarCloseGate()
-    t1 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-    t2 = datetime(2026, 1, 1, 12, 1, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    t2 = datetime(2026, 1, 1, 12, 1, tzinfo=UTC)
 
     assert gate.is_new_bar("XAUUSD", t1) is True
     gate.mark_evaluated("XAUUSD", t1)
@@ -37,7 +37,7 @@ def test_bar_close_gate_only_fires_once_per_bar():
 
 
 def test_signal_dedup_key_stable():
-    t = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    t = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     key = signal_dedup_key("XAUUSD", Timeframe.M1, t, SignalType.BUY)
     assert key == "XAUUSD|M1|2026-01-01T12:00:00+00:00|buy"
 

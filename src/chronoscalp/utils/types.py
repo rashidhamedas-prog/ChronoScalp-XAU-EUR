@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class Timeframe(str, Enum):
+class Timeframe(StrEnum):
     """Supported timeframes. Always pass these, never raw strings like "5m"."""
 
     M1 = "M1"
@@ -25,13 +25,13 @@ class Timeframe(str, Enum):
         return {"M1": 1, "M3": 3, "M5": 5, "M10": 10}[self.value]
 
 
-class TrendDirection(str, Enum):
+class TrendDirection(StrEnum):
     BULLISH = "bullish"
     BEARISH = "bearish"
     NEUTRAL = "neutral"
 
 
-class SignalType(str, Enum):
+class SignalType(StrEnum):
     BUY = "buy"
     SELL = "sell"
     NONE = "none"

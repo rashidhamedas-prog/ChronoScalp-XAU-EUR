@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -68,7 +68,7 @@ def test_passes_reward_risk_filter():
     signal = Signal(
         symbol="XAUUSD",
         signal_type=SignalType.BUY,
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         entry_price=2000,
         stop_loss=1990,
         take_profit=2020,
@@ -81,7 +81,7 @@ def test_passes_reward_risk_filter():
 
 def test_daily_loss_limit_triggers_and_resets_next_day():
     tracker = DailyRiskTracker(max_daily_loss_pct=3.0, starting_equity=10_000)
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     assert not tracker.daily_loss_limit_hit(now)
     tracker.record_trade_pnl(-350, at=now)  # 3.5% loss > 3% limit

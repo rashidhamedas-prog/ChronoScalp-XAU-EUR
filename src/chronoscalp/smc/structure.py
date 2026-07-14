@@ -164,9 +164,17 @@ def detect_liquidity_sweeps(df: pd.DataFrame, swings: pd.DataFrame) -> pd.DataFr
         row = df.iloc[i]
         swing_row = swings.iloc[i]
 
-        if last_swing_high is not None and row["high"] > last_swing_high and row["close"] < last_swing_high:
+        if (
+            last_swing_high is not None
+            and row["high"] > last_swing_high
+            and row["close"] < last_swing_high
+        ):
             out.iloc[i, out.columns.get_loc("liquidity_sweep_high")] = True
-        if last_swing_low is not None and row["low"] < last_swing_low and row["close"] > last_swing_low:
+        if (
+            last_swing_low is not None
+            and row["low"] < last_swing_low
+            and row["close"] > last_swing_low
+        ):
             out.iloc[i, out.columns.get_loc("liquidity_sweep_low")] = True
 
         if swing_row.get("swing_high"):

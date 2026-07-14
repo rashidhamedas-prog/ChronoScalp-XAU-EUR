@@ -28,22 +28,16 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return result.fillna(50.0)
 
 
-def macd(
-    series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-) -> pd.DataFrame:
+def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
     ema_fast = ema(series, fast)
     ema_slow = ema(series, slow)
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
     histogram = macd_line - signal_line
-    return pd.DataFrame(
-        {"macd": macd_line, "signal": signal_line, "histogram": histogram}
-    )
+    return pd.DataFrame({"macd": macd_line, "signal": signal_line, "histogram": histogram})
 
 
-def bollinger_bands(
-    series: pd.Series, period: int = 20, std_dev: float = 2.0
-) -> pd.DataFrame:
+def bollinger_bands(series: pd.Series, period: int = 20, std_dev: float = 2.0) -> pd.DataFrame:
     mid = series.rolling(window=period, min_periods=period).mean()
     std = series.rolling(window=period, min_periods=period).std(ddof=0)
     upper = mid + std_dev * std

@@ -31,7 +31,9 @@ class TradingState:
         return cls(
             open_tickets={str(k): int(v) for k, v in (data.get("open_tickets") or {}).items()},
             processed_signals=list(data.get("processed_signals") or []),
-            last_evaluated_bars={str(k): str(v) for k, v in (data.get("last_evaluated_bars") or {}).items()},
+            last_evaluated_bars={
+                str(k): str(v) for k, v in (data.get("last_evaluated_bars") or {}).items()
+            },
             updated_at=str(data.get("updated_at") or ""),
         )
 

@@ -71,6 +71,16 @@ def test_atr_non_negative():
 def test_enrich_with_indicators_adds_expected_columns():
     df = _make_ohlcv()
     enriched = enrich_with_indicators(df, ema_period=50)
-    expected = {"ema_50", "rsi", "macd", "signal", "histogram", "bb_mid", "bb_upper", "bb_lower", "atr"}
+    expected = {
+        "ema_50",
+        "rsi",
+        "macd",
+        "signal",
+        "histogram",
+        "bb_mid",
+        "bb_upper",
+        "bb_lower",
+        "atr",
+    }
     assert expected.issubset(set(enriched.columns))
     assert len(enriched) == len(df)

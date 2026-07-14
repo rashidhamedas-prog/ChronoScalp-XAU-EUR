@@ -95,13 +95,21 @@ class MT5Connector:
         mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
         rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
         if rates is None or len(rates) == 0:
-            logger.warning("No rates returned for {} {}: {}", symbol, timeframe.value, mt5.last_error())
+            logger.warning(
+                "No rates returned for {} {}: {}", symbol, timeframe.value, mt5.last_error()
+            )
             return pd.DataFrame(columns=OHLCV_COLUMNS).set_index("time")
 
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df = df.set_index("time")
-        return df[[c for c in ["open", "high", "low", "close", "tick_volume", "spread"] if c in df.columns]]
+        return df[
+            [
+                c
+                for c in ["open", "high", "low", "close", "tick_volume", "spread"]
+                if c in df.columns
+            ]
+        ]
 
     def fetch_ohlcv_range(
         self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime
@@ -116,14 +124,24 @@ class MT5Connector:
         if rates is None or len(rates) == 0:
             logger.warning(
                 "No rates returned for {} {} [{} .. {}]: {}",
-                symbol, timeframe.value, start, end, mt5.last_error(),
+                symbol,
+                timeframe.value,
+                start,
+                end,
+                mt5.last_error(),
             )
             return pd.DataFrame(columns=OHLCV_COLUMNS).set_index("time")
 
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df = df.set_index("time")
-        return df[[c for c in ["open", "high", "low", "close", "tick_volume", "spread"] if c in df.columns]]
+        return df[
+            [
+                c
+                for c in ["open", "high", "low", "close", "tick_volume", "spread"]
+                if c in df.columns
+            ]
+        ]
 
     def current_spread_points(self, symbol: str) -> float | None:
         _require_windows()
@@ -155,7 +173,9 @@ def history_csv_path(data_dir: str | Path, symbol: str, timeframe: Timeframe) ->
     return Path(data_dir) / symbol / f"{timeframe.value}.csv"
 
 
-def save_history_csv(df: pd.DataFrame, data_dir: str | Path, symbol: str, timeframe: Timeframe) -> Path:
+def save_history_csv(
+    df: pd.DataFrame, data_dir: str | Path, symbol: str, timeframe: Timeframe
+) -> Path:
     path = history_csv_path(data_dir, symbol, timeframe)
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path)
