@@ -66,6 +66,18 @@ execution:
   state_dir: "data/state"         # persistent open tickets + dedup keys
   magic_number: 20260711          # MT5 magic — must match live positions
 
+alerting:
+  enabled: false                  # set true once TELEGRAM_* or DISCORD_* are in .env
+  telegram_enabled: true
+  discord_enabled: true
+  timeout_seconds: 5
+  prefix: "ChronoScalp"
+
+resilience:
+  max_consecutive_errors: 5       # circuit breaker trips after this many loop failures
+  alert_on_daily_loss_limit: true
+  alert_on_connection_loss: true
+
 backtest:
   initial_balance: 10000
   commission_per_lot: 7.0

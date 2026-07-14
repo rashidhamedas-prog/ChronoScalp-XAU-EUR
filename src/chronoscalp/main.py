@@ -13,7 +13,7 @@ see CLAUDE.md rule #2. Do not remove this gate.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -32,12 +32,15 @@ from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.logging_setup import logger
+from chronoscalp.orchestration.alerts import AlertLevel, AlertNotifier
 from chronoscalp.orchestration.bar_scheduler import (
     BarCloseGate,
     SignalDeduper,
     last_completed_bar_time,
     signal_dedup_key,
 )
+from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
+from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.state_store import TradingStateStore
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
@@ -65,6 +68,7 @@ class TradingBot:
         self.trade_on_bar_close = bool(settings.execution.get("trade_on_bar_close_only", True))
         self.max_concurrent = int(settings.risk.get("max_concurrent_positions", 2))
         self.magic = int(settings.execution.get("magic_number", CHRONOSCALP_MAGIC))
+        self.state_dir = Path(settings.execution.get("state_dir", "data/state"))
 
         self.connector = MT5Connector(
             login=settings.secrets.mt5_login,
@@ -104,9 +108,24 @@ class TradingBot:
             starting_equity=float(settings.backtest.get("initial_balance", 10_000)),
         )
 
-        state_path = Path(settings.execution.get("state_dir", "data/state")) / f"trading_state_{mode}.json"
+        state_path = self.state_dir / f"trading_state_{mode}.json"
         self.state_store = TradingStateStore(state_path)
         self.state_store.load()
+
+        resilience_cfg = settings.resilience
+        self.kill_switch = KillSwitch(
+            state_dir=self.state_dir,
+            env_stop=settings.secrets.chronoscalp_stop_trading,
+        )
+        self.circuit_breaker = CircuitBreaker(
+            max_consecutive_errors=int(resilience_cfg.get("max_consecutive_errors", 5)),
+        )
+        self.alerts = AlertNotifier.from_settings(settings.alerting, settings.secrets)
+        self._alert_on_daily_loss = bool(resilience_cfg.get("alert_on_daily_loss_limit", True))
+        self._alert_on_connection_loss = bool(resilience_cfg.get("alert_on_connection_loss", True))
+        self._daily_loss_alerted = False
+        self._connection_loss_alerted = False
+        self._kill_switch_alerted = False
 
         self.open_tickets: dict[str, int] = dict(self.state_store.state.open_tickets)
         self.bar_gate = BarCloseGate()
@@ -133,9 +152,28 @@ class TradingBot:
             poll_seconds,
             self.trade_on_bar_close,
         )
+        if self.alerts.is_configured:
+            self.alerts.notify(
+                "Bot started",
+                f"mode={self.mode}, symbols={','.join(self.settings.symbols)}",
+                AlertLevel.INFO,
+            )
+        if self.kill_switch.is_active():
+            logger.warning("Kill switch active at startup — new entries disabled")
 
         try:
             while True:
+                if self.kill_switch.check_and_log():
+                    prev = self._kill_switch_alerted
+                    if not prev:
+                        self.alerts.notify(
+                            "Kill switch active",
+                            self.kill_switch.reason() or "unknown",
+                            AlertLevel.CRITICAL,
+                        )
+                    self._kill_switch_alerted = True
+                else:
+                    self._kill_switch_alerted = False
                 self.tick()
                 time.sleep(poll_seconds)
         except KeyboardInterrupt:
@@ -163,11 +201,48 @@ class TradingBot:
         self.state_store.save()
 
     def tick(self) -> None:
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
+        tick_had_failure = False
+        failure_context = ""
+
+        if not self.connector.is_connected:
+            tick_had_failure = True
+            failure_context = "mt5_disconnect"
+            if self._alert_on_connection_loss and not self._connection_loss_alerted:
+                self.alerts.notify(
+                    "MT5 connection lost",
+                    "Market data connector is disconnected — skipping new entries",
+                    AlertLevel.ERROR,
+                )
+                self._connection_loss_alerted = True
+        else:
+            self._connection_loss_alerted = False
+
+        kill_active = self.kill_switch.is_active()
+        circuit_tripped = self.circuit_breaker.is_tripped
+        daily_limit_hit = self.risk_manager.daily_tracker.daily_loss_limit_hit(at=now)
+        if daily_limit_hit and self._alert_on_daily_loss and not self._daily_loss_alerted:
+            self.alerts.notify(
+                "Daily loss limit hit",
+                "No new entries until the next trading day",
+                AlertLevel.WARNING,
+            )
+            self._daily_loss_alerted = True
+        if not daily_limit_hit:
+            self._daily_loss_alerted = False
+
+        allow_new_entries = (
+            self.connector.is_connected
+            and not kill_active
+            and not circuit_tripped
+            and not daily_limit_hit
+        )
 
         for symbol in self.settings.symbols:
             try:
                 self._manage_open_position(symbol, now)
+                if not allow_new_entries:
+                    continue
                 if symbol in self.open_tickets:
                     continue
 
@@ -225,9 +300,35 @@ class TradingBot:
                 self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
                 self._persist_state()
+                self.alerts.notify(
+                    "Trade opened",
+                    (
+                        f"{symbol} {signal.signal_type.value} vol={volume:.2f} "
+                        f"entry={position.entry_price:.5f} sl={position.stop_loss:.5f} "
+                        f"tp={position.take_profit:.5f}"
+                    ),
+                    AlertLevel.INFO,
+                )
 
             except Exception:  # noqa: BLE001 - one symbol's failure must not kill the loop
+                tick_had_failure = True
+                failure_context = f"symbol={symbol}"
+                self.alerts.notify(
+                    "Processing error",
+                    f"symbol={symbol} — see logs for traceback",
+                    AlertLevel.ERROR,
+                )
                 logger.exception("Error processing {}", symbol)
+
+        if tick_had_failure:
+            if self.circuit_breaker.record_failure(failure_context or "tick"):
+                self.alerts.notify(
+                    "Circuit breaker tripped",
+                    f"Halting new entries after {self.circuit_breaker.consecutive_errors} errors",
+                    AlertLevel.CRITICAL,
+                )
+        else:
+            self.circuit_breaker.record_success()
 
     def _fetch_and_enrich(self, symbol: str) -> dict[Timeframe, pd.DataFrame]:
         ind_cfg = self.settings.indicators
@@ -292,6 +393,11 @@ class TradingBot:
                     hit.exit_reason(),
                     trade.pnl,
                 )
+                self.alerts.notify(
+                    "Trade closed",
+                    f"{symbol} {hit.exit_reason()} pnl={trade.pnl:.2f}",
+                    AlertLevel.INFO,
+                )
                 return
 
         atr_value = float(
@@ -314,8 +420,18 @@ class TradingBot:
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)
             logger.info("Position {} ticket={} closed externally, pnl={:.2f}", symbol, ticket, pnl)
+            self.alerts.notify(
+                "Trade closed",
+                f"{symbol} external close pnl={pnl:.2f}",
+                AlertLevel.INFO,
+            )
         else:
             logger.info("Position {} ticket={} closed externally (PnL unknown)", symbol, ticket)
+            self.alerts.notify(
+                "Trade closed",
+                f"{symbol} external close (PnL unknown)",
+                AlertLevel.INFO,
+            )
 
         self.open_tickets.pop(symbol, None)
         self._persist_state()

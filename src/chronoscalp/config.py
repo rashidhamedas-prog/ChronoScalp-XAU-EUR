@@ -30,8 +30,12 @@ class Secrets(BaseSettings):
     mt5_terminal_path: str = Field(default="")
 
     chronoscalp_confirm_live: str = Field(default="no")
+    chronoscalp_stop_trading: str = Field(default="no")
     news_api_key: str = Field(default="")
     sentry_dsn: str = Field(default="")
+    telegram_bot_token: str = Field(default="")
+    telegram_chat_id: str = Field(default="")
+    discord_webhook_url: str = Field(default="")
     chronoscalp_env: str = Field(default="development")
     log_level: str = Field(default="INFO")
 
@@ -92,6 +96,14 @@ class Settings:
     @property
     def backtest(self) -> dict[str, Any]:
         return dict(self.raw.get("backtest", {}))
+
+    @property
+    def alerting(self) -> dict[str, Any]:
+        return dict(self.raw.get("alerting", {}))
+
+    @property
+    def resilience(self) -> dict[str, Any]:
+        return dict(self.raw.get("resilience", {}))
 
     def symbol_spec(self, symbol: str) -> dict[str, Any]:
         spec = self.symbols_raw.get(symbol)
