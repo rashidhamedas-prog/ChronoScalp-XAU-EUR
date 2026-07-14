@@ -20,10 +20,10 @@ We resolved it with an abstraction, not a compromise:
 
 - `execution/broker.py` defines a `Broker` **interface** (connect, get_balance, place_order, modify_sl_tp, close_position, get_open_positions).
 - `execution/mt5_broker.py` implements it against **MetaTrader5** — requires a **Windows VPS** (or a Windows box running the MT5 terminal) near the broker's servers (London/NY).
-- `execution/paper_broker.py` is a fully working **simulated broker** — runs anywhere (including this Linux dev sandbox), used for dry-runs, CI, and strategy validation without touching a real account.
-- A REST-based broker (e.g. OANDA v20, which is cross-platform and Docker/Linux-friendly) is the documented Phase-2 alternative if you want true Linux-native live deployment instead of a Windows VPS. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#broker-abstraction).
+- `execution/oanda_broker.py` implements **OANDA v20 REST** — runs on **Linux VPS** (e.g. Netherlands/Amsterdam). See [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md).
+- `execution/paper_broker.py` is a fully working **simulated broker** — runs anywhere (including Linux), used for dry-runs, CI, and strategy validation without touching a real account.
 
-Pick your deployment target once (Windows VPS + MT5, **or** Linux VPS + REST broker) — the strategy/risk/filter code above the broker layer does not change either way.
+Pick your deployment target once (Windows VPS + MT5, **or** Linux VPS + OANDA) — the strategy/risk/filter code above the broker layer does not change either way.
 
 ## 3. Tech stack
 

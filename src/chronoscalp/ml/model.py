@@ -94,6 +94,8 @@ class SetupClassifier:
         )
 
     def predict_proba(self, features: dict[str, float]) -> float:
-        row = pd.DataFrame([[features.get(col, 0.0) for col in self.feature_columns]], columns=self.feature_columns)
+        row = pd.DataFrame(
+            [[features.get(col, 0.0) for col in self.feature_columns]], columns=self.feature_columns
+        )
         proba = self._model.predict_proba(row)[0]
         return float(proba[1])

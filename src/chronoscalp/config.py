@@ -36,6 +36,8 @@ class Secrets(BaseSettings):
     telegram_bot_token: str = Field(default="")
     telegram_chat_id: str = Field(default="")
     discord_webhook_url: str = Field(default="")
+    oanda_api_token: str = Field(default="")
+    oanda_account_id: str = Field(default="")
     chronoscalp_env: str = Field(default="development")
     log_level: str = Field(default="INFO")
 

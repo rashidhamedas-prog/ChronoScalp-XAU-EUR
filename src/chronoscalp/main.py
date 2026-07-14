@@ -1,13 +1,12 @@
 """Live/paper trading orchestration loop.
 
-Requires a Windows host with the MT5 terminal installed and logged in (data
-fetch goes through MT5Connector regardless of --mode, since that's the only
-implemented real-time data source — see docs/ARCHITECTURE.md). On Linux/macOS
-use scripts/run_backtest.py instead, which reads CSV history and needs no
-broker connection at all.
+Deployment targets:
+- **Windows + MT5** — ``execution.broker: mt5``, ``data_source: mt5`` (or auto)
+- **Linux VPS (e.g. Netherlands)** — ``execution.broker: oanda``, ``data_source: oanda``
+  See docs/DEPLOY_NL_VPS.md. No MetaTrader5 terminal required.
+- **Paper on any OS** — ``execution.broker: paper`` with ``data_source: oanda`` or ``mt5``
 
-`--mode live` additionally requires CHRONOSCALP_CONFIRM_LIVE=yes in .env —
-see CLAUDE.md rule #2. Do not remove this gate.
+``--mode live`` requires CHRONOSCALP_CONFIRM_LIVE=yes in .env — see CLAUDE.md rule #2.
 """
 
 from __future__ import annotations
@@ -19,11 +18,9 @@ from pathlib import Path
 import pandas as pd
 
 from chronoscalp.config import Settings, get_settings
-from chronoscalp.data.mt5_connector import MT5Connector
 from chronoscalp.data.spread_sampler import SpreadSampler
 from chronoscalp.execution.mt5_broker import MT5Broker
-from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC
-from chronoscalp.execution.paper_broker import PaperBroker
+from chronoscalp.execution.oanda_broker import OANDABroker
 from chronoscalp.execution.position_logic import (
     apply_breakeven_or_trailing,
     check_sl_tp_hit,
@@ -40,6 +37,12 @@ from chronoscalp.orchestration.bar_scheduler import (
     SignalDeduper,
     last_completed_bar_time,
     signal_dedup_key,
+)
+from chronoscalp.orchestration.bootstrap import (
+    connector_label,
+    create_broker,
+    create_data_connector,
+    resolve_data_source,
 )
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
@@ -71,32 +74,11 @@ class TradingBot:
         self.trigger_timeframe = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
         self.trade_on_bar_close = bool(settings.execution.get("trade_on_bar_close_only", True))
         self.max_concurrent = int(settings.risk.get("max_concurrent_positions", 2))
-        self.magic = int(settings.execution.get("magic_number", CHRONOSCALP_MAGIC))
         self.state_dir = Path(settings.execution.get("state_dir", "data/state"))
+        self.data_source = resolve_data_source(settings)
 
-        self.connector = MT5Connector(
-            login=settings.secrets.mt5_login,
-            password=settings.secrets.mt5_password,
-            server=settings.secrets.mt5_server,
-            terminal_path=settings.secrets.mt5_terminal_path,
-        )
-        self.broker = (
-            MT5Broker(
-                connector=self.connector,
-                login=settings.secrets.mt5_login,
-                password=settings.secrets.mt5_password,
-                server=settings.secrets.mt5_server,
-                terminal_path=settings.secrets.mt5_terminal_path,
-                symbols_cfg=settings.symbols_raw,
-                magic=self.magic,
-            )
-            if mode == "live"
-            else PaperBroker(
-                symbols_cfg=settings.symbols_raw,
-                starting_balance=float(settings.backtest.get("initial_balance", 10_000)),
-                slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
-            )
-        )
+        self.connector = create_data_connector(settings)
+        self.broker = create_broker(settings, mode=mode, connector=self.connector)
 
         self.session_filter = SessionFilter.from_config(settings.sessions)
         self.news_filter = NewsFilter.from_config(
@@ -160,7 +142,8 @@ class TradingBot:
     def start(self) -> None:
         if not self.connector.connect():
             raise RuntimeError(
-                "Failed to connect to MT5 for market data. Is the terminal running and logged in?"
+                f"Failed to connect to {connector_label(self.connector)} for market data. "
+                "Check credentials in .env and docs/DEPLOY_NL_VPS.md for OANDA setup."
             )
         if not self.broker.connect():
             raise RuntimeError("Failed to connect broker")
@@ -170,8 +153,10 @@ class TradingBot:
 
         poll_seconds = int(self.settings.execution.get("poll_interval_seconds", 5))
         logger.info(
-            "ChronoScalp started in {} mode, polling every {}s (bar_close_only={})",
+            "ChronoScalp started in {} mode (data={}, broker={}), polling every {}s (bar_close_only={})",
             self.mode,
+            self.data_source,
+            self.settings.execution.get("broker", "paper"),
             poll_seconds,
             self.trade_on_bar_close,
         )
@@ -208,7 +193,10 @@ class TradingBot:
     def _reconcile_state_with_broker(self, *, alert_on_change: bool = False) -> None:
         previous = dict(self.open_tickets)
         if self.mode == "live":
-            managed = self.broker.get_managed_positions()
+            if isinstance(self.broker, MT5Broker):
+                managed = self.broker.get_managed_positions()
+            else:
+                managed = self.broker.get_open_positions()
         else:
             managed = self.broker.get_open_positions()
 
@@ -251,10 +239,10 @@ class TradingBot:
 
         if not self.connector.is_connected:
             tick_had_failure = True
-            failure_context = "mt5_disconnect"
+            failure_context = "data_disconnect"
             if self._alert_on_connection_loss and not self._connection_loss_alerted:
                 self.alerts.notify(
-                    "MT5 connection lost",
+                    f"{connector_label(self.connector)} connection lost",
                     "Market data connector is disconnected — skipping new entries",
                     AlertLevel.ERROR,
                 )
@@ -462,7 +450,7 @@ class TradingBot:
 
     def _on_position_closed_externally(self, symbol: str, ticket: int, now: datetime) -> None:
         pnl: float | None = None
-        if self.mode == "live" and isinstance(self.broker, MT5Broker):
+        if self.mode == "live" and isinstance(self.broker, (MT5Broker, OANDABroker)):
             pnl = self.broker.fetch_closed_pnl(ticket)
 
         if pnl is not None:

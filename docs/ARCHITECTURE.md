@@ -60,14 +60,12 @@ Implementations:
   (the package has no Linux/macOS build; it talks to a local MT5 terminal
   process). Deploy this on a Windows VPS located near your broker's servers
   (London/NY, per the session windows in `config/settings.yaml`).
+- **`oanda_broker.py`** — OANDA v20 REST. **Cross-platform** (Linux VPS /
+  Netherlands deployment). See `docs/DEPLOY_NL_VPS.md`. Pairs with
+  `data/oanda_connector.py` for candles and pricing without MT5.
 - **`paper_broker.py`** — in-memory simulated broker with realistic spread
   and slippage assumptions pulled from `config/symbols.yaml`. Runs anywhere,
   including this Linux dev sandbox. Use for dry-runs and CI.
-- **Documented, not yet implemented: an OANDA v20 REST broker** — cross
-  platform (pure HTTPS/WebSocket), Docker/Linux-native, would let you deploy
-  on a Linux VPS exactly as the original brief wanted, without a Windows
-  terminal in the loop. This is the recommended Phase-2 addition if
-  Linux-native live deployment matters more than MT5-specific brokers.
 
 Pick one live deployment target; the pipeline above the broker layer is
 identical either way.

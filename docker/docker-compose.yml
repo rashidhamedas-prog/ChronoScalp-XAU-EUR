@@ -12,6 +12,35 @@ services:
     command: ["python", "scripts/run_backtest.py", "--symbol", "XAUUSD"]
     restart: "no"
 
-  # Once a Linux-native broker (e.g. OANDA REST, see docs/ROADMAP.md) is
-  # implemented, add a `chronoscalp-live` service here with
-  # `restart: unless-stopped` for unattended operation.
+  # Paper trading on Linux VPS — OANDA market data, simulated fills.
+  # Set execution.broker=paper and execution.data_source=oanda in settings.yaml.
+  chronoscalp-paper-oanda:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../config:/app/config
+    command: ["python", "scripts/run_live.py", "--mode", "paper"]
+    restart: unless-stopped
+
+  # Live OANDA execution (Netherlands / Linux VPS). Requires:
+  #   execution.broker=oanda, oanda.environment=practice|live
+  #   CHRONOSCALP_CONFIRM_LIVE=yes in .env
+  chronoscalp-live-oanda:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../config:/app/config
+    command: ["python", "scripts/run_live.py", "--mode", "live"]
+    restart: unless-stopped
+    profiles:
+      - live

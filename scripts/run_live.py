@@ -5,9 +5,10 @@ Usage:
     python scripts/run_live.py --mode paper
     python scripts/run_live.py --mode live      # requires CHRONOSCALP_CONFIRM_LIVE=yes in .env
 
-Requires a Windows host with the MT5 terminal installed and logged in (both
-modes use MT5 for market data — see docs/ARCHITECTURE.md). For a
-Linux/macOS-friendly workflow, use scripts/run_backtest.py instead.
+Deployment:
+    Windows + MT5  →  execution.broker=mt5, data_source=mt5
+    Linux VPS (NL) →  execution.broker=oanda, data_source=oanda  (see docs/DEPLOY_NL_VPS.md)
+    Paper anywhere →  execution.broker=paper, data_source=oanda|mt5
 """
 
 from __future__ import annotations

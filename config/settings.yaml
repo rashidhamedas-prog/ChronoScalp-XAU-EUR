@@ -65,12 +65,17 @@ ml:
   model_path: "data/models/setup_classifier.joblib"
 
 execution:
-  broker: "paper"    # "paper" | "mt5"
+  broker: "paper"    # "paper" | "mt5" | "oanda"
+  data_source: "auto"             # "auto" | "mt5" | "oanda" — auto picks oanda when broker=oanda
   slippage_pips: 0.5
   poll_interval_seconds: 5
   trade_on_bar_close_only: true   # evaluate entries once per completed trigger bar
   state_dir: "data/state"         # persistent open tickets + dedup keys
   magic_number: 20260711          # MT5 magic — must match live positions
+
+oanda:
+  environment: "practice"         # "practice" | "live" — use practice until validated
+  timeout_seconds: 15
 
 alerting:
   enabled: false                  # set true once TELEGRAM_* or DISCORD_* are in .env
