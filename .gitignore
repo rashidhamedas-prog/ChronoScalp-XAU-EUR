@@ -23,6 +23,7 @@ data/history/
 data/state/
 data/spread_history/
 data/models/
+data/reports/
 *.csv
 *.parquet
 !config/*.yaml

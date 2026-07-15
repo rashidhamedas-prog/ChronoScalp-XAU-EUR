@@ -29,6 +29,7 @@ xgboost>=2.0
 
 # Reporting
 matplotlib>=3.9
+streamlit>=1.35          # optional: scripts/dashboard.py
 
 # Dev / test / lint
 pytest>=8.2
