@@ -97,7 +97,17 @@ python scripts/run_live.py --mode live
 `--mode live` refuses to start unless `CHRONOSCALP_CONFIRM_LIVE=yes` is set in `.env` — a deliberate friction point so nobody flips to real money by accident.
 
 **راهنمای فارسی قدم‌به‌قدم:** [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md)  
+**فروش لایسنس + IB:** [docs/FOROOSH_FA.md](docs/FOROOSH_FA.md)  
 **VPS هلند (انگلیسی):** [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md)
+
+### Control panel (recommended for end users)
+
+```bash
+streamlit run scripts/app.py
+# or double-click scripts/start.bat on Windows
+```
+
+Flow: activate license → connect broker (OANDA/MT5) → start paper bot.
 
 ## 6. Configuration
 

@@ -38,6 +38,7 @@ class Secrets(BaseSettings):
     discord_webhook_url: str = Field(default="")
     oanda_api_token: str = Field(default="")
     oanda_account_id: str = Field(default="")
+    license_admin_secret: str = Field(default="")
     chronoscalp_env: str = Field(default="development")
     log_level: str = Field(default="INFO")
 
@@ -54,11 +55,29 @@ def _load_yaml(name: str) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``overlay`` into a copy of ``base``."""
+    result = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 class Settings:
     """Merged, typed access to config/settings.yaml + config/symbols.yaml."""
 
     def __init__(self) -> None:
         self.raw: dict[str, Any] = _load_yaml("settings.yaml")
+        # Optional runtime overrides written by the user panel (broker mode, etc.)
+        overrides_path = CONFIG_DIR / "runtime_overrides.yaml"
+        if overrides_path.exists():
+            with overrides_path.open(encoding="utf-8") as f:
+                overlay = yaml.safe_load(f) or {}
+            if isinstance(overlay, dict):
+                self.raw = _deep_merge(self.raw, overlay)
         self.symbols_raw: dict[str, Any] = _load_yaml("symbols.yaml")
         self.secrets = Secrets()
 

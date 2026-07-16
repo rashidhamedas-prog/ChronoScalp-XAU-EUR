@@ -48,4 +48,5 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
 - [x] Persian step-by-step guide: `docs/RAHNAMA_FA.md`
+- [x] **SaaS packaging:** license/subscription (`licensing/`), user control panel (`scripts/app.py`), easy broker wizard, IB referral section (`docs/FOROOSH_FA.md`)
 - [ ] **User action — VPS deploy:** purchase Netherlands VPS, configure `.env`, run `docker compose up` (see `docs/RAHNAMA_FA.md` §13)

@@ -6,18 +6,20 @@ echo   ChronoScalp - Stop
 echo ========================================
 echo.
 
-REM Close bot and dashboard windows by title
+REM Stop bot via PID file if present
+if exist "data\user\bot.pid" (
+  for /f %%p in (data\user\bot.pid) do taskkill /PID %%p /T /F >nul 2>&1
+  del /f /q "data\user\bot.pid" >nul 2>&1
+)
+
+taskkill /FI "WINDOWTITLE eq ChronoScalp Panel*" /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq ChronoScalp Bot*" /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq ChronoScalp Dashboard*" /T /F >nul 2>&1
 
-REM Free port 8501 if Streamlit still listening
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":8501" ^| findstr "LISTENING"') do (
     taskkill /F /PID %%p >nul 2>&1
 )
 
-echo [OK] ChronoScalp processes stopped.
-echo.
-echo Note: kill switch file data\state\STOP_TRADING is NOT removed.
-echo       Delete it manually to allow new entries on next start.
+echo [OK] ChronoScalp stopped.
 echo.
 pause

@@ -90,6 +90,14 @@ resilience:
   alert_on_daily_loss_limit: true
   alert_on_connection_loss: true
 
+licensing:
+  require_license: true           # set false only for local open-source / self use without keys
+  # Seller sets LICENSE_ADMIN_SECRET in .env, then issues keys via scripts/app.py (Admin) or manage_licenses.py
+
+saas:
+  ib_referral_url: ""             # your OANDA/partner Introducing Broker signup link
+  product_name: "ChronoScalp"
+
 backtest:
   initial_balance: 10000
   commission_per_lot: 7.0

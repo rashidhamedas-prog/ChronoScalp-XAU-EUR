@@ -35,6 +35,9 @@ def main() -> None:
     settings = get_settings()
 
     try:
+        from chronoscalp.licensing import require_valid_license
+
+        require_valid_license(settings)
         bot = TradingBot(settings, mode=args.mode)
     except RuntimeError as exc:
         logger.error(str(exc))

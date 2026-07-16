@@ -24,6 +24,9 @@ data/state/
 data/spread_history/
 data/models/
 data/reports/
+data/user/
+data/licenses/
+config/runtime_overrides.yaml
 *.csv
 *.parquet
 !config/*.yaml
