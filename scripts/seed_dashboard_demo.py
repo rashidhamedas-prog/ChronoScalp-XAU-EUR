@@ -37,7 +37,10 @@ def seed_state() -> None:
     demo = {
         "open_tickets": {"XAUUSD": 1001},
         "processed_signals": ["XAUUSD|M1|2026-07-14T12:00:00+00:00|buy"],
-        "last_evaluated_bars": {"XAUUSD": "2026-07-14T12:00:00+00:00", "EURUSD": "2026-07-14T12:00:00+00:00"},
+        "last_evaluated_bars": {
+            "XAUUSD": "2026-07-14T12:00:00+00:00",
+            "EURUSD": "2026-07-14T12:00:00+00:00",
+        },
         "updated_at": datetime.now(tz=UTC).isoformat(),
     }
     for mode in ("paper", "live"):

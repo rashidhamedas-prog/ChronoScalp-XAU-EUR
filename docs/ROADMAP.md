@@ -24,12 +24,12 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] Breakeven-at-1R and ATR-based trailing stop
 - [x] Hard spread filter (`if spread > max_allowed_spread: skip`)
 
-## Phase 5 — Backtesting & optimization 🟡
+## Phase 5 — Backtesting & optimization ✅
 - [x] Event-driven backtest engine with spread/slippage modeling (`backtest/engine.py`)
 - [x] Equity curve, win rate, profit factor, max drawdown, expectancy reporting
 - [x] Grid-search / walk-forward optimization over indicator parameters (`backtest/optimizer.py`, `scripts/run_optimize.py` — results are JSON-only, never auto-written to `config/settings.yaml`)
 
-## Phase 6 — Advanced techniques 🟡
+## Phase 6 — Advanced techniques ✅
 - [x] SMC structure detection: swing points, BOS/CHoCH, order blocks, FVGs, liquidity sweeps (`smc/structure.py`)
 - [x] ML setup-probability scoring — training pipeline (`ml/dataset.py`, `ml/model.py`, `scripts/train_ml_model.py`), feature extraction, optional live gate via `ml.enabled` + `strategy.min_signal_confidence` (never sole signal source)
 - [x] Fast breakeven + trailing stop (Phase 4, listed here too since the brief grouped it under "advanced techniques")
@@ -44,3 +44,8 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Phase B resilience:** kill switch (`CHRONOSCALP_STOP_TRADING` / `data/state/STOP_TRADING`), circuit breaker after consecutive loop errors, Telegram/Discord alerting on trade open/close, daily loss limit, connection loss, and critical faults (`orchestration/kill_switch.py`, `circuit_breaker.py`, `alerts.py`)
 - [x] **Periodic reconciliation:** broker ↔ state sync every N seconds in live loop (`resilience.reconcile_interval_seconds`)
 - [x] OANDA v20 REST broker + connector for Linux VPS deployment (`execution/oanda_broker.py`, `data/oanda_connector.py`, `docs/DEPLOY_NL_VPS.md`)
+- [x] Bilingual Streamlit dashboard (`scripts/dashboard.py`, `scripts/dashboard_i18n.py`)
+- [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
+- [x] VPS setup script: `scripts/vps-setup.sh`
+- [x] Persian step-by-step guide: `docs/RAHNAMA_FA.md`
+- [ ] **User action — VPS deploy:** purchase Netherlands VPS, configure `.env`, run `docker compose up` (see `docs/RAHNAMA_FA.md` §13)

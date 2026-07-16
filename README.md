@@ -96,6 +96,9 @@ python scripts/run_live.py --mode live
 
 `--mode live` refuses to start unless `CHRONOSCALP_CONFIRM_LIVE=yes` is set in `.env` — a deliberate friction point so nobody flips to real money by accident.
 
+**راهنمای فارسی قدم‌به‌قدم:** [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md)  
+**VPS هلند (انگلیسی):** [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md)
+
 ## 6. Configuration
 
 All strategy/risk parameters live in [`config/settings.yaml`](config/settings.yaml) (git-tracked, safe to version) — timeframes, session windows, risk %, spread caps, R:R minimum. Secrets (MT5 login, Sentry DSN, news API key) live only in `.env` (git-ignored) — see [`.env.example`](.env.example).
