@@ -19,10 +19,11 @@ def test_kill_switch_file_active(tmp_path: Path):
     assert "STOP_TRADING" in (ks.reason() or "")
 
 
-def test_kill_switch_logs_transition(tmp_path: Path):
+def test_kill_switch_activate_deactivate(tmp_path: Path):
     ks = KillSwitch(state_dir=tmp_path, env_stop="no")
-    assert ks.check_and_log() is False
-    (tmp_path / STOP_FILE_NAME).touch()
-    assert ks.check_and_log() is True
-    (tmp_path / STOP_FILE_NAME).unlink()
-    assert ks.check_and_log() is False
+    assert ks.is_active() is False
+    ks.activate("unit-test")
+    assert ks.is_active() is True
+    assert (tmp_path / STOP_FILE_NAME).exists()
+    ks.deactivate()
+    assert ks.is_active() is False

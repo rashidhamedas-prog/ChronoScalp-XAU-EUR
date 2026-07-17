@@ -55,3 +55,15 @@ class KillSwitch:
             logger.info("Kill switch cleared — trading may resume")
         self._last_active = active
         return active
+
+    def activate(self, reason: str = "manual") -> None:
+        """Create the on-disk kill marker (does not change env var)."""
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._marker_path.write_text(f"activated: {reason}\n", encoding="utf-8")
+        logger.warning("Kill switch activated via marker ({})", reason)
+
+    def deactivate(self) -> None:
+        """Remove the on-disk kill marker if present."""
+        if self._marker_path.exists():
+            self._marker_path.unlink()
+            logger.info("Kill switch marker removed")

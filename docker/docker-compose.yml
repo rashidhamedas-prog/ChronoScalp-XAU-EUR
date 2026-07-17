@@ -70,3 +70,19 @@ services:
         "8501",
       ]
     restart: unless-stopped
+
+  # Telegram control bot (/status /pnl /stop /resume). Needs TELEGRAM_BOT_TOKEN.
+  chronoscalp-telegram:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../config:/app/config
+    command: ["python", "scripts/telegram_control_bot.py"]
+    restart: unless-stopped
+    profiles:
+      - telegram
