@@ -45,7 +45,8 @@ from chronoscalp.saas import (  # noqa: E402
     test_oanda_connection,
 )
 from chronoscalp.saas.broker_wizard import enable_alerting_override  # noqa: E402
-from dashboard_i18n import rtl_css, t as dash_t  # noqa: E402
+from dashboard_i18n import rtl_css  # noqa: E402
+from dashboard_i18n import t as dash_t  # noqa: E402
 from dashboard_stats import render_trading_stats  # noqa: E402
 
 # Extended UI strings (FA-first SaaS panel)
