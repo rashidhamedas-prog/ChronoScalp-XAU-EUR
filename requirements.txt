@@ -1,7 +1,8 @@
 # Core
 pandas>=2.2,<2.3
-numpy>=1.26,<2.0          # pinned <2.0: pandas-ta relies on np.NaN, removed in numpy 2.x
-pandas-ta>=0.3.14b0
+numpy>=1.26,<2.0
+# pandas-ta optional — indicators are hand-rolled in technical.py.
+# Current pandas-ta wants numpy>=2.2 which conflicts with this pin.
 
 # Config / env
 pydantic>=2.7

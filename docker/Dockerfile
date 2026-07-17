@@ -4,7 +4,7 @@
 # installed, which cannot run inside this Linux container. See
 # docs/ARCHITECTURE.md "Broker abstraction" for the deployment options.
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
