@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -24,7 +24,9 @@ import streamlit as st  # noqa: E402
 
 from chronoscalp.config import get_settings  # noqa: E402
 from chronoscalp.orchestration.kill_switch import KillSwitch  # noqa: E402
+from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noqa: E402
 from dashboard_i18n import rtl_css, t  # noqa: E402
+from dashboard_stats import render_trading_stats  # noqa: E402
 
 Lang = str
 
@@ -89,8 +91,8 @@ def main() -> None:
     spread_dir = Path(settings.spread_filter.get("spread_history_dir", "data/spread_history"))
     report_dir = ROOT / "data" / "reports"
     log_dir = ROOT / "logs"
+    reference_equity = float(settings.backtest.get("initial_balance", 10_000))
 
-    # --- Sidebar: language toggle first ---
     with st.sidebar:
         if st.button(t("lang_btn", lang), use_container_width=True, key="lang_toggle"):
             st.session_state.lang = "en" if lang == "fa" else "fa"
@@ -107,6 +109,7 @@ def main() -> None:
             st.write(f"**{t('oanda_env', lang)}:** `{oanda_env}`")
         st.divider()
         state_mode = st.radio(t("state_file", lang), ["paper", "live"], horizontal=True)
+        refresh_sec = st.slider(t("auto_refresh", lang), min_value=0, max_value=30, value=5, step=1)
         st.divider()
         st.markdown(f"**{t('risk_limits', lang)}**")
         st.write(f"{t('max_risk', lang)}: {settings.risk.get('max_risk_per_trade_pct')}%")
@@ -142,6 +145,15 @@ def main() -> None:
 
     if kill_active:
         st.error(f"{t('trading_halted', lang)}: {ks.reason()}")
+
+    run_every = timedelta(seconds=refresh_sec) if refresh_sec > 0 else None
+
+    @st.fragment(run_every=run_every)
+    def _live_trading_block() -> None:
+        snapshot = load_journal_snapshot(state_dir, state_mode, reference_equity=reference_equity)
+        render_trading_stats(snapshot, t=t, lang=lang)
+
+    _live_trading_block()
 
     state_path = state_dir / f"trading_state_{state_mode}.json"
     state = _load_state(state_path)

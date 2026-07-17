@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +31,7 @@ from chronoscalp.licensing import (  # noqa: E402
     issue_license,
 )
 from chronoscalp.orchestration.kill_switch import STOP_FILE_NAME, KillSwitch  # noqa: E402
+from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noqa: E402
 from chronoscalp.saas import (  # noqa: E402
     UserConfigStore,
     apply_broker_to_settings_yaml,
@@ -44,7 +45,8 @@ from chronoscalp.saas import (  # noqa: E402
     test_oanda_connection,
 )
 from chronoscalp.saas.broker_wizard import enable_alerting_override  # noqa: E402
-from dashboard_i18n import rtl_css  # noqa: E402
+from dashboard_i18n import rtl_css, t as dash_t  # noqa: E402
+from dashboard_stats import render_trading_stats  # noqa: E402
 
 # Extended UI strings (FA-first SaaS panel)
 UI = {
@@ -375,21 +377,28 @@ def page_control(settings) -> None:
 
 def page_monitor(settings) -> None:
     st.subheader(_t("nav_monitor"))
+    lang = st.session_state.lang
     state_dir = Path(settings.execution.get("state_dir", "data/state"))
     mode = UserConfigStore().config.broker.mode
+    reference_equity = float(settings.backtest.get("initial_balance", 10_000))
+    refresh_sec = st.slider(dash_t("auto_refresh", lang), 0, 30, 5, 1)
+
+    run_every = timedelta(seconds=refresh_sec) if refresh_sec > 0 else None
+
+    @st.fragment(run_every=run_every)
+    def _stats_block() -> None:
+        snapshot = load_journal_snapshot(state_dir, mode, reference_equity=reference_equity)
+        render_trading_stats(snapshot, t=dash_t, lang=lang)
+
+    _stats_block()
+
     path = state_dir / f"trading_state_{mode}.json"
-    if path.exists():
-        data = json.loads(path.read_text(encoding="utf-8"))
-        st.json(data)
-        tickets = data.get("open_tickets") or {}
-        if tickets:
-            st.dataframe(
-                pd.DataFrame([{"symbol": k, "ticket": v} for k, v in tickets.items()]),
-                hide_index=True,
-                use_container_width=True,
-            )
-    else:
-        st.info("هنوز state ذخیره نشده — ربات را یک‌بار اجرا کنید")
+    with st.expander("State JSON", expanded=False):
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            st.json(data)
+        else:
+            st.info("هنوز state ذخیره نشده — ربات را یک‌بار اجرا کنید")
 
     spread_dir = Path(settings.spread_filter.get("spread_history_dir", "data/spread_history"))
     for symbol in settings.symbols:

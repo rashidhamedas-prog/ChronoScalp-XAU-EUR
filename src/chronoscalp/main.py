@@ -47,6 +47,7 @@ from chronoscalp.orchestration.bootstrap import (
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.state_store import TradingStateStore
+from chronoscalp.orchestration.trade_journal import TradeJournal, journal_path_for
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
@@ -97,6 +98,9 @@ class TradingBot:
         state_path = self.state_dir / f"trading_state_{mode}.json"
         self.state_store = TradingStateStore(state_path)
         self.state_store.load()
+
+        self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
+        self.trade_journal.load()
 
         resilience_cfg = settings.resilience
         self.kill_switch = KillSwitch(
@@ -203,6 +207,7 @@ class TradingBot:
         broker_map = {p.symbol: p.ticket for p in managed}
         self.state_store.reconcile_open_tickets(broker_map)
         self.open_tickets = dict(self.state_store.state.open_tickets)
+        self.trade_journal.sync_open_from_broker(managed)
 
         if alert_on_change and previous != self.open_tickets:
             self.alerts.notify(
@@ -333,6 +338,7 @@ class TradingBot:
 
                 position = self.broker.place_order(signal, volume)
                 self.open_tickets[symbol] = position.ticket
+                self.trade_journal.record_open(position)
                 self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
                 self._persist_state()
@@ -421,6 +427,7 @@ class TradingBot:
                     reason=hit.exit_reason(),
                 )
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
+                self.trade_journal.record_close(trade, ticket=ticket)
                 self.open_tickets.pop(symbol, None)
                 self._persist_state()
                 logger.info(
@@ -452,6 +459,8 @@ class TradingBot:
         pnl: float | None = None
         if self.mode == "live" and isinstance(self.broker, (MT5Broker, OANDABroker)):
             pnl = self.broker.fetch_closed_pnl(ticket)
+
+        self.trade_journal.record_external_close(ticket, symbol, pnl, at=now)
 
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)

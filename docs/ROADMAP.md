@@ -45,6 +45,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Periodic reconciliation:** broker ↔ state sync every N seconds in live loop (`resilience.reconcile_interval_seconds`)
 - [x] OANDA v20 REST broker + connector for Linux VPS deployment (`execution/oanda_broker.py`, `data/oanda_connector.py`, `docs/DEPLOY_NL_VPS.md`)
 - [x] Bilingual Streamlit dashboard (`scripts/dashboard.py`, `scripts/dashboard_i18n.py`)
+- [x] Live trading stats dashboard: net/today P&L, open/closed counts, win rate, avg return, profit factor, streaks + auto-refresh (`orchestration/trade_journal.py`, `scripts/dashboard_stats.py`)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
 - [x] Persian step-by-step guide: `docs/RAHNAMA_FA.md`
