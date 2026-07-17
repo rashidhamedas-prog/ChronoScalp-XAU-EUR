@@ -289,7 +289,7 @@ class TradingBot:
                 if len(self.open_tickets) >= self.max_concurrent:
                     continue
 
-                if not self.session_filter.is_within_session(now):
+                if not self.session_filter.is_within_session(now, symbol=symbol):
                     continue
                 if self.news_filter.is_blackout(now, currency=self._news_currency(symbol)):
                     continue

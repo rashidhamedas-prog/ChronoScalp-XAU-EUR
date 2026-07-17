@@ -10,6 +10,7 @@ from chronoscalp.risk.position_sizing import (
     kelly_fraction,
     passes_reward_risk_filter,
     passes_spread_filter,
+    resolve_active_risk_pct,
     round_to_lot_step,
 )
 from chronoscalp.utils.types import Signal, SignalType, Timeframe
@@ -89,3 +90,27 @@ def test_daily_loss_limit_triggers_and_resets_next_day():
 
     next_day = now + timedelta(days=1)
     assert not tracker.daily_loss_limit_hit(next_day)
+
+
+def test_resolve_active_risk_pct_default_and_presets():
+    assert resolve_active_risk_pct({"active_risk_per_trade_pct": 0.5}) == 0.5
+    assert resolve_active_risk_pct({"active_risk_per_trade_pct": 1.0}) == 1.0
+    # 1.5% requested but hard-capped at 1%
+    assert (
+        resolve_active_risk_pct({"active_risk_per_trade_pct": 1.5, "max_risk_per_trade_pct": 1.0})
+        == 1.0
+    )
+
+
+def test_btcusd_position_size_positive():
+    spec = {
+        "pip_size": 1.0,
+        "contract_size": 1,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 10,
+        "pip_value_per_lot": 1.0,
+    }
+    volume = calculate_position_size(10_000, 1.0, 65000.0, 64000.0, spec)
+    assert volume >= 0.01
+    assert volume <= 10

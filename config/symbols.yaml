@@ -30,3 +30,15 @@ XAUEUR:
   max_lot: 50
   typical_spread_pips: 30
   pip_value_per_lot: 1.0
+
+# Crypto CFD — verify pip/contract against your MT5 broker symbol card.
+# Default assumes 1 lot ≈ 1 BTC and $1 price move ≈ $1 PnL per lot.
+BTCUSD:
+  pip_size: 1.0
+  contract_size: 1
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 10
+  typical_spread_pips: 20
+  pip_value_per_lot: 1.0
+  news_currency: USD

@@ -3,6 +3,7 @@
 from chronoscalp.saas.broker_wizard import (
     ConnectionTestResult,
     apply_broker_to_settings_yaml,
+    apply_risk_preset,
     save_mt5_credentials,
     save_oanda_credentials,
     save_telegram_credentials,
@@ -17,6 +18,7 @@ __all__ = [
     "UserConfig",
     "UserConfigStore",
     "apply_broker_to_settings_yaml",
+    "apply_risk_preset",
     "bot_is_running",
     "save_mt5_credentials",
     "save_oanda_credentials",

@@ -35,6 +35,7 @@ from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noq
 from chronoscalp.saas import (  # noqa: E402
     UserConfigStore,
     apply_broker_to_settings_yaml,
+    apply_risk_preset,
     bot_is_running,
     save_mt5_credentials,
     save_oanda_credentials,
@@ -93,6 +94,10 @@ UI = {
         "stop": "⏹ استاپ ربات",
         "kill_on": "فعال کردن Kill Switch",
         "kill_off": "برداشتن Kill Switch",
+        "risk_title": "ریسک هر معامله (% سرمایه)",
+        "risk_hint": "پیش‌فرض ۱٪. سه گزینه: ۰٫۵ / ۱ / ۱٫۵ — سقف امنیتی پروژه حداکثر ۱٪ است؛ انتخاب ۱٫۵٪ عملاً ۱٪ اعمال می‌شود.",
+        "risk_save": "اعمال ریسک",
+        "symbols_label": "نمادهای فعال",
         "admin_title": "صدور لایسنس برای مشتری",
         "admin_secret": "رمز ادمین (LICENSE_ADMIN_SECRET)",
         "tier": "پلن اشتراک",
@@ -155,6 +160,10 @@ UI = {
         "stop": "⏹ Stop bot",
         "kill_on": "Enable Kill Switch",
         "kill_off": "Clear Kill Switch",
+        "risk_title": "Risk per trade (% of equity)",
+        "risk_hint": "Default 1%. Presets: 0.5 / 1 / 1.5 — project hard-caps at 1%; selecting 1.5% applies 1%.",
+        "risk_save": "Apply risk",
+        "symbols_label": "Active symbols",
         "admin_title": "Issue license for customer",
         "admin_secret": "Admin secret (LICENSE_ADMIN_SECRET)",
         "tier": "Plan",
@@ -335,6 +344,46 @@ def page_control(settings) -> None:
     st.subheader(_t("control_title"))
     running = bot_is_running()
     st.metric("Bot", _t("bot_running") if running else _t("bot_stopped"))
+
+    st.markdown(f"**{_t('symbols_label')}:** `{', '.join(settings.symbols)}`")
+
+    st.markdown(f"#### {_t('risk_title')}")
+    st.caption(_t("risk_hint"))
+    presets = list(settings.risk.get("risk_presets_pct") or [0.5, 1.0, 1.5])
+    current = float(settings.risk.get("active_risk_per_trade_pct", 1.0))
+    labels = {0.5: "۰٫۵٪", 1.0: "۱٪ (پیش‌فرض)", 1.5: "۱٫۵٪ → سقف ۱٪"}
+    if st.session_state.lang == "en":
+        labels = {0.5: "0.5%", 1.0: "1% (default)", 1.5: "1.5% → capped to 1%"}
+    # Normalize presets to floats for radio
+    preset_vals = [float(p) for p in presets]
+    try:
+        idx = preset_vals.index(current) if current in preset_vals else preset_vals.index(1.0)
+    except ValueError:
+        idx = 0
+    selected = st.radio(
+        _t("risk_title"),
+        options=preset_vals,
+        index=min(idx, len(preset_vals) - 1),
+        format_func=lambda v: labels.get(float(v), f"{v}%"),
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if st.button(_t("risk_save")):
+        effective = apply_risk_preset(float(selected))
+        get_settings.cache_clear()
+        if float(selected) > 1.0:
+            st.warning(
+                f"انتخاب شما {selected}% بود؛ به‌خاطر سقف امنیتی، ریسک مؤثر = {effective}%"
+                if st.session_state.lang == "fa"
+                else f"You selected {selected}%; hard ceiling applied → effective {effective}%"
+            )
+        else:
+            st.success(f"Risk = {effective}%")
+        st.rerun()
+
+    from chronoscalp.risk.position_sizing import resolve_active_risk_pct
+
+    st.caption(f"Effective now: **{resolve_active_risk_pct(settings.risk)}%**")
 
     user = UserConfigStore().config
     mode = user.broker.mode if user.broker.mode in ("paper", "live") else "paper"

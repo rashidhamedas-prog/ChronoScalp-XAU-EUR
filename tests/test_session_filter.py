@@ -46,3 +46,15 @@ def test_session_filter_trade_outside_sessions_true_always_allows():
     }
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(20, 0))
+
+
+def test_session_filter_always_on_symbol_bypasses_windows():
+    cfg = {
+        "windows": {"london": {"start": "08:00", "end": "11:00"}},
+        "trade_outside_sessions": False,
+        "always_on_symbols": ["BTCUSD"],
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    assert not session_filter.is_within_session(_dt(20, 0))
+    assert session_filter.is_within_session(_dt(20, 0), symbol="BTCUSD")
+    assert not session_filter.is_within_session(_dt(20, 0), symbol="EURUSD")

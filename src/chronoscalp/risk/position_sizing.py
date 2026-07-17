@@ -15,6 +15,30 @@ from datetime import date, datetime
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal
 
+HARD_MAX_RISK_PCT = 1.0
+
+
+def resolve_active_risk_pct(risk_cfg: dict) -> float:
+    """Return the effective risk % for sizing, never above the hard 1% ceiling.
+
+    UI may offer presets including 1.5, but ``max_risk_per_trade_pct`` (default
+    1.0) and ``HARD_MAX_RISK_PCT`` always cap the result — see CLAUDE.md rule #1.
+    """
+    ceiling = float(risk_cfg.get("max_risk_per_trade_pct", HARD_MAX_RISK_PCT))
+    ceiling = min(ceiling, HARD_MAX_RISK_PCT)
+    requested = float(
+        risk_cfg.get("active_risk_per_trade_pct", risk_cfg.get("max_risk_per_trade_pct", 1.0))
+    )
+    effective = min(max(requested, 0.0), ceiling)
+    if requested > ceiling:
+        logger.warning(
+            "Requested risk {:.2f}% exceeds hard ceiling {:.2f}% — using {:.2f}%",
+            requested,
+            ceiling,
+            effective,
+        )
+    return effective
+
 
 def round_to_lot_step(volume: float, min_lot: float, max_lot: float, lot_step: float) -> float:
     if lot_step <= 0:
@@ -159,13 +183,13 @@ class RiskManager:
         self, signal: Signal, equity: float, win_rate_estimate: float = 0.6
     ) -> float:
         symbol_spec = self.symbols_cfg[signal.symbol]
-        risk_pct = self.risk_cfg.get("max_risk_per_trade_pct", 1.0)
+        risk_pct = resolve_active_risk_pct(self.risk_cfg)
 
         if self.risk_cfg.get("use_kelly_sizing", False):
             risk_pct = kelly_fraction(
                 win_rate=win_rate_estimate,
                 reward_risk_ratio=signal.risk_reward_ratio,
-                cap_pct=self.risk_cfg.get("max_risk_per_trade_pct", 1.0),
+                cap_pct=risk_pct,
             )
             if risk_pct <= 0:
                 return 0.0

@@ -31,9 +31,15 @@ class SessionWindow:
 
 
 class SessionFilter:
-    def __init__(self, windows: list[SessionWindow], trade_outside_sessions: bool = False) -> None:
+    def __init__(
+        self,
+        windows: list[SessionWindow],
+        trade_outside_sessions: bool = False,
+        always_on_symbols: set[str] | None = None,
+    ) -> None:
         self.windows = windows
         self.trade_outside_sessions = trade_outside_sessions
+        self.always_on_symbols = set(always_on_symbols or ())
 
     @classmethod
     def from_config(cls, sessions_cfg: dict) -> SessionFilter:
@@ -42,14 +48,21 @@ class SessionFilter:
             start = _parse_hhmm(spec["start"])
             end = _parse_hhmm(spec["end"])
             windows.append(SessionWindow(name=name, start=start, end=end))
+        always_on = {str(s) for s in (sessions_cfg.get("always_on_symbols") or [])}
         return cls(
             windows=windows,
             trade_outside_sessions=bool(sessions_cfg.get("trade_outside_sessions", False)),
+            always_on_symbols=always_on,
         )
 
-    def is_within_session(self, moment: datetime) -> bool:
+    def is_within_session(self, moment: datetime, symbol: str | None = None) -> bool:
         """`moment` must be a GMT/UTC timestamp — convert before calling if
-        your data source uses broker-server time or local time."""
+        your data source uses broker-server time or local time.
+
+        Symbols listed in ``always_on_symbols`` (e.g. BTCUSD) bypass session windows.
+        """
+        if symbol and symbol in self.always_on_symbols:
+            return True
         if self.trade_outside_sessions:
             return True
         return any(window.contains(moment) for window in self.windows)
