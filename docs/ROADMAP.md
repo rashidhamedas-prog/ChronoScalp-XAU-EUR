@@ -49,6 +49,8 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] BTCUSD multi-symbol (24/7 session bypass) + risk presets 0.5%/1%/1.5% with hard 1% ceiling (`config/settings.yaml`, `risk/position_sizing.py`)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
+- [x] Windows VPS one-shot setup: `scripts/windows_vps_setup.ps1` (MT5 + paper path)
 - [x] Persian step-by-step guide: `docs/RAHNAMA_FA.md`
 - [x] **SaaS packaging:** license/subscription (`licensing/`), user control panel (`scripts/app.py`), easy broker wizard, IB referral section (`docs/FOROOSH_FA.md`)
-- [ ] **User action — VPS deploy:** purchase Netherlands VPS, configure `.env`, run `docker compose up` (see `docs/RAHNAMA_FA.md` §13)
+- [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
+- [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

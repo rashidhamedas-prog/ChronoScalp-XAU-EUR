@@ -41,7 +41,11 @@ def test_compute_trading_stats_basic() -> None:
             r_multiple=-0.5,
         ),
     ]
-    stats = compute_trading_stats(closed, [], reference_equity=10_000)
+    # Pin "today" to the fixture close date so the assertion is not flaky.
+    as_of = datetime(2026, 7, 17, 23, 0, tzinfo=UTC)
+    stats = compute_trading_stats(
+        closed, [], reference_equity=10_000, as_of=as_of
+    )
     assert stats.closed_trades == 2
     assert stats.wins == 1
     assert stats.losses == 1
@@ -51,6 +55,44 @@ def test_compute_trading_stats_basic() -> None:
     assert stats.avg_pnl == 15.0
     assert stats.avg_r_multiple == 0.5
     assert stats.today_trades == 2
+    assert stats.today_pnl == 30.0
+
+
+def test_today_stats_ignore_older_closes() -> None:
+    closed = [
+        ClosedTradeRecord(
+            ticket=1,
+            symbol="EURUSD",
+            direction="buy",
+            volume=0.1,
+            entry_price=1.1,
+            exit_price=1.11,
+            open_time="2026-07-16T10:00:00+00:00",
+            close_time="2026-07-16T11:00:00+00:00",
+            pnl=10.0,
+            r_multiple=0.5,
+        ),
+        ClosedTradeRecord(
+            ticket=2,
+            symbol="EURUSD",
+            direction="buy",
+            volume=0.1,
+            entry_price=1.1,
+            exit_price=1.12,
+            open_time="2026-07-17T10:00:00+00:00",
+            close_time="2026-07-17T11:00:00+00:00",
+            pnl=20.0,
+            r_multiple=1.0,
+        ),
+    ]
+    stats = compute_trading_stats(
+        closed,
+        [],
+        as_of=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+    )
+    assert stats.closed_trades == 2
+    assert stats.today_trades == 1
+    assert stats.today_pnl == 20.0
 
 
 def test_journal_open_close_roundtrip(tmp_path: Path) -> None:

@@ -176,8 +176,13 @@ def compute_trading_stats(
     open_trades: list[OpenTradeRecord],
     *,
     reference_equity: float | None = None,
+    as_of: datetime | None = None,
 ) -> TradingStats:
-    """Compute dashboard metrics from closed + open journal rows."""
+    """Compute dashboard metrics from closed + open journal rows.
+
+    ``as_of`` pins the \"today\" cutoff (UTC date) for tests; production leaves it
+    unset so the wall-clock UTC date is used.
+    """
     wins = [t for t in closed if t.pnl > 0]
     losses = [t for t in closed if t.pnl < 0]
     flats = [t for t in closed if t.pnl == 0]
@@ -186,7 +191,8 @@ def compute_trading_stats(
     net_pnl = sum(t.pnl for t in closed)
     n = len(closed)
 
-    today = datetime.now(tz=UTC).date().isoformat()
+    ref = as_of.astimezone(UTC) if as_of is not None else datetime.now(tz=UTC)
+    today = ref.date().isoformat()
     today_rows = [t for t in closed if (t.close_time or "")[:10] == today]
 
     avg_return_pct = 0.0
