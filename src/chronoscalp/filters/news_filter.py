@@ -85,38 +85,6 @@ class NewsFilter:
         if not self.enabled:
             return False
         moment = _ensure_utc(moment)
-        # #region agent log
-        try:
-            import json as _json
-            from pathlib import Path as _P
-
-            _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
-            _ev0 = self.events[0].timestamp if self.events else None
-            with _log.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "eb4742",
-                            "runId": "post-fix",
-                            "hypothesisId": "A",
-                            "location": "news_filter.py:is_blackout:entry",
-                            "message": "tzinfo after normalize",
-                            "data": {
-                                "moment_tz": str(moment.tzinfo),
-                                "moment_aware": moment.tzinfo is not None,
-                                "n_events": len(self.events),
-                                "event0_tz": str(_ev0.tzinfo) if _ev0 else None,
-                                "event0_aware": (_ev0.tzinfo is not None) if _ev0 else None,
-                                "currency": currency,
-                            },
-                            "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         for event in self.events:
             if self.high_impact_only and event.impact != "high":
                 continue
@@ -125,37 +93,6 @@ class NewsFilter:
             event_ts = _ensure_utc(event.timestamp)
             window_start = event_ts - self.blackout_before
             window_end = event_ts + self.blackout_after
-            # #region agent log
-            try:
-                import json as _json
-                from pathlib import Path as _P
-
-                _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
-                with _log.open("a", encoding="utf-8") as _f:
-                    _f.write(
-                        _json.dumps(
-                            {
-                                "sessionId": "eb4742",
-                                "runId": "post-fix",
-                                "hypothesisId": "B",
-                                "location": "news_filter.py:is_blackout:compare",
-                                "message": "compare after UTC normalize",
-                                "data": {
-                                    "event_tz": str(event_ts.tzinfo),
-                                    "window_start_tz": str(window_start.tzinfo),
-                                    "moment_tz": str(moment.tzinfo),
-                                    "mismatch": (event_ts.tzinfo is None)
-                                    != (moment.tzinfo is None),
-                                    "title": event.title[:80],
-                                },
-                                "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             if window_start <= moment <= window_end:
                 return True
         return False
@@ -240,34 +177,6 @@ def _fetch_events_from_api(api_key: str) -> list[NewsEvent] | None:
         except ValueError:
             continue
         ts = _ensure_utc(ts)
-        # #region agent log
-        try:
-            import json as _json
-            from pathlib import Path as _P
-
-            _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
-            with _log.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "eb4742",
-                            "runId": "post-fix",
-                            "hypothesisId": "C",
-                            "location": "news_filter.py:_fetch_events_from_api",
-                            "message": "parsed Finnhub timestamp normalized",
-                            "data": {
-                                "time_str_sample": str(time_str)[:40],
-                                "ts_aware": ts.tzinfo is not None,
-                                "ts_tz": str(ts.tzinfo),
-                            },
-                            "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
 
         events.append(
             NewsEvent(
