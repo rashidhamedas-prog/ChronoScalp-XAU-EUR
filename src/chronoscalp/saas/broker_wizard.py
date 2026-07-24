@@ -280,15 +280,22 @@ def apply_enabled_strategies(
 
 def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
+    import os
+
     path = overrides_env or ENV_PATH
     _upsert_env(path, {"CHRONOSCALP_CONFIRM_LIVE": "yes"})
+    # Process env wins over .env in pydantic-settings; keep them in sync for panel + child spawn.
+    os.environ["CHRONOSCALP_CONFIRM_LIVE"] = "yes"
     logger.warning("CHRONOSCALP_CONFIRM_LIVE=yes written to {} by panel action", path)
 
 
 def disable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=no into ``.env``."""
+    import os
+
     path = overrides_env or ENV_PATH
     _upsert_env(path, {"CHRONOSCALP_CONFIRM_LIVE": "no"})
+    os.environ["CHRONOSCALP_CONFIRM_LIVE"] = "no"
     logger.info("CHRONOSCALP_CONFIRM_LIVE=no written to {}", path)
 
 
