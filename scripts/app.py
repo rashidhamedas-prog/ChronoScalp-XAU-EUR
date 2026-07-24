@@ -553,7 +553,11 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    st.markdown(panel_theme_css(rtl=(lang == "fa")), unsafe_allow_html=True)
+    # Streamlit >=1.35 strips <style> from st.markdown; st.html keeps CSS.
+    try:
+        st.html(panel_theme_css(rtl=(lang == "fa")))
+    except Exception:  # noqa: BLE001 — older Streamlit without st.html
+        st.markdown(panel_theme_css(rtl=(lang == "fa")), unsafe_allow_html=True)
 
     settings = _settings()
 

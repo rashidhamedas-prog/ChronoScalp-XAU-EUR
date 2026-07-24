@@ -2,9 +2,8 @@
 
 Two event sources, in priority order:
 1. A live economic-calendar API, if `news_api_key` is configured (Phase 3
-   extension point — no specific provider is wired in yet; implement
-   `_fetch_events_from_api()` for your chosen provider, e.g. FinancialModelingPrep,
-   TradingEconomics, or Finnhub).
+   extension point — Finnhub economic calendar is wired via
+   ``_fetch_events_from_api()``).
 2. A manual event list in config/news_events.yaml (git-tracked, zero external
    dependency, works out of the box) — maintain this list manually if you
    don't want an API dependency.
@@ -15,7 +14,7 @@ Like SessionFilter, this is veto-only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +23,28 @@ import yaml
 from chronoscalp.logging_setup import logger
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalize to timezone-aware UTC (naive values treated as UTC)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 @dataclass(frozen=True)
 class NewsEvent:
     timestamp: datetime
     currency: str
     impact: str  # "high" | "medium" | "low"
     title: str
+
+
+def _normalize_event(event: NewsEvent) -> NewsEvent:
+    return NewsEvent(
+        timestamp=_ensure_utc(event.timestamp),
+        currency=event.currency,
+        impact=event.impact,
+        title=event.title,
+    )
 
 
 class NewsFilter:
@@ -41,7 +56,7 @@ class NewsFilter:
         high_impact_only: bool = True,
         enabled: bool = True,
     ) -> None:
-        self.events = events
+        self.events = [_normalize_event(e) for e in events]
         self.blackout_before = blackout_before
         self.blackout_after = blackout_after
         self.high_impact_only = high_impact_only
@@ -69,13 +84,78 @@ class NewsFilter:
     def is_blackout(self, moment: datetime, currency: str | None = None) -> bool:
         if not self.enabled:
             return False
+        moment = _ensure_utc(moment)
+        # #region agent log
+        try:
+            import json as _json
+            from pathlib import Path as _P
+
+            _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
+            _ev0 = self.events[0].timestamp if self.events else None
+            with _log.open("a", encoding="utf-8") as _f:
+                _f.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "eb4742",
+                            "runId": "post-fix",
+                            "hypothesisId": "A",
+                            "location": "news_filter.py:is_blackout:entry",
+                            "message": "tzinfo after normalize",
+                            "data": {
+                                "moment_tz": str(moment.tzinfo),
+                                "moment_aware": moment.tzinfo is not None,
+                                "n_events": len(self.events),
+                                "event0_tz": str(_ev0.tzinfo) if _ev0 else None,
+                                "event0_aware": (_ev0.tzinfo is not None) if _ev0 else None,
+                                "currency": currency,
+                            },
+                            "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         for event in self.events:
             if self.high_impact_only and event.impact != "high":
                 continue
             if currency and event.currency not in (currency, "ALL"):
                 continue
-            window_start = event.timestamp - self.blackout_before
-            window_end = event.timestamp + self.blackout_after
+            event_ts = _ensure_utc(event.timestamp)
+            window_start = event_ts - self.blackout_before
+            window_end = event_ts + self.blackout_after
+            # #region agent log
+            try:
+                import json as _json
+                from pathlib import Path as _P
+
+                _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
+                with _log.open("a", encoding="utf-8") as _f:
+                    _f.write(
+                        _json.dumps(
+                            {
+                                "sessionId": "eb4742",
+                                "runId": "post-fix",
+                                "hypothesisId": "B",
+                                "location": "news_filter.py:is_blackout:compare",
+                                "message": "compare after UTC normalize",
+                                "data": {
+                                    "event_tz": str(event_ts.tzinfo),
+                                    "window_start_tz": str(window_start.tzinfo),
+                                    "moment_tz": str(moment.tzinfo),
+                                    "mismatch": (event_ts.tzinfo is None)
+                                    != (moment.tzinfo is None),
+                                    "title": event.title[:80],
+                                },
+                                "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
             if window_start <= moment <= window_end:
                 return True
         return False
@@ -92,7 +172,7 @@ def _load_manual_events(path: str | Path) -> list[NewsEvent]:
     for item in raw:
         events.append(
             NewsEvent(
-                timestamp=datetime.fromisoformat(item["timestamp"]),
+                timestamp=_ensure_utc(datetime.fromisoformat(item["timestamp"])),
                 currency=item.get("currency", "ALL"),
                 impact=item.get("impact", "high"),
                 title=item.get("title", ""),
@@ -159,6 +239,35 @@ def _fetch_events_from_api(api_key: str) -> list[NewsEvent] | None:
             ts = datetime.fromisoformat(str(time_str).replace("Z", "+00:00"))
         except ValueError:
             continue
+        ts = _ensure_utc(ts)
+        # #region agent log
+        try:
+            import json as _json
+            from pathlib import Path as _P
+
+            _log = _P(__file__).resolve().parents[3] / "debug-eb4742.log"
+            with _log.open("a", encoding="utf-8") as _f:
+                _f.write(
+                    _json.dumps(
+                        {
+                            "sessionId": "eb4742",
+                            "runId": "post-fix",
+                            "hypothesisId": "C",
+                            "location": "news_filter.py:_fetch_events_from_api",
+                            "message": "parsed Finnhub timestamp normalized",
+                            "data": {
+                                "time_str_sample": str(time_str)[:40],
+                                "ts_aware": ts.tzinfo is not None,
+                                "ts_tz": str(ts.tzinfo),
+                            },
+                            "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
 
         events.append(
             NewsEvent(
