@@ -278,6 +278,20 @@ def apply_enabled_strategies(
     return cleaned
 
 
+def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
+    """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
+    path = overrides_env or ENV_PATH
+    _upsert_env(path, {"CHRONOSCALP_CONFIRM_LIVE": "yes"})
+    logger.warning("CHRONOSCALP_CONFIRM_LIVE=yes written to {} by panel action", path)
+
+
+def disable_live_confirm(*, overrides_env: Path | None = None) -> None:
+    """Write CHRONOSCALP_CONFIRM_LIVE=no into ``.env``."""
+    path = overrides_env or ENV_PATH
+    _upsert_env(path, {"CHRONOSCALP_CONFIRM_LIVE": "no"})
+    logger.info("CHRONOSCALP_CONFIRM_LIVE=no written to {}", path)
+
+
 def test_oanda_connection(
     api_token: str,
     account_id: str,

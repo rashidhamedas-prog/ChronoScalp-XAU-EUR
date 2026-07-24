@@ -34,6 +34,38 @@ def main() -> None:
     args = parse_args()
     settings = get_settings()
 
+    # #region agent log
+    try:
+        import json
+        from datetime import UTC, datetime
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        with open(root / "debug-eb4742.log", "a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "sessionId": "eb4742",
+                        "runId": "pre-fix",
+                        "hypothesisId": "A",
+                        "location": "run_live.main",
+                        "message": "run_live entry",
+                        "data": {
+                            "mode": args.mode,
+                            "confirm": settings.secrets.live_trading_confirmed,
+                            "env_exists": (root / ".env").exists(),
+                            "broker": settings.execution.get("broker"),
+                        },
+                        "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    # #endregion
+
     try:
         from chronoscalp.licensing import require_valid_license
 
@@ -41,6 +73,32 @@ def main() -> None:
         bot = TradingBot(settings, mode=args.mode)
     except RuntimeError as exc:
         logger.error(str(exc))
+        # #region agent log
+        try:
+            import json
+            from datetime import UTC, datetime
+            from pathlib import Path
+
+            root = Path(__file__).resolve().parents[1]
+            with open(root / "debug-eb4742.log", "a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "sessionId": "eb4742",
+                            "runId": "pre-fix",
+                            "hypothesisId": "A",
+                            "location": "run_live.main",
+                            "message": "run_live RuntimeError exit",
+                            "data": {"error": str(exc)[:300]},
+                            "timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        # #endregion
         sys.exit(1)
 
     bot.start()

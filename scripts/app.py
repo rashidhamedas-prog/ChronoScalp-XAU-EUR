@@ -39,6 +39,8 @@ from chronoscalp.saas import (  # noqa: E402
     apply_enabled_strategies,
     apply_risk_preset,
     bot_is_running,
+    disable_live_confirm,
+    enable_live_confirm,
     save_mt5_credentials,
     save_oanda_credentials,
     save_telegram_credentials,
@@ -109,6 +111,11 @@ UI = {
         "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
         "strategy_scalp": "معامله اسکلپ فوق‌سریع (S15 / Ultra Scalp)",
         "need_restart": "برای اعمال کامل، ربات را Stop سپس Start کنید.",
+        "live_confirm_title": "تأیید معامله Live",
+        "live_confirm_hint": "بدون CHRONOSCALP_CONFIRM_LIVE=yes ربات Live فوراً بسته می‌شود. این تأیید عمدی است.",
+        "live_confirm_check": "تأیید می‌کنم: Live را آگاهانه فعال کنم",
+        "live_confirm_save": "ذخیره تأیید Live",
+        "live_confirm_clear": "لغو تأیید Live",
         "admin_title": "صدور لایسنس برای مشتری",
         "admin_secret": "رمز ادمین (LICENSE_ADMIN_SECRET)",
         "tier": "پلن اشتراک",
@@ -184,6 +191,11 @@ UI = {
         "strategy_liq": "Liquidity + Volume",
         "strategy_scalp": "Ultra Scalp (S15 burst / high frequency)",
         "need_restart": "Stop then Start the bot for changes to fully apply.",
+        "live_confirm_title": "Confirm live trading",
+        "live_confirm_hint": "Without CHRONOSCALP_CONFIRM_LIVE=yes the Live bot exits immediately. This gate is intentional.",
+        "live_confirm_check": "I confirm enabling Live trading deliberately",
+        "live_confirm_save": "Save live confirm",
+        "live_confirm_clear": "Clear live confirm",
         "admin_title": "Issue license for customer",
         "admin_secret": "Admin secret (LICENSE_ADMIN_SECRET)",
         "tier": "Plan",
@@ -493,6 +505,38 @@ def page_control(settings) -> None:
     mode = user.broker.mode if user.broker.mode in ("paper", "live") else "paper"
     st.write(f"Mode از پروفایل کاربر: **{mode}**")
 
+    live_ok = bool(settings.secrets.live_trading_confirmed)
+    st.markdown(f"#### {_t('live_confirm_title')}")
+    st.caption(_t("live_confirm_hint"))
+    st.write(
+        f"وضعیت فعلی: **{'CONFIRMED' if live_ok else 'NOT SET'}** | .env: "
+        f"**{'yes' if (Path('.env').exists()) else 'MISSING'}**"
+    )
+    confirm_box = st.checkbox(_t("live_confirm_check"), value=live_ok, key="live_confirm_cb")
+    lc1, lc2 = st.columns(2)
+    with lc1:
+        if st.button(_t("live_confirm_save"), key="live_confirm_save_btn"):
+            if confirm_box:
+                enable_live_confirm()
+                get_settings.cache_clear()
+                st.success("CHRONOSCALP_CONFIRM_LIVE=yes")
+                st.rerun()
+            else:
+                st.warning("ابتدا چک‌باکس تأیید را بزنید")
+    with lc2:
+        if st.button(_t("live_confirm_clear"), key="live_confirm_clear_btn"):
+            disable_live_confirm()
+            get_settings.cache_clear()
+            st.info("CHRONOSCALP_CONFIRM_LIVE=no")
+            st.rerun()
+
+    if mode == "live" and not live_ok:
+        st.error(
+            "Mode=live است ولی تأیید Live فعال نیست — استارت شکست می‌خورد تا تأیید را ذخیره کنید."
+            if st.session_state.lang == "fa"
+            else "Mode is live but live confirm is off — start will fail until you save confirm."
+        )
+
     c1, c2 = st.columns(2)
     with c1:
         if st.button(_t("start"), type="primary", disabled=running):
@@ -504,7 +548,7 @@ def page_control(settings) -> None:
                 st.error(str(exc))
             else:
                 ok, msg = start_bot(mode=mode)
-                (st.success if ok else st.warning)(msg)
+                (st.success if ok else st.error)(msg)
                 st.rerun()
     with c2:
         if st.button(_t("stop"), disabled=not running):
