@@ -14,6 +14,17 @@ PID_FILE = Path("data/user/bot.pid")
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _python_executable() -> str:
+    """Prefer project venv so panel and bot share one interpreter."""
+    win = ROOT / ".venv" / "Scripts" / "python.exe"
+    if win.exists():
+        return str(win)
+    unix = ROOT / ".venv" / "bin" / "python"
+    if unix.exists():
+        return str(unix)
+    return sys.executable
+
+
 def bot_is_running(pid_file: Path = PID_FILE) -> bool:
     if not pid_file.exists():
         return False
@@ -46,7 +57,7 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
 
     proc = subprocess.Popen(
-        [sys.executable, str(script), "--mode", mode],
+        [_python_executable(), str(script), "--mode", mode],
         cwd=str(ROOT),
         env=env,
         stdout=stdout,
