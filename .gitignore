@@ -15,6 +15,12 @@ dist/
 .env
 .env.*
 !.env.example
+# Local secrets / filled samples (never commit)
+مهم/
+_list_dirs.txt
+debug-*.log
+scripts/_deploy_*.py
+scripts/_vps_*.py
 
 # Market data / generated artifacts
 data/raw/

@@ -25,8 +25,9 @@ import streamlit as st  # noqa: E402
 from chronoscalp.config import get_settings  # noqa: E402
 from chronoscalp.orchestration.kill_switch import KillSwitch  # noqa: E402
 from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noqa: E402
-from dashboard_i18n import rtl_css, t  # noqa: E402
+from dashboard_i18n import t  # noqa: E402
 from dashboard_stats import render_trading_stats  # noqa: E402
+from panel_theme import hero_html, panel_theme_css  # noqa: E402
 
 Lang = str
 
@@ -80,11 +81,19 @@ def main() -> None:
     lang = _init_lang()
     st.set_page_config(
         page_title=t("page_title", lang),
-        page_icon="📈",
+        page_icon="◈",
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    st.markdown(rtl_css(lang), unsafe_allow_html=True)
+    st.markdown(panel_theme_css(rtl=(lang == "fa")), unsafe_allow_html=True)
+    st.markdown(
+        hero_html(
+            title=t("title", lang),
+            subtitle=t("caption", lang),
+            badge="LIVE MONITOR" if lang == "en" else "مانیتور زنده",
+        ),
+        unsafe_allow_html=True,
+    )
 
     settings = get_settings()
     state_dir = Path(settings.execution.get("state_dir", "data/state"))
@@ -118,9 +127,6 @@ def main() -> None:
         st.divider()
         if st.button(t("refresh", lang), use_container_width=True):
             st.rerun()
-
-    st.title(t("title", lang))
-    st.caption(t("caption", lang))
 
     ks = KillSwitch(state_dir=state_dir, env_stop=settings.secrets.chronoscalp_stop_trading)
     kill_active = ks.is_active()

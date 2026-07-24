@@ -46,9 +46,9 @@ from chronoscalp.saas import (  # noqa: E402
     test_oanda_connection,
 )
 from chronoscalp.saas.broker_wizard import enable_alerting_override  # noqa: E402
-from dashboard_i18n import rtl_css  # noqa: E402
 from dashboard_i18n import t as dash_t  # noqa: E402
 from dashboard_stats import render_trading_stats  # noqa: E402
+from panel_theme import hero_html, panel_theme_css, steps_html  # noqa: E402
 
 # Extended UI strings (FA-first SaaS panel)
 UI = {
@@ -205,7 +205,19 @@ def _settings():
 
 
 def page_home(settings) -> None:
-    st.subheader(_t("welcome"))
+    lang = st.session_state.lang
+    st.markdown(
+        hero_html(
+            title=_t("welcome") + " · ChronoScalp",
+            subtitle=(
+                "کنسول عملیات اسکالپ چندتایم‌فریم — لایسنس، بروکر، کنترل ربات و آمار زنده."
+                if lang == "fa"
+                else "Multi-timeframe scalping ops console — license, broker, control, live stats."
+            ),
+            badge="DEMO · MT5 · PAPER-FIRST" if lang == "en" else "دمو · MT5 · اول Paper",
+        ),
+        unsafe_allow_html=True,
+    )
     lic = check_license(
         admin_secret=settings.secrets.license_admin_secret,
         require_license=bool(settings.raw.get("licensing", {}).get("require_license", True)),
@@ -213,14 +225,27 @@ def page_home(settings) -> None:
     user = UserConfigStore().config
     c1, c2, c3 = st.columns(3)
     c1.metric(_t("license_status"), _t("valid") if lic.valid else _t("invalid"))
-    c2.metric("Broker", user.broker.provider)
-    c3.metric("Mode", user.broker.mode)
-    st.markdown(f"""
-### مسیر سریع
-1. **{_t("step_license")}** — کلید اشتراک را فعال کنید  
-2. **{_t("step_broker")}** — OANDA یا MT5 را وصل و تست کنید  
-3. **{_t("step_run")}** — ربات را Paper استارت کنید  
-""")
+    c2.metric("Broker", user.broker.provider.upper())
+    c3.metric("Mode", user.broker.mode.upper())
+    st.markdown(
+        steps_html(
+            [
+                (
+                    _t("step_license"),
+                    "کلید اشتراک را فعال کنید" if lang == "fa" else "Activate your license key",
+                ),
+                (
+                    _t("step_broker"),
+                    "MT5 دمو را وصل و تست کنید" if lang == "fa" else "Connect & test MT5 demo",
+                ),
+                (
+                    _t("step_run"),
+                    "ربات را Paper استارت کنید" if lang == "fa" else "Start the bot in Paper mode",
+                ),
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
     if lic.valid and user.broker.onboarding_complete:
         st.success(_t("onboarding_done"))
 
@@ -522,8 +547,13 @@ def page_ib() -> None:
 def main() -> None:
     _init()
     lang = st.session_state.lang
-    st.set_page_config(page_title=_t("title"), page_icon="📈", layout="wide")
-    st.markdown(rtl_css(lang), unsafe_allow_html=True)
+    st.set_page_config(
+        page_title=_t("title"),
+        page_icon="◈",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.markdown(panel_theme_css(rtl=(lang == "fa")), unsafe_allow_html=True)
 
     settings = _settings()
 
@@ -531,7 +561,7 @@ def main() -> None:
         if st.button(_t("lang"), use_container_width=True):
             st.session_state.lang = "en" if lang == "fa" else "fa"
             st.rerun()
-        st.title(_t("title"))
+        st.markdown(f"# {_t('title')}")
         st.caption(_t("caption"))
         pages = [
             ("home", _t("nav_home")),
@@ -549,6 +579,7 @@ def main() -> None:
         if st.button(_t("refresh"), use_container_width=True):
             get_settings.cache_clear()
             st.rerun()
+        st.caption("Panel · :8501")
 
     page = st.session_state.page
     if page == "home":
@@ -567,7 +598,10 @@ def main() -> None:
         page_ib()
 
     st.divider()
-    st.caption(f"ChronoScalp SaaS · {datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M UTC')}")
+    st.caption(
+        f"ChronoScalp · LiteFinance MT5 Demo path · "
+        f"{datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
 
 
 if __name__ == "__main__":
