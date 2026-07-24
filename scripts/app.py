@@ -34,7 +34,9 @@ from chronoscalp.orchestration.kill_switch import STOP_FILE_NAME, KillSwitch  # 
 from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noqa: E402
 from chronoscalp.saas import (  # noqa: E402
     UserConfigStore,
+    apply_active_symbols,
     apply_broker_to_settings_yaml,
+    apply_enabled_strategies,
     apply_risk_preset,
     bot_is_running,
     save_mt5_credentials,
@@ -98,6 +100,14 @@ UI = {
         "risk_hint": "پیش‌فرض ۱٪. سه گزینه: ۰٫۵ / ۱ / ۱٫۵ — سقف امنیتی پروژه حداکثر ۱٪ است؛ انتخاب ۱٫۵٪ عملاً ۱٪ اعمال می‌شود.",
         "risk_save": "اعمال ریسک",
         "symbols_label": "نمادهای فعال",
+        "symbols_hint": "یک یا چند نماد را انتخاب کنید. پیش‌فرض: همه.",
+        "symbols_save": "اعمال نمادها",
+        "strategies_label": "استراتژی‌های فعال",
+        "strategies_hint": "یک یا چند استراتژی را همزمان انتخاب کنید (OR). پیش‌فرض: همه.",
+        "strategies_save": "اعمال استراتژی‌ها",
+        "strategy_smc": "SMC (Order Block / FVG / Sweep)",
+        "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
+        "need_restart": "برای اعمال کامل، ربات را Stop سپس Start کنید.",
         "admin_title": "صدور لایسنس برای مشتری",
         "admin_secret": "رمز ادمین (LICENSE_ADMIN_SECRET)",
         "tier": "پلن اشتراک",
@@ -164,6 +174,14 @@ UI = {
         "risk_hint": "Default 1%. Presets: 0.5 / 1 / 1.5 — project hard-caps at 1%; selecting 1.5% applies 1%.",
         "risk_save": "Apply risk",
         "symbols_label": "Active symbols",
+        "symbols_hint": "Select one or more symbols. Default: all.",
+        "symbols_save": "Apply symbols",
+        "strategies_label": "Active strategies",
+        "strategies_hint": "Select one or more strategies together (OR). Default: all.",
+        "strategies_save": "Apply strategies",
+        "strategy_smc": "SMC (Order Block / FVG / Sweep)",
+        "strategy_liq": "Liquidity + Volume",
+        "need_restart": "Stop then Start the bot for changes to fully apply.",
         "admin_title": "Issue license for customer",
         "admin_secret": "Admin secret (LICENSE_ADMIN_SECRET)",
         "tier": "Plan",
@@ -370,7 +388,63 @@ def page_control(settings) -> None:
     running = bot_is_running()
     st.metric("Bot", _t("bot_running") if running else _t("bot_stopped"))
 
-    st.markdown(f"**{_t('symbols_label')}:** `{', '.join(settings.symbols)}`")
+    from chronoscalp.saas.broker_wizard import KNOWN_STRATEGIES
+    from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+
+    catalog = list(settings.available_symbols) or list(settings.symbols)
+    # Prefer settings order for defaults, then any extra catalog entries
+    default_symbols = [s for s in settings.symbols if s in catalog] or catalog
+    extra = [s for s in catalog if s not in default_symbols]
+    symbol_options = default_symbols + extra
+
+    st.markdown(f"#### {_t('symbols_label')}")
+    st.caption(_t("symbols_hint"))
+    selected_symbols = st.multiselect(
+        _t("symbols_label"),
+        options=symbol_options,
+        default=default_symbols,
+        label_visibility="collapsed",
+        key="active_symbols_ms",
+    )
+    if st.button(_t("symbols_save"), key="save_symbols_btn"):
+        try:
+            saved = apply_active_symbols(selected_symbols, allowed=catalog)
+            get_settings.cache_clear()
+            st.success(", ".join(saved))
+            st.info(_t("need_restart"))
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+    strategy_labels = {
+        "smc_confluence": _t("strategy_smc"),
+        "liquidity_volume": _t("strategy_liq"),
+    }
+    use_smc, use_liq = resolve_enabled_strategies(settings.strategy)
+    default_strats: list[str] = []
+    if use_smc:
+        default_strats.append("smc_confluence")
+    if use_liq:
+        default_strats.append("liquidity_volume")
+    if not default_strats:
+        default_strats = list(KNOWN_STRATEGIES)
+
+    st.markdown(f"#### {_t('strategies_label')}")
+    st.caption(_t("strategies_hint"))
+    selected_strats = st.multiselect(
+        _t("strategies_label"),
+        options=list(KNOWN_STRATEGIES),
+        default=default_strats,
+        format_func=lambda k: strategy_labels.get(k, k),
+        label_visibility="collapsed",
+        key="active_strategies_ms",
+    )
+    if st.button(_t("strategies_save"), key="save_strategies_btn"):
+        saved = apply_enabled_strategies(selected_strats)
+        get_settings.cache_clear()
+        st.success(", ".join(saved) if saved else "(MACD/trend only)")
+        st.info(_t("need_restart"))
+        st.rerun()
 
     st.markdown(f"#### {_t('risk_title')}")
     st.caption(_t("risk_hint"))

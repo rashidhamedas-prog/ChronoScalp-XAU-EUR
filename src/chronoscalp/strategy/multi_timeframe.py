@@ -84,6 +84,41 @@ def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> boo
     return False
 
 
+def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool]:
+    """Return ``(use_smc, use_liquidity_volume)`` from config.
+
+    Prefers ``enabled_strategies`` list when present; otherwise falls back to
+    the boolean flags. Empty list means no confluence filter (MACD/trend only).
+    """
+    enabled = strategy_cfg.get("enabled_strategies")
+    if isinstance(enabled, list):
+        names = {str(x).strip().lower() for x in enabled}
+        return ("smc_confluence" in names, "liquidity_volume" in names)
+    return (
+        bool(strategy_cfg.get("use_smc_confluence", True)),
+        bool(strategy_cfg.get("use_liquidity_volume", False)),
+    )
+
+
+def _confluence_ok(
+    row: pd.Series,
+    direction: TrendDirection,
+    *,
+    use_smc_confluence: bool,
+    use_liquidity_volume: bool,
+) -> tuple[bool, list[str]]:
+    """OR across enabled strategy modes — any confirming mode is enough."""
+    if not use_smc_confluence and not use_liquidity_volume:
+        return True, []
+
+    tags: list[str] = []
+    if use_smc_confluence and _smc_confirms(row, direction):
+        tags.append("smc_confirmed")
+    if use_liquidity_volume and _liquidity_volume_confirms(row, direction):
+        tags.append("liquidity_volume")
+    return bool(tags), tags
+
+
 def generate_entry_signal(
     symbol: str,
     trigger_df: pd.DataFrame,
@@ -97,8 +132,8 @@ def generate_entry_signal(
 ) -> Signal:
     """Entry trigger on the lower timeframe: MACD crossover in the direction
     of `trend`, confirmed by Bollinger Band mean-reversion-into-trend and
-    (optionally) SMC confluence / volume-confirmed liquidity. Stop-loss /
-    take-profit are ATR-based.
+    (optionally) one or more strategy modes (OR). Stop-loss / take-profit
+    are ATR-based.
     """
     if trend == TrendDirection.NEUTRAL or trigger_df.empty or len(trigger_df) < 2:
         return _no_signal(symbol, timeframe)
@@ -117,26 +152,29 @@ def generate_entry_signal(
     reason_parts: list[str] = []
 
     if trend == TrendDirection.BULLISH and macd_cross_up and last["close"] <= last["bb_upper"]:
-        if use_liquidity_volume and not _liquidity_volume_confirms(last, trend):
-            return _no_signal(symbol, timeframe)
-        if use_smc_confluence and not use_liquidity_volume and not _smc_confirms(last, trend):
+        ok, tags = _confluence_ok(
+            last,
+            trend,
+            use_smc_confluence=use_smc_confluence,
+            use_liquidity_volume=use_liquidity_volume,
+        )
+        if not ok:
             return _no_signal(symbol, timeframe)
         signal_type = SignalType.BUY
-        reason_parts = ["trend=bullish", "macd_cross_up"]
+        reason_parts = ["trend=bullish", "macd_cross_up", *tags]
     elif trend == TrendDirection.BEARISH and macd_cross_down and last["close"] >= last["bb_lower"]:
-        if use_liquidity_volume and not _liquidity_volume_confirms(last, trend):
-            return _no_signal(symbol, timeframe)
-        if use_smc_confluence and not use_liquidity_volume and not _smc_confirms(last, trend):
+        ok, tags = _confluence_ok(
+            last,
+            trend,
+            use_smc_confluence=use_smc_confluence,
+            use_liquidity_volume=use_liquidity_volume,
+        )
+        if not ok:
             return _no_signal(symbol, timeframe)
         signal_type = SignalType.SELL
-        reason_parts = ["trend=bearish", "macd_cross_down"]
+        reason_parts = ["trend=bearish", "macd_cross_down", *tags]
     else:
         return _no_signal(symbol, timeframe)
-
-    if use_liquidity_volume:
-        reason_parts.append("liquidity_volume")
-    elif use_smc_confluence:
-        reason_parts.append("smc_confirmed")
 
     entry_price = float(last["close"])
     atr_value = float(last["atr"])
@@ -230,13 +268,14 @@ class MultiTimeframeStrategy:
         if trigger_df is None:
             return _no_signal(symbol, trigger_timeframe)
 
+        use_smc, use_liq = resolve_enabled_strategies(self.strategy_cfg)
         signal = generate_entry_signal(
             symbol=symbol,
             trigger_df=trigger_df,
             trend=trend,
             timeframe=trigger_timeframe,
-            use_smc_confluence=self.strategy_cfg.get("use_smc_confluence", True),
-            use_liquidity_volume=self.strategy_cfg.get("use_liquidity_volume", False),
+            use_smc_confluence=use_smc,
+            use_liquidity_volume=use_liq,
         )
 
         min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))

@@ -199,6 +199,80 @@ def apply_risk_preset(
     return effective
 
 
+KNOWN_STRATEGIES: tuple[str, ...] = ("smc_confluence", "liquidity_volume")
+
+
+def _load_overrides(overrides_path: Path) -> dict:
+    payload: dict = {}
+    if overrides_path.exists():
+        payload = yaml.safe_load(overrides_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(payload, dict):
+            payload = {}
+    return payload
+
+
+def _write_overrides(overrides_path: Path, payload: dict) -> None:
+    overrides_path.parent.mkdir(parents=True, exist_ok=True)
+    overrides_path.write_text(
+        yaml.safe_dump(payload, default_flow_style=False, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def apply_active_symbols(
+    symbols: list[str],
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+    allowed: list[str] | None = None,
+) -> list[str]:
+    """Persist the active symbol list into runtime overrides. Returns cleaned list."""
+    cleaned = [str(s).strip().upper() for s in symbols if str(s).strip()]
+    # Preserve order, drop dupes
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for s in cleaned:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+    if allowed is not None:
+        allowed_set = {str(a).strip().upper() for a in allowed}
+        ordered = [s for s in ordered if s in allowed_set]
+    if not ordered:
+        raise ValueError("At least one symbol must remain selected")
+
+    payload = _load_overrides(overrides_path)
+    payload["symbols"] = ordered
+    _write_overrides(overrides_path, payload)
+    logger.info("Active symbols saved: {}", ",".join(ordered))
+    return ordered
+
+
+def apply_enabled_strategies(
+    strategies: list[str],
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> list[str]:
+    """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only."""
+    known = set(KNOWN_STRATEGIES)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in strategies:
+        name = str(raw).strip().lower()
+        if name in known and name not in seen:
+            seen.add(name)
+            cleaned.append(name)
+
+    payload = _load_overrides(overrides_path)
+    strategy = dict(payload.get("strategy") or {})
+    strategy["enabled_strategies"] = cleaned
+    strategy["use_smc_confluence"] = "smc_confluence" in seen
+    strategy["use_liquidity_volume"] = "liquidity_volume" in seen
+    payload["strategy"] = strategy
+    _write_overrides(overrides_path, payload)
+    logger.info("Enabled strategies saved: {}", ",".join(cleaned) or "(none)")
+    return cleaned
+
+
 def test_oanda_connection(
     api_token: str,
     account_id: str,

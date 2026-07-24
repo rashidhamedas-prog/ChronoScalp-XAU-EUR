@@ -16,8 +16,10 @@ SYMBOL_TO_INSTRUMENT: dict[str, str] = {
     "XAUUSD": "XAU_USD",
     "EURUSD": "EUR_USD",
     "EURJPY": "EUR_JPY",
+    "USDJPY": "USD_JPY",
     "XAUEUR": "XAU_EUR",
     "BTCUSD": "BTC_USD",
+    "ETHUSD": "ETH_USD",
 }
 
 INSTRUMENT_TO_SYMBOL: dict[str, str] = {v: k for k, v in SYMBOL_TO_INSTRUMENT.items()}

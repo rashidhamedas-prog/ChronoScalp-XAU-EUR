@@ -106,3 +106,34 @@ def test_liquidity_volume_gate_allows_vol_confirmed_sweep():
     )
     assert signal.signal_type == SignalType.BUY
     assert "liquidity_volume" in signal.reason
+
+
+def test_both_strategies_or_allows_smc_without_vol():
+    """When SMC + liquidity are both enabled, either mode may confirm (OR)."""
+    df = _macd_cross_up_frame()
+    df.iloc[-1, df.columns.get_loc("liquidity_sweep_low_vol")] = False
+    df["bullish_ob"] = False
+    df["fvg_bullish"] = False
+    df["liquidity_sweep_low"] = False
+    df.iloc[-1, df.columns.get_loc("bullish_ob")] = True
+    signal = generate_entry_signal(
+        "USDJPY",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.M1,
+        use_smc_confluence=True,
+        use_liquidity_volume=True,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert "smc_confirmed" in signal.reason
+
+
+def test_resolve_enabled_strategies_from_list():
+    from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+
+    smc, liq = resolve_enabled_strategies(
+        {"enabled_strategies": ["smc_confluence", "liquidity_volume"]}
+    )
+    assert smc and liq
+    smc2, liq2 = resolve_enabled_strategies({"enabled_strategies": []})
+    assert not smc2 and not liq2
