@@ -72,8 +72,10 @@ def main() -> None:
             macd_slow=ind_cfg.get("macd_slow", 26),
             macd_signal=ind_cfg.get("macd_signal", 9),
             atr_period=ind_cfg.get("atr_period", 14),
+            rvol_period=ind_cfg.get("rvol_period", 20),
         )
-        df = enrich_with_smc(df)
+        rvol_min = float(settings.strategy.get("liquidity_rvol_min", 1.5))
+        df = enrich_with_smc(df, rvol_min=rvol_min)
         data_by_tf[tf] = df
 
     start = datetime.fromisoformat(args.date_from) if args.date_from else None

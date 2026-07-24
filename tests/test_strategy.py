@@ -4,8 +4,12 @@ import numpy as np
 import pandas as pd
 
 from chronoscalp.indicators.technical import enrich_with_indicators
-from chronoscalp.strategy.multi_timeframe import determine_trend, trends_aligned
-from chronoscalp.utils.types import TrendDirection
+from chronoscalp.strategy.multi_timeframe import (
+    determine_trend,
+    generate_entry_signal,
+    trends_aligned,
+)
+from chronoscalp.utils.types import SignalType, Timeframe, TrendDirection
 
 
 def _trending_df(n: int = 120, direction: str = "up") -> pd.DataFrame:
@@ -46,3 +50,59 @@ def test_trends_aligned_requires_unanimous_agreement():
     assert (
         trends_aligned([TrendDirection.NEUTRAL, TrendDirection.NEUTRAL]) == TrendDirection.NEUTRAL
     )
+
+
+def _macd_cross_up_frame() -> pd.DataFrame:
+    """Minimal frame where last bar is a bullish MACD cross with BB/ATR filled."""
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="min", tz="UTC")
+    close = np.array([100.0, 100.1, 100.2, 100.3, 100.4])
+    df = pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 0.2,
+            "low": close - 0.2,
+            "close": close,
+            "macd": [-0.02, -0.01, 0.0, -0.01, 0.02],
+            "signal": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "bb_lower": close - 1,
+            "bb_upper": close + 1,
+            "atr": np.full(n, 0.5),
+            "rsi": np.full(n, 55.0),
+            "histogram": [0.0] * n,
+            "liquidity_sweep_low_vol": [False, False, False, False, True],
+            "liquidity_sweep_high_vol": [False] * n,
+        },
+        index=index,
+    )
+    return df
+
+
+def test_liquidity_volume_gate_blocks_without_vol_sweep():
+    df = _macd_cross_up_frame()
+    df.iloc[-1, df.columns.get_loc("liquidity_sweep_low_vol")] = False
+    signal = generate_entry_signal(
+        "EURJPY",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.M1,
+        use_smc_confluence=False,
+        use_liquidity_volume=True,
+    )
+    assert signal.signal_type == SignalType.NONE
+
+
+def test_liquidity_volume_gate_allows_vol_confirmed_sweep():
+    df = _macd_cross_up_frame()
+    signal = generate_entry_signal(
+        "EURJPY",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.M1,
+        use_smc_confluence=False,
+        use_liquidity_volume=True,
+        atr_stop_multiple=1.5,
+        atr_target_multiple=2.5,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert "liquidity_volume" in signal.reason

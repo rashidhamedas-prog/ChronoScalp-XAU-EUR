@@ -106,6 +106,8 @@ def clone_settings_with_indicators(
 def enrich_data_by_timeframe(
     raw_by_tf: dict[Timeframe, pd.DataFrame],
     ind_cfg: dict[str, Any],
+    *,
+    rvol_min: float = 1.5,
 ) -> dict[Timeframe, pd.DataFrame]:
     """Apply indicator + SMC enrichment using ``ind_cfg``."""
     result: dict[Timeframe, pd.DataFrame] = {}
@@ -120,8 +122,9 @@ def enrich_data_by_timeframe(
             macd_slow=ind_cfg.get("macd_slow", 26),
             macd_signal=ind_cfg.get("macd_signal", 9),
             atr_period=ind_cfg.get("atr_period", 14),
+            rvol_period=ind_cfg.get("rvol_period", 20),
         )
-        result[tf] = enrich_with_smc(enriched)
+        result[tf] = enrich_with_smc(enriched, rvol_min=rvol_min)
     return result
 
 
@@ -169,7 +172,8 @@ def run_grid_search(
 
     for overrides in combos:
         tuned = clone_settings_with_indicators(settings, overrides)
-        data = enrich_data_by_timeframe(raw_by_timeframe, tuned.indicators)
+        rvol_min = float(tuned.strategy.get("liquidity_rvol_min", 1.5))
+        data = enrich_data_by_timeframe(raw_by_timeframe, tuned.indicators, rvol_min=rvol_min)
         bt = run_backtest(
             symbol=symbol,
             data_by_timeframe=data,
@@ -255,7 +259,8 @@ def run_walk_forward(
             continue
 
         tuned = clone_settings_with_indicators(settings, best.params)
-        data = enrich_data_by_timeframe(raw_by_timeframe, tuned.indicators)
+        rvol_min = float(tuned.strategy.get("liquidity_rvol_min", 1.5))
+        data = enrich_data_by_timeframe(raw_by_timeframe, tuned.indicators, rvol_min=rvol_min)
         oos = run_backtest(
             symbol=symbol,
             data_by_timeframe=data,

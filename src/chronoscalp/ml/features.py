@@ -21,6 +21,9 @@ FEATURE_COLUMNS: list[str] = [
     "smc_fvg_bearish",
     "smc_sweep_low",
     "smc_sweep_high",
+    "smc_sweep_low_vol",
+    "smc_sweep_high_vol",
+    "rvol",
     "risk_reward_ratio",
 ]
 
@@ -66,6 +69,9 @@ def extract_setup_features(
         "smc_fvg_bearish": 1.0 if bool(trigger_row.get("fvg_bearish")) else 0.0,
         "smc_sweep_low": 1.0 if bool(trigger_row.get("liquidity_sweep_low")) else 0.0,
         "smc_sweep_high": 1.0 if bool(trigger_row.get("liquidity_sweep_high")) else 0.0,
+        "smc_sweep_low_vol": 1.0 if bool(trigger_row.get("liquidity_sweep_low_vol")) else 0.0,
+        "smc_sweep_high_vol": 1.0 if bool(trigger_row.get("liquidity_sweep_high_vol")) else 0.0,
+        "rvol": float(trigger_row.get("rvol", 1.0) or 1.0),
         "risk_reward_ratio": rr,
     }
 

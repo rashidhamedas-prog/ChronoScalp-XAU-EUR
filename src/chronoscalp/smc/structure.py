@@ -148,14 +148,33 @@ def detect_fair_value_gaps(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def detect_liquidity_sweeps(df: pd.DataFrame, swings: pd.DataFrame) -> pd.DataFrame:
+def detect_liquidity_sweeps(
+    df: pd.DataFrame,
+    swings: pd.DataFrame,
+    *,
+    rvol_min: float = 1.5,
+) -> pd.DataFrame:
     """Liquidity sweep: a wick pierces a prior confirmed swing high/low and
     the candle closes back on the other side of it (rejection), suggesting
     stop-loss/liquidity was grabbed before a reversal.
+
+    When ``rvol`` (or ``tick_volume``) is present, also flags
+    ``liquidity_sweep_*_vol`` for sweeps with relative volume >= ``rvol_min``
+    — volume-confirmed liquidity grab (preferred institutional filter).
     """
     out = df.copy()
     out["liquidity_sweep_high"] = False
     out["liquidity_sweep_low"] = False
+    out["liquidity_sweep_high_vol"] = False
+    out["liquidity_sweep_low_vol"] = False
+
+    if "rvol" in df.columns:
+        rvol = df["rvol"].astype(float)
+    elif "tick_volume" in df.columns:
+        avg = df["tick_volume"].astype(float).rolling(20, min_periods=5).mean()
+        rvol = (df["tick_volume"].astype(float) / avg.replace(0, pd.NA)).fillna(1.0)
+    else:
+        rvol = pd.Series(1.0, index=df.index)
 
     last_swing_high: float | None = None
     last_swing_low: float | None = None
@@ -163,6 +182,7 @@ def detect_liquidity_sweeps(df: pd.DataFrame, swings: pd.DataFrame) -> pd.DataFr
     for i in range(len(df)):
         row = df.iloc[i]
         swing_row = swings.iloc[i]
+        vol_ok = float(rvol.iloc[i]) >= rvol_min
 
         if (
             last_swing_high is not None
@@ -170,12 +190,16 @@ def detect_liquidity_sweeps(df: pd.DataFrame, swings: pd.DataFrame) -> pd.DataFr
             and row["close"] < last_swing_high
         ):
             out.iloc[i, out.columns.get_loc("liquidity_sweep_high")] = True
+            if vol_ok:
+                out.iloc[i, out.columns.get_loc("liquidity_sweep_high_vol")] = True
         if (
             last_swing_low is not None
             and row["low"] < last_swing_low
             and row["close"] > last_swing_low
         ):
             out.iloc[i, out.columns.get_loc("liquidity_sweep_low")] = True
+            if vol_ok:
+                out.iloc[i, out.columns.get_loc("liquidity_sweep_low_vol")] = True
 
         if swing_row.get("swing_high"):
             last_swing_high = row["high"]
@@ -185,20 +209,34 @@ def detect_liquidity_sweeps(df: pd.DataFrame, swings: pd.DataFrame) -> pd.DataFr
     return out
 
 
-def enrich_with_smc(df: pd.DataFrame, left: int = 2, right: int = 2) -> pd.DataFrame:
+def enrich_with_smc(
+    df: pd.DataFrame,
+    left: int = 2,
+    right: int = 2,
+    *,
+    rvol_min: float = 1.5,
+) -> pd.DataFrame:
     """Convenience: run the full SMC detector pipeline and merge all columns."""
     swings = detect_swing_points(df, left, right)
     structure = detect_market_structure(swings)
     order_blocks = detect_order_blocks(df, swings)
     fvgs = detect_fair_value_gaps(df)
-    sweeps = detect_liquidity_sweeps(df, swings)
+    sweeps = detect_liquidity_sweeps(df, swings, rvol_min=rvol_min)
 
     out = df.copy()
     for extra, cols in [
         (structure, ["swing_high", "swing_low", "structure_event", "trend"]),
         (order_blocks, ["bullish_ob", "bearish_ob"]),
         (fvgs, ["fvg_bullish", "fvg_bearish", "fvg_top", "fvg_bottom"]),
-        (sweeps, ["liquidity_sweep_high", "liquidity_sweep_low"]),
+        (
+            sweeps,
+            [
+                "liquidity_sweep_high",
+                "liquidity_sweep_low",
+                "liquidity_sweep_high_vol",
+                "liquidity_sweep_low_vol",
+            ],
+        ),
     ]:
         out = out.join(extra[cols])
     return out

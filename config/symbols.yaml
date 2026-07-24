@@ -22,6 +22,17 @@ EURUSD:
   pip_value_per_lot: 10.0
   news_currency: EUR
 
+EURJPY:
+  pip_size: 0.01          # 1 pip = 0.01 JPY on most MT5 brokers
+  contract_size: 100000
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 2.0
+  # ~¥1000 per pip per lot ≈ $6.5–7 at ~150 USDJPY — verify on your broker
+  pip_value_per_lot: 6.5
+  news_currency: EUR      # primary; JPY high-impact also matters — extend filter later if needed
+
 XAUEUR:
   pip_size: 0.01
   contract_size: 100

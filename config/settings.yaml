@@ -4,6 +4,7 @@
 symbols:
   - "XAUUSD"
   - "EURUSD"
+  - "EURJPY"
   - "BTCUSD"
   # Add "XAUEUR" here too if your broker offers the direct cross instrument.
 
@@ -22,10 +23,15 @@ indicators:
   macd_slow: 26
   macd_signal: 9
   atr_period: 14
+  rvol_period: 20                    # relative volume lookback (tick_volume ÷ avg)
 
 strategy:
   require_trend_alignment: true      # M10 and M5 must agree
   use_smc_confluence: true           # require SMC context (order block / FVG / sweep) alongside indicators
+  # Prefer volume-confirmed liquidity sweeps over generic SMC when true
+  # (sweep of stops + RVOL >= liquidity_rvol_min on the trigger bar).
+  use_liquidity_volume: true
+  liquidity_rvol_min: 1.5
   min_signal_confidence: 0.55
 
 sessions:
@@ -67,6 +73,7 @@ spread_filter:
   max_spread_pips:
     XAUUSD: 35
     EURUSD: 2.0
+    EURJPY: 3.0
     BTCUSD: 50
 
 ml:

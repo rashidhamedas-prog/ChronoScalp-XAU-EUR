@@ -60,6 +60,12 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
 
 
+def relative_volume(series: pd.Series, period: int = 20) -> pd.Series:
+    """Volume ÷ rolling average volume (RVOL). Values > 1.0 = above average."""
+    avg = series.rolling(window=period, min_periods=max(3, period // 2)).mean()
+    return (series / avg.replace(0, pd.NA)).fillna(1.0)
+
+
 def enrich_with_indicators(
     df: pd.DataFrame,
     ema_period: int = 50,
@@ -70,9 +76,11 @@ def enrich_with_indicators(
     macd_slow: int = 26,
     macd_signal: int = 9,
     atr_period: int = 14,
+    rvol_period: int = 20,
 ) -> pd.DataFrame:
     """Return a copy of `df` with all standard indicator columns attached.
     `df` must have columns: open, high, low, close.
+    Optional ``tick_volume`` enables relative volume (``rvol``).
     """
     out = df.copy()
     out[f"ema_{ema_period}"] = ema(out["close"], ema_period)
@@ -85,4 +93,8 @@ def enrich_with_indicators(
     out = out.join(bb_df)
 
     out["atr"] = atr(out, atr_period)
+    if "tick_volume" in out.columns:
+        out["rvol"] = relative_volume(out["tick_volume"].astype(float), rvol_period)
+    else:
+        out["rvol"] = 1.0
     return out

@@ -81,6 +81,15 @@ def test_enrich_with_indicators_adds_expected_columns():
         "bb_upper",
         "bb_lower",
         "atr",
+        "rvol",
     }
     assert expected.issubset(set(enriched.columns))
     assert len(enriched) == len(df)
+
+
+def test_relative_volume_above_average_when_spike():
+    from chronoscalp.indicators.technical import relative_volume
+
+    vol = pd.Series([10.0] * 20 + [50.0])
+    rvol = relative_volume(vol, period=20)
+    assert rvol.iloc[-1] > 2.0

@@ -63,6 +63,53 @@ def test_enrich_with_smc_returns_all_expected_columns():
         "fvg_bearish",
         "liquidity_sweep_high",
         "liquidity_sweep_low",
+        "liquidity_sweep_high_vol",
+        "liquidity_sweep_low_vol",
     }
     assert expected.issubset(set(enriched.columns))
     assert len(enriched) == len(df)
+
+
+def test_volume_confirmed_liquidity_sweep_requires_elevated_rvol():
+    """A low sweep with high RVOL sets liquidity_sweep_low_vol; low RVOL does not."""
+    from chronoscalp.smc.structure import detect_liquidity_sweeps
+
+    n = 10
+    index = pd.date_range("2026-01-01", periods=n, freq="min", tz="UTC")
+    close = np.full(n, 100.0)
+    high = close + 0.5
+    low = close - 0.5
+    # Bar 3 is a confirmed swing low at 98.0
+    low[3] = 98.0
+    close[3] = 98.5
+    high[3] = 99.0
+    # Bar 7 sweeps below that swing low and closes back above
+    sweep_i = 7
+    low[sweep_i] = 97.5
+    high[sweep_i] = 99.5
+    close[sweep_i] = 98.5
+
+    df = pd.DataFrame(
+        {
+            "open": close.copy(),
+            "high": high,
+            "low": low,
+            "close": close,
+            "rvol": np.full(n, 1.0),
+        },
+        index=index,
+    )
+    swings = pd.DataFrame(
+        {"swing_high": [False] * n, "swing_low": [False] * n},
+        index=index,
+    )
+    swings.iloc[3, swings.columns.get_loc("swing_low")] = True
+
+    df_low_vol = detect_liquidity_sweeps(df, swings, rvol_min=1.5)
+    assert bool(df_low_vol["liquidity_sweep_low"].iloc[sweep_i])
+    assert not bool(df_low_vol["liquidity_sweep_low_vol"].iloc[sweep_i])
+
+    df2 = df.copy()
+    df2.loc[df2.index[sweep_i], "rvol"] = 2.0
+    df_hi_vol = detect_liquidity_sweeps(df2, swings, rvol_min=1.5)
+    assert bool(df_hi_vol["liquidity_sweep_low_vol"].iloc[sweep_i])

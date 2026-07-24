@@ -71,19 +71,34 @@ def _smc_confirms(row: pd.Series, direction: TrendDirection) -> bool:
     return False
 
 
+def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> bool:
+    """Volume-confirmed liquidity grab (preferred institutional filter).
+
+    Requires a sweep of stop liquidity with elevated relative volume
+    (``liquidity_sweep_*_vol`` from SMC enrichment).
+    """
+    if direction == TrendDirection.BULLISH:
+        return bool(row.get("liquidity_sweep_low_vol"))
+    if direction == TrendDirection.BEARISH:
+        return bool(row.get("liquidity_sweep_high_vol"))
+    return False
+
+
 def generate_entry_signal(
     symbol: str,
     trigger_df: pd.DataFrame,
     trend: TrendDirection,
     timeframe: Timeframe,
     use_smc_confluence: bool = True,
+    use_liquidity_volume: bool = False,
     min_reward_risk_ratio: float = 1.5,
     atr_stop_multiple: float = 1.5,
     atr_target_multiple: float = 2.5,
 ) -> Signal:
     """Entry trigger on the lower timeframe: MACD crossover in the direction
     of `trend`, confirmed by Bollinger Band mean-reversion-into-trend and
-    (optionally) SMC confluence. Stop-loss/take-profit are ATR-based.
+    (optionally) SMC confluence / volume-confirmed liquidity. Stop-loss /
+    take-profit are ATR-based.
     """
     if trend == TrendDirection.NEUTRAL or trigger_df.empty or len(trigger_df) < 2:
         return _no_signal(symbol, timeframe)
@@ -102,19 +117,25 @@ def generate_entry_signal(
     reason_parts: list[str] = []
 
     if trend == TrendDirection.BULLISH and macd_cross_up and last["close"] <= last["bb_upper"]:
-        if use_smc_confluence and not _smc_confirms(last, trend):
+        if use_liquidity_volume and not _liquidity_volume_confirms(last, trend):
+            return _no_signal(symbol, timeframe)
+        if use_smc_confluence and not use_liquidity_volume and not _smc_confirms(last, trend):
             return _no_signal(symbol, timeframe)
         signal_type = SignalType.BUY
         reason_parts = ["trend=bullish", "macd_cross_up"]
     elif trend == TrendDirection.BEARISH and macd_cross_down and last["close"] >= last["bb_lower"]:
-        if use_smc_confluence and not _smc_confirms(last, trend):
+        if use_liquidity_volume and not _liquidity_volume_confirms(last, trend):
+            return _no_signal(symbol, timeframe)
+        if use_smc_confluence and not use_liquidity_volume and not _smc_confirms(last, trend):
             return _no_signal(symbol, timeframe)
         signal_type = SignalType.SELL
         reason_parts = ["trend=bearish", "macd_cross_down"]
     else:
         return _no_signal(symbol, timeframe)
 
-    if use_smc_confluence:
+    if use_liquidity_volume:
+        reason_parts.append("liquidity_volume")
+    elif use_smc_confluence:
         reason_parts.append("smc_confirmed")
 
     entry_price = float(last["close"])
@@ -215,6 +236,7 @@ class MultiTimeframeStrategy:
             trend=trend,
             timeframe=trigger_timeframe,
             use_smc_confluence=self.strategy_cfg.get("use_smc_confluence", True),
+            use_liquidity_volume=self.strategy_cfg.get("use_liquidity_volume", False),
         )
 
         min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))

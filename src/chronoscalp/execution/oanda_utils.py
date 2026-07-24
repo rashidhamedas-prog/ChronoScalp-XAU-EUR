@@ -15,6 +15,7 @@ OANDA_LIVE_URL = "https://api-fxtrade.oanda.com"
 SYMBOL_TO_INSTRUMENT: dict[str, str] = {
     "XAUUSD": "XAU_USD",
     "EURUSD": "EUR_USD",
+    "EURJPY": "EUR_JPY",
     "XAUEUR": "XAU_EUR",
     "BTCUSD": "BTC_USD",
 }
