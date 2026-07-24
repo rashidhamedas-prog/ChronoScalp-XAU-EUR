@@ -107,6 +107,7 @@ UI = {
         "strategies_save": "اعمال استراتژی‌ها",
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
+        "strategy_scalp": "معامله اسکلپ فوق‌سریع (S15 / Ultra Scalp)",
         "need_restart": "برای اعمال کامل، ربات را Stop سپس Start کنید.",
         "admin_title": "صدور لایسنس برای مشتری",
         "admin_secret": "رمز ادمین (LICENSE_ADMIN_SECRET)",
@@ -181,6 +182,7 @@ UI = {
         "strategies_save": "Apply strategies",
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "Liquidity + Volume",
+        "strategy_scalp": "Ultra Scalp (S15 burst / high frequency)",
         "need_restart": "Stop then Start the bot for changes to fully apply.",
         "admin_title": "Issue license for customer",
         "admin_secret": "Admin secret (LICENSE_ADMIN_SECRET)",
@@ -419,13 +421,16 @@ def page_control(settings) -> None:
     strategy_labels = {
         "smc_confluence": _t("strategy_smc"),
         "liquidity_volume": _t("strategy_liq"),
+        "ultra_scalp": _t("strategy_scalp"),
     }
-    use_smc, use_liq = resolve_enabled_strategies(settings.strategy)
+    use_smc, use_liq, use_scalp = resolve_enabled_strategies(settings.strategy)
     default_strats: list[str] = []
     if use_smc:
         default_strats.append("smc_confluence")
     if use_liq:
         default_strats.append("liquidity_volume")
+    if use_scalp:
+        default_strats.append("ultra_scalp")
     if not default_strats:
         default_strats = list(KNOWN_STRATEGIES)
 

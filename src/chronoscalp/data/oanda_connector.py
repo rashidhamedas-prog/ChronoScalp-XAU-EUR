@@ -72,6 +72,13 @@ class OANDAConnector:
 
     def fetch_ohlcv(self, symbol: str, timeframe: Timeframe, count: int = 500) -> pd.DataFrame:
         """Fetch recent candles for ``symbol`` at ``timeframe``."""
+        if timeframe.is_subminute:
+            logger.warning(
+                "OANDA has no sub-minute candles; falling back to M1 instead of {}",
+                timeframe.value,
+            )
+            return self.fetch_ohlcv(symbol, Timeframe.M1, count=count)
+
         granularity = OANDA_GRANULARITY.get(timeframe)
         if granularity is None:
             m1 = self.fetch_ohlcv(symbol, Timeframe.M1, count=count * timeframe.minutes + 50)
@@ -116,6 +123,13 @@ class OANDAConnector:
         end: datetime,
     ) -> pd.DataFrame:
         """Fetch candles between ``start`` and ``end`` (UTC)."""
+        if timeframe.is_subminute:
+            logger.warning(
+                "OANDA has no sub-minute candles; falling back to M1 instead of {}",
+                timeframe.value,
+            )
+            return self.fetch_ohlcv_range(symbol, Timeframe.M1, start, end)
+
         granularity = OANDA_GRANULARITY.get(timeframe)
         if granularity is None:
             m1 = self.fetch_ohlcv_range(symbol, Timeframe.M1, start, end)

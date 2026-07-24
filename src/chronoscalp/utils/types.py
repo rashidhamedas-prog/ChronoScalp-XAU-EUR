@@ -13,16 +13,40 @@ from enum import StrEnum
 
 
 class Timeframe(StrEnum):
-    """Supported timeframes. Always pass these, never raw strings like "5m"."""
+    """Supported timeframes. Always pass these, never raw strings like "5m".
 
+    Sub-minute ``S15`` / ``S30`` are built from MT5 ticks (API has no native
+    second bars). Use :attr:`seconds` for duration; :attr:`minutes` only for
+    minute+ frames.
+    """
+
+    S15 = "S15"
+    S30 = "S30"
     M1 = "M1"
     M3 = "M3"
     M5 = "M5"
     M10 = "M10"
 
     @property
+    def seconds(self) -> int:
+        return {
+            "S15": 15,
+            "S30": 30,
+            "M1": 60,
+            "M3": 180,
+            "M5": 300,
+            "M10": 600,
+        }[self.value]
+
+    @property
+    def is_subminute(self) -> bool:
+        return self.seconds < 60
+
+    @property
     def minutes(self) -> int:
-        return {"M1": 1, "M3": 3, "M5": 5, "M10": 10}[self.value]
+        if self.is_subminute:
+            raise ValueError(f"{self.value} is sub-minute; use Timeframe.seconds")
+        return self.seconds // 60
 
 
 class TrendDirection(StrEnum):

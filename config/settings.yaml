@@ -14,6 +14,11 @@ symbols:
 timeframes:
   higher_trend: ["M10", "M5"]   # must agree before any trade is permitted
   entry_trigger: ["M3", "M1"]   # entry timing / trigger confirmation
+  # Ultra-scalp (sub-minute): S15 bars built from MT5 ticks; M5+M1 micro-trend
+  ultra_scalp:
+    higher_trend: ["M5", "M1"]
+    entry_trigger: ["S15"]
+    poll_interval_seconds: 2
 
 indicators:
   ema_period_trend: 50
@@ -29,15 +34,21 @@ indicators:
   rvol_period: 20                    # relative volume lookback (tick_volume ÷ avg)
 
 strategy:
-  require_trend_alignment: true      # M10 and M5 must agree
+  require_trend_alignment: true      # M10 and M5 must agree (or M5/M1 in ultra-scalp)
   # Multi-select modes (panel + overrides). When several are on, any one may confirm (OR).
   enabled_strategies:
     - smc_confluence
     - liquidity_volume
+    - ultra_scalp
   use_smc_confluence: true           # kept in sync with enabled_strategies
   use_liquidity_volume: true         # volume-confirmed liquidity sweep (RVOL gate)
+  use_ultra_scalp: true              # high-frequency S15 impulse scalp
   liquidity_rvol_min: 1.5
   min_signal_confidence: 0.55
+  ultra_scalp:
+    atr_stop_multiple: 1.0           # still enforces min 1:1.5 with target below
+    atr_target_multiple: 1.5
+    rvol_min: 1.2
 
 sessions:
   timezone: "GMT"

@@ -44,13 +44,14 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     assert data["symbols"] == ["ETHUSD", "USDJPY"]
 
     modes = apply_enabled_strategies(
-        ["liquidity_volume", "smc_confluence", "nope"],
+        ["liquidity_volume", "smc_confluence", "ultra_scalp", "nope"],
         overrides_path=overrides,
     )
-    assert modes == ["liquidity_volume", "smc_confluence"]
+    assert modes == ["liquidity_volume", "smc_confluence", "ultra_scalp"]
     data2 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
     assert data2["strategy"]["use_smc_confluence"] is True
     assert data2["strategy"]["use_liquidity_volume"] is True
+    assert data2["strategy"]["use_ultra_scalp"] is True
     assert data2["symbols"] == ["ETHUSD", "USDJPY"]  # preserved
 
 

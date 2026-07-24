@@ -49,6 +49,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] BTCUSD multi-symbol (24/7 session bypass) + risk presets 0.5%/1%/1.5% with hard 1% ceiling (`config/settings.yaml`, `risk/position_sizing.py`)
 - [x] EURJPY multi-symbol + volume-confirmed liquidity strategy (`use_liquidity_volume`, RVOL + `liquidity_sweep_*_vol`)
 - [x] USDJPY + ETHUSD symbols; panel multi-select for symbols & strategies (default all on; OR confluence)
+- [x] Ultra-scalp mode (S15 from MT5 ticks, impulse+RVOL entry, panel strategy option)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
 - [x] Windows VPS one-shot setup: `scripts/windows_vps_setup.ps1` (MT5 + paper path)
