@@ -40,6 +40,49 @@ _TIMEFRAME_MAP_NAMES = {
 }
 
 
+def ticks_to_ohlcv(ticks: pd.DataFrame, seconds: int) -> pd.DataFrame:
+    """Aggregate MT5 tick rows into OHLCV bars of ``seconds`` length.
+
+    Expects columns ``time`` (datetime index or column) and price via
+    ``last`` / ``bid`` / ``ask``. Volume uses ``volume`` when present.
+    """
+    if ticks is None or len(ticks) == 0:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "tick_volume"])
+
+    df = ticks.copy()
+    if "time" in df.columns:
+        df["time"] = pd.to_datetime(df["time"], utc=True)
+        df = df.set_index("time")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("ticks must be indexed by time")
+
+    if "last" in df.columns and df["last"].fillna(0).ne(0).any():
+        price = df["last"].replace(0, pd.NA).ffill()
+    elif "bid" in df.columns and "ask" in df.columns:
+        price = (df["bid"].astype(float) + df["ask"].astype(float)) / 2.0
+    elif "bid" in df.columns:
+        price = df["bid"].astype(float)
+    else:
+        raise ValueError("ticks need last or bid/ask columns")
+
+    price = price.ffill().dropna()
+    out = pd.DataFrame({"price": price}, index=price.index)
+    if "volume" in df.columns:
+        out["tick_volume"] = df["volume"].reindex(out.index).fillna(1).astype(float)
+    else:
+        out["tick_volume"] = 1.0
+
+    rule = f"{int(seconds)}s"
+    agg = out.resample(rule).agg(
+        open=("price", "first"),
+        high=("price", "max"),
+        low=("price", "min"),
+        close=("price", "last"),
+        tick_volume=("tick_volume", "sum"),
+    )
+    return agg.dropna(subset=["open", "high", "low", "close"])
+
+
 class MT5Connector:
     """Thin wrapper around the MetaTrader5 package. All MT5 SDK calls are
     isolated to this class + execution/mt5_broker.py — nothing else in the
@@ -88,9 +131,16 @@ class MT5Connector:
         self._connected = False
 
     def fetch_ohlcv(self, symbol: str, timeframe: Timeframe, count: int = 500) -> pd.DataFrame:
-        """Fetch the most recent `count` completed bars for symbol/timeframe."""
+        """Fetch the most recent `count` completed bars for symbol/timeframe.
+
+        Sub-minute frames (``S15`` / ``S30``) are aggregated from ticks because
+        the MetaTrader5 Python API has no native second-bar timeframes.
+        """
         _require_windows()
         import MetaTrader5 as mt5
+
+        if timeframe.is_subminute:
+            return self._fetch_ohlcv_from_ticks(symbol, timeframe, count)
 
         mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
         rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
@@ -110,6 +160,41 @@ class MT5Connector:
                 if c in df.columns
             ]
         ]
+
+    def _fetch_ohlcv_from_ticks(
+        self, symbol: str, timeframe: Timeframe, count: int
+    ) -> pd.DataFrame:
+        """Build sub-minute OHLCV from recent ticks."""
+        from datetime import timedelta
+
+        import MetaTrader5 as mt5
+
+        seconds = timeframe.seconds
+        # Extra headroom: thin markets / gaps need more wall-clock than count*seconds
+        window = timedelta(seconds=max(seconds * count * 3, 900))
+        from datetime import UTC as _UTC
+
+        end = datetime.now(tz=_UTC)
+        start = end - window
+        ticks = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
+        if ticks is None or len(ticks) == 0:
+            logger.warning(
+                "No ticks for {} {}: {}", symbol, timeframe.value, mt5.last_error()
+            )
+            return pd.DataFrame(columns=OHLCV_COLUMNS).set_index(
+                pd.DatetimeIndex([], tz="UTC", name="time")
+            )
+
+        tdf = pd.DataFrame(ticks)
+        # MT5 tick time is seconds; time_msc is milliseconds
+        if "time_msc" in tdf.columns:
+            tdf["time"] = pd.to_datetime(tdf["time_msc"], unit="ms", utc=True)
+        else:
+            tdf["time"] = pd.to_datetime(tdf["time"], unit="s", utc=True)
+        bars = ticks_to_ohlcv(tdf, seconds)
+        if bars.empty:
+            return bars
+        return bars.tail(count)
 
     def fetch_ohlcv_range(
         self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime
@@ -208,7 +293,7 @@ def clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 def resample_ohlcv(df: pd.DataFrame, target: Timeframe) -> pd.DataFrame:
     """Resample a finer-grained OHLCV DataFrame up to a coarser timeframe,
     e.g. build M5 bars from M1 data when a broker doesn't offer M5 directly."""
-    rule = f"{target.minutes}min"
+    rule = f"{target.seconds}s" if target.is_subminute else f"{target.minutes}min"
     agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
     if "tick_volume" in df.columns:
         agg["tick_volume"] = "sum"

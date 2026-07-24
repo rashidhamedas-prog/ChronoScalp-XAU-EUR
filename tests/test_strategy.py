@@ -131,9 +131,45 @@ def test_both_strategies_or_allows_smc_without_vol():
 def test_resolve_enabled_strategies_from_list():
     from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-    smc, liq = resolve_enabled_strategies(
-        {"enabled_strategies": ["smc_confluence", "liquidity_volume"]}
+    smc, liq, scalp = resolve_enabled_strategies(
+        {"enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"]}
     )
-    assert smc and liq
-    smc2, liq2 = resolve_enabled_strategies({"enabled_strategies": []})
-    assert not smc2 and not liq2
+    assert smc and liq and scalp
+    smc2, liq2, scalp2 = resolve_enabled_strategies({"enabled_strategies": []})
+    assert not smc2 and not liq2 and not scalp2
+
+
+def test_ultra_scalp_impulse_buy():
+    from chronoscalp.strategy.multi_timeframe import generate_ultra_scalp_signal
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.array([100.0, 100.1, 100.2, 100.3, 101.0])
+    open_ = close - 0.4
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 0.1,
+            "low": open_ - 0.1,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 1.5),
+            "rsi": np.full(n, 55.0),
+            "macd": np.zeros(n),
+            "histogram": np.zeros(n),
+            "bb_upper": close + 2,
+            "bb_lower": close - 2,
+        },
+        index=index,
+    )
+    signal = generate_ultra_scalp_signal(
+        "XAUUSD",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.S15,
+        use_smc_confluence=False,
+        use_liquidity_volume=False,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert "ultra_scalp" in signal.reason
+    assert signal.risk_reward_ratio >= 1.5

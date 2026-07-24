@@ -26,6 +26,8 @@ INSTRUMENT_TO_SYMBOL: dict[str, str] = {v: k for k, v in SYMBOL_TO_INSTRUMENT.it
 
 # OANDA native granularities (M3 is resampled from M1 in the connector)
 OANDA_GRANULARITY: dict[Timeframe, str | None] = {
+    Timeframe.S15: None,  # no native; connector falls back to M1
+    Timeframe.S30: None,
     Timeframe.M1: "M1",
     Timeframe.M3: None,  # resample from M1
     Timeframe.M5: "M5",

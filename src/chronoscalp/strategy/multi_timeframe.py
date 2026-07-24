@@ -84,8 +84,8 @@ def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> boo
     return False
 
 
-def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool]:
-    """Return ``(use_smc, use_liquidity_volume)`` from config.
+def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool]:
+    """Return ``(use_smc, use_liquidity_volume, use_ultra_scalp)`` from config.
 
     Prefers ``enabled_strategies`` list when present; otherwise falls back to
     the boolean flags. Empty list means no confluence filter (MACD/trend only).
@@ -93,10 +93,15 @@ def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool]:
     enabled = strategy_cfg.get("enabled_strategies")
     if isinstance(enabled, list):
         names = {str(x).strip().lower() for x in enabled}
-        return ("smc_confluence" in names, "liquidity_volume" in names)
+        return (
+            "smc_confluence" in names,
+            "liquidity_volume" in names,
+            "ultra_scalp" in names,
+        )
     return (
         bool(strategy_cfg.get("use_smc_confluence", True)),
         bool(strategy_cfg.get("use_liquidity_volume", False)),
+        bool(strategy_cfg.get("use_ultra_scalp", False)),
     )
 
 
@@ -117,6 +122,109 @@ def _confluence_ok(
     if use_liquidity_volume and _liquidity_volume_confirms(row, direction):
         tags.append("liquidity_volume")
     return bool(tags), tags
+
+
+def generate_ultra_scalp_signal(
+    symbol: str,
+    trigger_df: pd.DataFrame,
+    trend: TrendDirection,
+    timeframe: Timeframe,
+    use_smc_confluence: bool = False,
+    use_liquidity_volume: bool = False,
+    min_reward_risk_ratio: float = 1.5,
+    atr_stop_multiple: float = 1.0,
+    atr_target_multiple: float = 1.5,
+    rvol_min: float = 1.2,
+) -> Signal:
+    """High-frequency scalp entry on sub-minute (or M1 fallback) bars.
+
+    Industry-style short-burst filters (still hard-capped at min 1:1.5 R:R):
+    - Micro-trend from higher TFs must be non-neutral
+    - Impulse candle in trend direction (body ≥ 0.45×ATR)
+    - Relative volume ≥ ``rvol_min``
+    - Optional SMC / liquidity-volume confluence (OR)
+    """
+    if trend == TrendDirection.NEUTRAL or trigger_df.empty or len(trigger_df) < 2:
+        return _no_signal(symbol, timeframe)
+
+    last = trigger_df.iloc[-1]
+    prev = trigger_df.iloc[-2]
+    required = ["open", "high", "low", "close", "atr"]
+    if any(pd.isna(last.get(c)) for c in required):
+        return _no_signal(symbol, timeframe)
+
+    atr_value = float(last["atr"])
+    if atr_value <= 0:
+        return _no_signal(symbol, timeframe)
+
+    body = abs(float(last["close"]) - float(last["open"]))
+    rvol = float(last.get("rvol", 1.0) or 1.0)
+    impulse = body >= 0.45 * atr_value and rvol >= rvol_min
+
+    signal_type = SignalType.NONE
+    if (
+        trend == TrendDirection.BULLISH
+        and impulse
+        and last["close"] > last["open"]
+        and last["close"] >= prev["close"]
+    ):
+        signal_type = SignalType.BUY
+    elif (
+        trend == TrendDirection.BEARISH
+        and impulse
+        and last["close"] < last["open"]
+        and last["close"] <= prev["close"]
+    ):
+        signal_type = SignalType.SELL
+    else:
+        return _no_signal(symbol, timeframe)
+
+    ok, tags = _confluence_ok(
+        last,
+        trend,
+        use_smc_confluence=use_smc_confluence,
+        use_liquidity_volume=use_liquidity_volume,
+    )
+    if not ok:
+        return _no_signal(symbol, timeframe)
+
+    entry_price = float(last["close"])
+    if signal_type == SignalType.BUY:
+        stop_loss = entry_price - atr_stop_multiple * atr_value
+        take_profit = entry_price + atr_target_multiple * atr_value
+    else:
+        stop_loss = entry_price + atr_stop_multiple * atr_value
+        take_profit = entry_price - atr_target_multiple * atr_value
+
+    reason_parts = [
+        "ultra_scalp",
+        f"trend={trend.value}",
+        f"rvol={rvol:.2f}",
+        *tags,
+    ]
+    signal = Signal(
+        symbol=symbol,
+        signal_type=signal_type,
+        timestamp=last.name if isinstance(last.name, datetime) else datetime.utcnow(),
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        confidence=score_setup_probability(
+            extract_setup_features(
+                trigger_row=last,
+                trend=trend,
+                signal_type=signal_type,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+        ),
+        reason=", ".join(reason_parts),
+        timeframe=timeframe,
+    )
+    if signal.risk_reward_ratio < min_reward_risk_ratio:
+        return _no_signal(symbol, timeframe)
+    return signal
 
 
 def generate_entry_signal(
@@ -268,15 +376,29 @@ class MultiTimeframeStrategy:
         if trigger_df is None:
             return _no_signal(symbol, trigger_timeframe)
 
-        use_smc, use_liq = resolve_enabled_strategies(self.strategy_cfg)
-        signal = generate_entry_signal(
-            symbol=symbol,
-            trigger_df=trigger_df,
-            trend=trend,
-            timeframe=trigger_timeframe,
-            use_smc_confluence=use_smc,
-            use_liquidity_volume=use_liq,
-        )
+        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
+        scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
+        if use_scalp:
+            signal = generate_ultra_scalp_signal(
+                symbol=symbol,
+                trigger_df=trigger_df,
+                trend=trend,
+                timeframe=trigger_timeframe,
+                use_smc_confluence=use_smc,
+                use_liquidity_volume=use_liq,
+                atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
+                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.5)),
+                rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
+            )
+        else:
+            signal = generate_entry_signal(
+                symbol=symbol,
+                trigger_df=trigger_df,
+                trend=trend,
+                timeframe=trigger_timeframe,
+                use_smc_confluence=use_smc,
+                use_liquidity_volume=use_liq,
+            )
 
         min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))
         if (

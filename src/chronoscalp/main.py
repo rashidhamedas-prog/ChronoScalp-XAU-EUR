@@ -50,10 +50,10 @@ from chronoscalp.orchestration.state_store import TradingStateStore
 from chronoscalp.orchestration.trade_journal import TradeJournal, journal_path_for
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
-from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, resolve_enabled_strategies
 from chronoscalp.utils.types import SignalType, Timeframe
 
-ALL_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10]
+STANDARD_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10]
 
 
 class TradingBot:
@@ -69,10 +69,37 @@ class TradingBot:
 
         self.settings = settings
         self.mode = mode
-        self.higher_timeframes = [
-            Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]
-        ]
-        self.trigger_timeframe = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
+        _, _, use_ultra_scalp = resolve_enabled_strategies(settings.strategy)
+        self.use_ultra_scalp = use_ultra_scalp
+        scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
+        if use_ultra_scalp:
+            higher_raw = scalp_tf.get("higher_trend") or ["M5", "M1"]
+            trigger_raw = scalp_tf.get("entry_trigger") or ["S15"]
+            self.higher_timeframes = [Timeframe(tf) for tf in higher_raw]
+            self.trigger_timeframe = Timeframe(trigger_raw[-1])
+            self.poll_interval = int(
+                scalp_tf.get(
+                    "poll_interval_seconds",
+                    settings.execution.get("poll_interval_seconds", 2),
+                )
+            )
+            self.fetch_timeframes = list(
+                dict.fromkeys([*self.higher_timeframes, self.trigger_timeframe, Timeframe.M1])
+            )
+            logger.info(
+                "Ultra-scalp mode ON: higher={} trigger={} poll={}s",
+                [t.value for t in self.higher_timeframes],
+                self.trigger_timeframe.value,
+                self.poll_interval,
+            )
+        else:
+            self.higher_timeframes = [
+                Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]
+            ]
+            self.trigger_timeframe = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
+            self.poll_interval = int(settings.execution.get("poll_interval_seconds", 5))
+            self.fetch_timeframes = list(STANDARD_TIMEFRAMES)
+
         self.trade_on_bar_close = bool(settings.execution.get("trade_on_bar_close_only", True))
         self.max_concurrent = int(settings.risk.get("max_concurrent_positions", 2))
         self.state_dir = Path(settings.execution.get("state_dir", "data/state"))
@@ -155,7 +182,7 @@ class TradingBot:
         self._reconcile_state_with_broker()
         self._last_reconcile_at = datetime.now(tz=UTC)
 
-        poll_seconds = int(self.settings.execution.get("poll_interval_seconds", 5))
+        poll_seconds = int(self.poll_interval)
         logger.info(
             "ChronoScalp started in {} mode (data={}, broker={}), polling every {}s (bar_close_only={})",
             self.mode,
@@ -375,7 +402,7 @@ class TradingBot:
     def _fetch_and_enrich(self, symbol: str) -> dict[Timeframe, pd.DataFrame]:
         ind_cfg = self.settings.indicators
         result = {}
-        for tf in ALL_TIMEFRAMES:
+        for tf in self.fetch_timeframes:
             df = self.connector.fetch_ohlcv(symbol, tf, count=300)
             if df.empty:
                 continue
