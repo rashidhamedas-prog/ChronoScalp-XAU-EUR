@@ -87,6 +87,11 @@ class Settings:
         return list(self.raw.get("symbols", []))
 
     @property
+    def available_symbols(self) -> list[str]:
+        """All symbols with a contract spec (panel multiselect catalog)."""
+        return sorted(self.symbols_raw.keys())
+
+    @property
     def risk(self) -> dict[str, Any]:
         return dict(self.raw.get("risk", {}))
 

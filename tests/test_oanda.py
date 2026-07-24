@@ -25,6 +25,8 @@ def test_to_instrument_mapping():
     assert to_instrument("EURUSD") == "EUR_USD"
     assert to_instrument("XAUUSD") == "XAU_USD"
     assert to_instrument("EURJPY") == "EUR_JPY"
+    assert to_instrument("USDJPY") == "USD_JPY"
+    assert to_instrument("ETHUSD") == "ETH_USD"
 
 
 def test_to_instrument_unknown_raises():

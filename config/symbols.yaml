@@ -33,6 +33,16 @@ EURJPY:
   pip_value_per_lot: 6.5
   news_currency: EUR      # primary; JPY high-impact also matters — extend filter later if needed
 
+USDJPY:
+  pip_size: 0.01
+  contract_size: 100000
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 1.5
+  pip_value_per_lot: 6.5
+  news_currency: USD
+
 XAUEUR:
   pip_size: 0.01
   contract_size: 100
@@ -51,5 +61,16 @@ BTCUSD:
   lot_step: 0.01
   max_lot: 10
   typical_spread_pips: 20
+  pip_value_per_lot: 1.0
+  news_currency: USD
+
+# Ethereum CFD — verify pip/contract against your MT5 broker symbol card.
+ETHUSD:
+  pip_size: 0.01
+  contract_size: 1
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 50
+  typical_spread_pips: 25
   pip_value_per_lot: 1.0
   news_currency: USD
