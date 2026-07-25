@@ -118,6 +118,15 @@ class DailyRiskTracker:
         self._roll_over_if_new_day(at or datetime.utcnow())
         self._realized_pnl_today += pnl
 
+    def reset(self, *, starting_equity: float | None = None) -> None:
+        """Zero today's realized P&L (manual override / demo unlock)."""
+        self._current_date = datetime.utcnow().date()
+        self._realized_pnl_today = 0.0
+        if starting_equity is not None:
+            self.starting_equity = float(starting_equity)
+        self._last_limit_log_at = 0.0
+        logger.info("Daily risk tracker reset (realized_pnl_today=0)")
+
     def _roll_over_if_new_day(self, at: datetime) -> None:
         if at.date() != self._current_date:
             self._current_date = at.date()
