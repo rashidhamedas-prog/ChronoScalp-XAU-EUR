@@ -8,10 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from dotenv import dotenv_values
+from dotenv import dotenv_values  # noqa: E402
 
-from chronoscalp.telegram.control_bot import HELP_TEXT, MAIN_KEYBOARD, TelegramControlBot
-
+from chronoscalp.telegram.control_bot import (  # noqa: E402
+    HELP_TEXT,
+    MAIN_KEYBOARD,
+    TelegramControlBot,
+)
 
 def main() -> None:
     env = dotenv_values(ROOT / ".env")
