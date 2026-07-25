@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from urllib import error, request
 
-DEFAULT_BASE = "http://45.90.98.99:8510"
+DEFAULT_BASE = "http://127.0.0.1:8510"
 DEFAULT_TOKEN = "Hamed95240"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".chronoscalp_desktop.json")
 
@@ -73,7 +73,7 @@ class ApiClient:
             },
         )
         try:
-            with self._opener().open(req, timeout=20) as resp:
+            with self._opener().open(req, timeout=45) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except error.HTTPError as exc:
