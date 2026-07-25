@@ -46,9 +46,13 @@ strategy:
   liquidity_rvol_min: 1.5
   min_signal_confidence: 0.55
   ultra_scalp:
-    atr_stop_multiple: 1.0           # still enforces min 1:1.5 with target below
-    atr_target_multiple: 1.5
+    # Deliberate scalp exception: 1:1 R:R allowed ONLY for ultra_scalp.
+    # All other strategies still use risk.min_reward_risk_ratio (1.5).
+    atr_stop_multiple: 1.0
+    atr_target_multiple: 1.0
+    min_reward_risk_ratio: 1.0
     rvol_min: 1.2
+
 
 sessions:
   timezone: "GMT"
@@ -124,6 +128,10 @@ resilience:
   reconcile_interval_seconds: 60  # periodic broker ↔ state sync (0 = startup only)
   alert_on_daily_loss_limit: true
   alert_on_connection_loss: true
+  # If market data stays empty this long, reconnect + alert (avoids silent 24h stalls).
+  data_starvation_alert_seconds: 300
+  skip_heartbeat_seconds: 300
+
 
 licensing:
   require_license: true           # set false only for local open-source / self use without keys

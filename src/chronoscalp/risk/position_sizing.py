@@ -155,11 +155,25 @@ class RiskManager:
             starting_equity=starting_equity,
         )
 
-    def validate_signal(self, signal: Signal, current_spread_pips: float) -> bool:
+    def validate_signal(
+        self,
+        signal: Signal,
+        current_spread_pips: float,
+        *,
+        min_reward_risk_ratio: float | None = None,
+    ) -> bool:
         if self.daily_tracker.daily_loss_limit_hit():
             return False
 
-        min_rr = self.risk_cfg.get("min_reward_risk_ratio", 1.5)
+        # Default hard floor remains 1.5; callers may pass a scoped override
+        # (e.g. ultra_scalp min 1.0) without lowering the global risk config.
+        min_rr = (
+            float(min_reward_risk_ratio)
+            if min_reward_risk_ratio is not None
+            else float(self.risk_cfg.get("min_reward_risk_ratio", 1.5))
+        )
+        if min_rr < 1.0:
+            min_rr = 1.0
         if not passes_reward_risk_filter(signal, min_rr):
             logger.debug(
                 "Signal rejected: R:R {:.2f} < min {:.2f}", signal.risk_reward_ratio, min_rr

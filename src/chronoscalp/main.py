@@ -147,6 +147,13 @@ class TradingBot:
         self._kill_switch_alerted = False
         self._skip_counts: dict[str, int] = {}
         self._last_skip_log_at: datetime | None = None
+        self._data_starvation_alerted = False
+        self._last_trade_opened_at: datetime | None = None
+        self._started_at: datetime | None = None
+        self._skip_heartbeat_seconds = int(resilience_cfg.get("skip_heartbeat_seconds", 300))
+        self._data_starvation_alert_seconds = int(
+            resilience_cfg.get("data_starvation_alert_seconds", 300)
+        )
 
         self.open_tickets: dict[str, int] = dict(self.state_store.state.open_tickets)
         self.bar_gate = BarCloseGate()
@@ -183,6 +190,7 @@ class TradingBot:
 
         self._reconcile_state_with_broker()
         self._last_reconcile_at = datetime.now(tz=UTC)
+        self._started_at = self._last_reconcile_at
 
         poll_seconds = int(self.poll_interval)
         logger.info(
@@ -264,15 +272,51 @@ class TradingBot:
         if self._last_skip_log_at is None:
             self._last_skip_log_at = now
             return
-        if (now - self._last_skip_log_at).total_seconds() < 300:
+        if (now - self._last_skip_log_at).total_seconds() < self._skip_heartbeat_seconds:
             return
         if self._skip_counts:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(self._skip_counts.items()))
-            logger.info("Entry skip heartbeat (5m): {}", summary)
+            logger.info("Entry skip heartbeat ({}s): {}", self._skip_heartbeat_seconds, summary)
         else:
-            logger.info("Entry skip heartbeat (5m): no skips recorded")
+            logger.info("Entry skip heartbeat ({}s): no skips recorded", self._skip_heartbeat_seconds)
         self._skip_counts.clear()
         self._last_skip_log_at = now
+
+    def _check_data_health(self, now: datetime) -> None:
+        """Reconnect + alert when market data has been empty too long."""
+        ensure = getattr(self.connector, "ensure_connected", None)
+        if callable(ensure):
+            ensure()
+
+        last_ok = getattr(self.connector, "last_successful_fetch_at", None)
+        if last_ok is None:
+            if self._started_at is None:
+                return
+            age = (now - self._started_at).total_seconds()
+        else:
+            age = (now - last_ok).total_seconds()
+
+        if age < self._data_starvation_alert_seconds:
+            self._data_starvation_alerted = False
+            return
+        if self._data_starvation_alerted:
+            return
+        self._data_starvation_alerted = True
+        msg = (
+            f"No successful market-data fetch for {int(age)}s "
+            f"(threshold={self._data_starvation_alert_seconds}s). "
+            "Check MT5 terminal login / Market Watch symbols."
+        )
+        logger.error(msg)
+        self.alerts.notify("Data starvation", msg, AlertLevel.ERROR)
+        if callable(ensure):
+            ensure()
+
+    def _min_rr_for_signal(self, signal) -> float:
+        if "ultra_scalp" in (signal.reason or ""):
+            scalp = self.settings.strategy.get("ultra_scalp") or {}
+            return max(1.0, float(scalp.get("min_reward_risk_ratio", 1.0)))
+        return max(1.0, float(self.settings.risk.get("min_reward_risk_ratio", 1.5)))
 
     def _persist_state(self) -> None:
         self.state_store.state.open_tickets = dict(self.open_tickets)
@@ -285,6 +329,7 @@ class TradingBot:
     def tick(self) -> None:
         now = datetime.now(tz=UTC)
         self._maybe_reconcile(now)
+        self._check_data_health(now)
         tick_had_failure = False
         failure_context = ""
 
@@ -391,7 +436,11 @@ class TradingBot:
                     self._note_skip(f"{symbol}:dedup")
                     continue
 
-                if not self.risk_manager.validate_signal(signal, spread_pips):
+                if not self.risk_manager.validate_signal(
+                    signal,
+                    spread_pips,
+                    min_reward_risk_ratio=self._min_rr_for_signal(signal),
+                ):
                     self._note_skip(f"{symbol}:risk_reject")
                     continue
 
@@ -407,6 +456,7 @@ class TradingBot:
                 self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
                 self._persist_state()
+                self._last_trade_opened_at = now
                 self.alerts.notify(
                     "Trade opened",
                     (
