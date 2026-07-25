@@ -211,3 +211,127 @@ def test_ultra_scalp_allows_one_to_one_rr():
     )
     assert signal.signal_type == SignalType.BUY
     assert abs(signal.risk_reward_ratio - 1.0) < 1e-9
+
+
+def test_ultra_scalp_trend_primary_allows_neutral_m1():
+    from chronoscalp.strategy.multi_timeframe import ultra_scalp_trend
+
+    assert (
+        ultra_scalp_trend(
+            [TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="primary"
+        )
+        == TrendDirection.BULLISH
+    )
+    assert (
+        ultra_scalp_trend(
+            [TrendDirection.BULLISH, TrendDirection.BEARISH], mode="primary"
+        )
+        == TrendDirection.NEUTRAL
+    )
+    assert (
+        ultra_scalp_trend(
+            [TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="strict"
+        )
+        == TrendDirection.NEUTRAL
+    )
+
+
+def test_ultra_scalp_skips_smc_when_confluence_not_required():
+    """Regression: enabled SMC must not silently block every S15 impulse."""
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.array([100.0, 100.1, 100.2, 100.3, 101.0])
+    open_ = close - 0.4
+    trigger = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 0.1,
+            "low": open_ - 0.1,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 1.2),
+            "rsi": np.full(n, 55.0),
+            "macd": np.zeros(n),
+            "histogram": np.zeros(n),
+            "bb_upper": close + 2,
+            "bb_lower": close - 2,
+            "bullish_ob": False,
+            "fvg_bullish": False,
+            "liquidity_sweep_low": False,
+            "liquidity_sweep_low_vol": False,
+        },
+        index=index,
+    )
+    # Trending M5 (primary) + neutral-looking M1 is enough in primary mode.
+    m5 = _trending_df(direction="up")
+    # Force M1 last bars toward flat/neutral —
+    # evaluate uses determine_trend; use a flat frame for M1.
+    flat_close = np.full(80, 100.0)
+    m1_flat = enrich_with_indicators(
+        pd.DataFrame(
+            {
+                "open": flat_close,
+                "high": flat_close + 0.05,
+                "low": flat_close - 0.05,
+                "close": flat_close,
+            },
+            index=pd.date_range("2026-01-01", periods=80, freq="min", tz="UTC"),
+        ),
+        ema_period=50,
+    )
+    strategy = MultiTimeframeStrategy(
+        {
+            "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
+            "ultra_scalp": {
+                "require_confluence": False,
+                "trend_mode": "primary",
+                "rvol_min": 1.05,
+                "impulse_body_atr_multiple": 0.35,
+                "min_reward_risk_ratio": 1.0,
+                "atr_stop_multiple": 1.0,
+                "atr_target_multiple": 1.0,
+            },
+            "min_signal_confidence": 0.0,
+        },
+        {"ema_period_trend": 50},
+    )
+    signal = strategy.evaluate(
+        "BTCUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1_flat, Timeframe.S15: trigger},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert "ultra_scalp" in signal.reason
+
+
+def test_ultra_scalp_reports_weak_impulse_reason():
+    from chronoscalp.strategy.multi_timeframe import generate_ultra_scalp_signal
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.array([100.0, 100.1, 100.2, 100.3, 100.35])
+    open_ = close - 0.01  # tiny body vs atr=0.5
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 0.1,
+            "low": open_ - 0.1,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 2.0),
+        },
+        index=index,
+    )
+    signal = generate_ultra_scalp_signal(
+        "ETHUSD",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.S15,
+        impulse_body_atr_multiple=0.35,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert signal.reason == "weak_impulse"

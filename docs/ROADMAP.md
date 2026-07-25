@@ -51,6 +51,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] USDJPY + ETHUSD symbols; panel multi-select for symbols & strategies (default all on; OR confluence)
 - [x] Ultra-scalp mode (S15 from MT5 ticks, impulse+RVOL entry, panel strategy option)
 - [x] Ultra-scalp scoped 1:1 R:R exception (`strategy.ultra_scalp.min_reward_risk_ratio`); global floor stays 1.5
+- [x] Ultra-scalp crypto fixes: skip SMC on S15 unless `require_confluence`, primary M5 trend mode, tunable impulse/RVOL, tick-count volume when MT5 volume=0, granular skip reasons
 - [x] MT5 reconnect + data-starvation alerts + skip heartbeat (avoids silent no-trade stalls)
 - [x] Control API + Windows desktop client with proxy (`scripts/run_api.py`, `scripts/desktop_client.py`)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
@@ -60,6 +61,5 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **SaaS packaging:** license/subscription (`licensing/`), user control panel (`scripts/app.py`), easy broker wizard, IB referral section (`docs/FOROOSH_FA.md`)
 - [x] **Telegram control bot:** start/stop paper+live, status, P&L, open positions, kill switch, logs + Persian reply keyboard (`src/chronoscalp/telegram/control_bot.py`, `docs/TELEGRAM_BOT_FA.md`)
 - [x] **Telegram watchdog:** `scripts/watch_telegram.ps1` Scheduled Task keeps control bot alive on Windows VPS
-- [x] **Telegram settings:** connection (MT5/OANDA wizard, mode, live confirm, test) + control (symbols, strategies, risk) via `/settings`
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

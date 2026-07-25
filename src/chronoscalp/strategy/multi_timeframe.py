@@ -56,6 +56,29 @@ def trends_aligned(higher_trends: list[TrendDirection]) -> TrendDirection:
     return TrendDirection.NEUTRAL
 
 
+def ultra_scalp_trend(
+    higher_trends: list[TrendDirection], mode: str = "primary"
+) -> TrendDirection:
+    """Trend gate for ultra-scalp.
+
+    - ``strict``: same as ``trends_aligned`` (every TF must agree, none neutral).
+    - ``primary`` (default): use the first higher TF when non-neutral; reject only
+      if a later TF is explicitly opposite (neutral on M1 is allowed). Crypto
+      S15 scalps rarely see M5+M1 both fully aligned on EMA50+RSI.
+    """
+    if not higher_trends:
+        return TrendDirection.NEUTRAL
+    if mode == "strict":
+        return trends_aligned(higher_trends)
+    primary = higher_trends[0]
+    if primary == TrendDirection.NEUTRAL:
+        return TrendDirection.NEUTRAL
+    for t in higher_trends[1:]:
+        if t != TrendDirection.NEUTRAL and t != primary:
+            return TrendDirection.NEUTRAL
+    return primary
+
+
 def _smc_confirms(row: pd.Series, direction: TrendDirection) -> bool:
     """Require SMC confluence: an order block, FVG, or liquidity sweep in the
     signal's direction on the trigger timeframe. Only checked when
@@ -134,52 +157,59 @@ def generate_ultra_scalp_signal(
     min_reward_risk_ratio: float = 1.0,
     atr_stop_multiple: float = 1.0,
     atr_target_multiple: float = 1.0,
-    rvol_min: float = 1.2,
+    rvol_min: float = 1.05,
+    impulse_body_atr_multiple: float = 0.35,
 ) -> Signal:
     """High-frequency scalp entry on sub-minute (or M1 fallback) bars.
 
     Industry-style short-burst filters.
-    R:R floor defaults to 1.5 but may be set to 1.0 via ``min_reward_risk_ratio``
-    for ultra-scalp only (global strategies remain at risk.min_reward_risk_ratio).
+    R:R floor may be set to 1.0 via ``min_reward_risk_ratio`` for ultra-scalp
+    only (global strategies remain at risk.min_reward_risk_ratio).
     - Micro-trend from higher TFs must be non-neutral
-    - Impulse candle in trend direction (body ≥ 0.45×ATR)
+    - Impulse candle in trend direction (body ≥ ``impulse_body_atr_multiple``×ATR)
     - Relative volume ≥ ``rvol_min``
-    - Optional SMC / liquidity-volume confluence (OR)
+    - Optional SMC / liquidity-volume confluence (OR) — off by default for
+      S15 (order-blocks on 15s bars almost never fire)
     """
-    if trend == TrendDirection.NEUTRAL or trigger_df.empty or len(trigger_df) < 2:
-        return _no_signal(symbol, timeframe)
+    if trigger_df.empty or len(trigger_df) < 2:
+        return _no_signal(symbol, timeframe, reason="no_bars")
+    if trend == TrendDirection.NEUTRAL:
+        return _no_signal(symbol, timeframe, reason="trend_neutral")
 
     last = trigger_df.iloc[-1]
     prev = trigger_df.iloc[-2]
     required = ["open", "high", "low", "close", "atr"]
     if any(pd.isna(last.get(c)) for c in required):
-        return _no_signal(symbol, timeframe)
+        return _no_signal(symbol, timeframe, reason="indicators_nan")
 
     atr_value = float(last["atr"])
     if atr_value <= 0:
-        return _no_signal(symbol, timeframe)
+        return _no_signal(symbol, timeframe, reason="atr_zero")
 
     body = abs(float(last["close"]) - float(last["open"]))
     rvol = float(last.get("rvol", 1.0) or 1.0)
-    impulse = body >= 0.45 * atr_value and rvol >= rvol_min
+    body_ok = body >= impulse_body_atr_multiple * atr_value
+    rvol_ok = rvol >= rvol_min
+    if not body_ok:
+        return _no_signal(symbol, timeframe, reason="weak_impulse")
+    if not rvol_ok:
+        return _no_signal(symbol, timeframe, reason="low_rvol")
 
     signal_type = SignalType.NONE
     if (
         trend == TrendDirection.BULLISH
-        and impulse
         and last["close"] > last["open"]
         and last["close"] >= prev["close"]
     ):
         signal_type = SignalType.BUY
     elif (
         trend == TrendDirection.BEARISH
-        and impulse
         and last["close"] < last["open"]
         and last["close"] <= prev["close"]
     ):
         signal_type = SignalType.SELL
     else:
-        return _no_signal(symbol, timeframe)
+        return _no_signal(symbol, timeframe, reason="candle_dir")
 
     ok, tags = _confluence_ok(
         last,
@@ -188,7 +218,7 @@ def generate_ultra_scalp_signal(
         use_liquidity_volume=use_liquidity_volume,
     )
     if not ok:
-        return _no_signal(symbol, timeframe)
+        return _no_signal(symbol, timeframe, reason="no_confluence")
 
     entry_price = float(last["close"])
     if signal_type == SignalType.BUY:
@@ -225,7 +255,7 @@ def generate_ultra_scalp_signal(
         timeframe=timeframe,
     )
     if signal.risk_reward_ratio < min_reward_risk_ratio:
-        return _no_signal(symbol, timeframe)
+        return _no_signal(symbol, timeframe, reason="rr_fail")
     return signal
 
 
@@ -333,7 +363,7 @@ def score_setup_probability(features: dict) -> float:
     return predict_setup_probability(features)
 
 
-def _no_signal(symbol: str, timeframe: Timeframe) -> Signal:
+def _no_signal(symbol: str, timeframe: Timeframe, reason: str = "") -> Signal:
     return Signal(
         symbol=symbol,
         signal_type=SignalType.NONE,
@@ -342,6 +372,7 @@ def _no_signal(symbol: str, timeframe: Timeframe) -> Signal:
         stop_loss=0.0,
         take_profit=0.0,
         timeframe=timeframe,
+        reason=reason,
     )
 
 
@@ -369,29 +400,40 @@ class MultiTimeframeStrategy:
             if tf in data_by_timeframe
         ]
 
-        if self.strategy_cfg.get("require_trend_alignment", True):
+        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
+        scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
+
+        if use_scalp:
+            trend = ultra_scalp_trend(
+                higher_trends, mode=str(scalp_cfg.get("trend_mode", "primary"))
+            )
+        elif self.strategy_cfg.get("require_trend_alignment", True):
             trend = trends_aligned(higher_trends)
         else:
             trend = higher_trends[-1] if higher_trends else TrendDirection.NEUTRAL
 
         trigger_df = data_by_timeframe.get(trigger_timeframe)
         if trigger_df is None:
-            return _no_signal(symbol, trigger_timeframe)
+            return _no_signal(symbol, trigger_timeframe, reason="no_trigger_data")
 
-        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
-        scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         if use_scalp:
+            # SMC/liquidity on S15 almost never confirms; only apply when
+            # explicitly requested via ultra_scalp.require_confluence.
+            require_conf = bool(scalp_cfg.get("require_confluence", False))
             signal = generate_ultra_scalp_signal(
                 symbol=symbol,
                 trigger_df=trigger_df,
                 trend=trend,
                 timeframe=trigger_timeframe,
-                use_smc_confluence=use_smc,
-                use_liquidity_volume=use_liq,
+                use_smc_confluence=use_smc and require_conf,
+                use_liquidity_volume=use_liq and require_conf,
                 min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
                 atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
                 atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.0)),
-                rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
+                rvol_min=float(scalp_cfg.get("rvol_min", 1.05)),
+                impulse_body_atr_multiple=float(
+                    scalp_cfg.get("impulse_body_atr_multiple", 0.35)
+                ),
             )
         else:
             signal = generate_entry_signal(
@@ -417,6 +459,6 @@ class MultiTimeframeStrategy:
                 signal.confidence,
                 min_conf,
             )
-            return _no_signal(symbol, trigger_timeframe)
+            return _no_signal(symbol, trigger_timeframe, reason="low_confidence")
 
         return signal

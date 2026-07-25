@@ -69,8 +69,13 @@ def ticks_to_ohlcv(ticks: pd.DataFrame, seconds: int) -> pd.DataFrame:
 
     price = price.ffill().dropna()
     out = pd.DataFrame({"price": price}, index=price.index)
+    # MT5 CFD/crypto ticks often have volume=0; count ticks so RVOL is meaningful.
     if "volume" in df.columns:
-        out["tick_volume"] = df["volume"].reindex(out.index).fillna(1).astype(float)
+        vol = df["volume"].reindex(out.index).astype(float)
+        if float(vol.fillna(0).sum()) <= 0:
+            out["tick_volume"] = 1.0
+        else:
+            out["tick_volume"] = vol.fillna(1.0)
     else:
         out["tick_volume"] = 1.0
 

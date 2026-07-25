@@ -51,7 +51,14 @@ strategy:
     atr_stop_multiple: 1.0
     atr_target_multiple: 1.0
     min_reward_risk_ratio: 1.0
-    rvol_min: 1.2
+    # Crypto S15: slightly softer than FX defaults (was 1.2 / 0.45 hardcoded).
+    rvol_min: 1.05
+    impulse_body_atr_multiple: 0.35
+    # primary = M5 bias; M1 may be neutral. Use "strict" for M5+M1 both aligned.
+    trend_mode: primary
+    # Do NOT require SMC/liquidity on S15 (almost never fires). Set true only if
+    # you intentionally want OB/FVG/sweep confirmation on the trigger bar.
+    require_confluence: false
 
 
 sessions:

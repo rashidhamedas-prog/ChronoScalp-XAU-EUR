@@ -423,7 +423,8 @@ class TradingBot:
                     self.bar_gate.mark_evaluated(symbol, completed_bar)
 
                 if signal.signal_type == SignalType.NONE:
-                    self._note_skip(f"{symbol}:no_signal")
+                    detail = (signal.reason or "no_signal").replace(" ", "_")
+                    self._note_skip(f"{symbol}:{detail}")
                     continue
 
                 if completed_bar is None:
