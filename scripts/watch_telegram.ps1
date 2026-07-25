@@ -6,29 +6,28 @@ $py = Join-Path (Get-Location) ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 $env:PYTHONPATH = (Resolve-Path ".\src").Path
 
-function Test-TelegramBotRunning {
-  $hit = Get-CimInstance Win32_Process |
+function Get-TelegramBotProcesses {
+  @(Get-CimInstance Win32_Process |
     Where-Object {
       $_.Name -match 'python' -and
       $_.CommandLine -and
       ($_.CommandLine -match 'telegram_control_bot\.py')
-    }
-  return [bool]$hit
+    })
 }
 
-if (Test-TelegramBotRunning) {
+$procs = Get-TelegramBotProcesses
+if ($procs.Count -gt 1) {
+  $keep = $procs[0].ProcessId
+  foreach ($p in $procs | Select-Object -Skip 1) {
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  Write-Output "TG_DEDUPE_KEPT=$keep"
+  exit 0
+}
+if ($procs.Count -eq 1) {
   Write-Output "TG_ALREADY_UP"
   exit 0
 }
-
-# Avoid duplicate pollers if a stale non-python match confused us earlier
-Get-CimInstance Win32_Process |
-  Where-Object {
-    $_.Name -match 'python' -and
-    $_.CommandLine -and
-    ($_.CommandLine -match 'telegram_control_bot\.py')
-  } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 New-Item -ItemType Directory -Path "logs" -Force | Out-Null
 
@@ -39,7 +38,8 @@ Start-Process -FilePath $py `
   -WindowStyle Hidden
 
 Start-Sleep -Seconds 5
-if (Test-TelegramBotRunning) {
+$after = Get-TelegramBotProcesses
+if ($after.Count -ge 1) {
   Write-Output "TG_STARTED_OK"
 } else {
   Write-Output "TG_START_FAIL"
