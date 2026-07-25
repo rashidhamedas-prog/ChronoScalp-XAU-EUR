@@ -184,12 +184,30 @@ class TelegramControlBot:
         }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
-        self._api("sendMessage", **payload)
+        try:
+            self._api("sendMessage", **payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("Telegram sendMessage failed chat_id={}", chat_id)
+            raise
 
     def _authorized(self, chat_id: str | int) -> bool:
         if not self.allowed_chat:
             return True
         return str(chat_id) == str(self.allowed_chat)
+
+    def _bind_chat_if_needed(self, chat_id: int) -> None:
+        """Persist first controller chat id when TELEGRAM_CHAT_ID is empty."""
+        if self.allowed_chat:
+            return
+        chat_s = str(chat_id)
+        try:
+            from chronoscalp.saas.broker_wizard import save_telegram_credentials
+
+            save_telegram_credentials(self.token, chat_s)
+            self.allowed_chat = chat_s
+            logger.info("Bound TELEGRAM_CHAT_ID to {}", chat_s)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to persist TELEGRAM_CHAT_ID")
 
     def _resolve_command(self, text: str) -> str | None:
         raw = (text or "").strip()
@@ -331,9 +349,12 @@ class TelegramControlBot:
 
     def handle(self, chat_id: int, text: str) -> None:
         """Dispatch one inbound message."""
+        logger.info("Telegram cmd from chat_id={} text={!r}", chat_id, (text or "")[:80])
         if not self._authorized(chat_id):
             self.send(chat_id, "⛔ Unauthorized chat.")
             return
+
+        self._bind_chat_if_needed(chat_id)
 
         cmd = self._resolve_command(text)
         if cmd is None:
@@ -357,6 +378,12 @@ class TelegramControlBot:
 
     def run_forever(self) -> None:
         """Block forever, long-polling Telegram updates."""
+        try:
+            self._api("deleteWebhook", drop_pending_updates=False)
+            logger.info("Telegram webhook cleared (long-poll mode)")
+        except Exception:  # noqa: BLE001
+            logger.warning("deleteWebhook failed — continuing with getUpdates")
+
         logger.info(
             "Telegram control bot started (allow_chat={})",
             self.allowed_chat or "*",

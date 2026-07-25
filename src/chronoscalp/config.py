@@ -22,7 +22,11 @@ CONFIG_DIR = ROOT_DIR / "config"
 class Secrets(BaseSettings):
     """Loaded from environment / .env. Never log these values directly."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(ROOT_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     mt5_login: int = Field(default=0)
     mt5_password: str = Field(default="")

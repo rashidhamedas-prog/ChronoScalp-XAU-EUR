@@ -123,8 +123,30 @@ def test_stop_alias_is_kill_switch_not_process_stop(bot: TelegramControlBot) -> 
     assert bot._stopped == []  # type: ignore[attr-defined]
 
 
-def test_missing_token_raises(tmp_path: Path) -> None:
+def test_bind_chat_persists_when_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: dict[str, str] = {}
+
+    def fake_save(token: str, chat_id: str, env_path=None) -> None:  # noqa: ANN001
+        saved["token"] = token
+        saved["chat_id"] = chat_id
+
+    monkeypatch.setattr(
+        "chronoscalp.saas.broker_wizard.save_telegram_credentials",
+        fake_save,
+    )
     settings = _fake_settings(tmp_path)
-    settings.secrets.telegram_bot_token = ""
-    with pytest.raises(RuntimeError, match="TELEGRAM_BOT_TOKEN"):
-        TelegramControlBot(settings=settings)  # type: ignore[arg-type]
+    settings.secrets.telegram_chat_id = ""
+    ctrl = TelegramControlBot(
+        settings=settings,  # type: ignore[arg-type]
+        start_fn=lambda _m: (True, "ok"),
+        stop_fn=lambda: (True, "ok"),
+        running_fn=lambda: False,
+        pid_fn=lambda: None,
+        logs_fn=lambda _n: [],
+        license_check=lambda _s: None,
+    )
+    ctrl.allowed_chat = ""
+    ctrl.send = MagicMock()  # type: ignore[method-assign]
+    ctrl.handle(777, "/whoami")
+    assert saved["chat_id"] == "777"
+    assert ctrl.allowed_chat == "777"
