@@ -18,20 +18,16 @@ if (Test-TelegramBotRunning) {
 }
 
 New-Item -ItemType Directory -Path "logs" -Force | Out-Null
-$log = Join-Path (Get-Location) "logs\telegram_bot_stdout.log"
-$err = Join-Path (Get-Location) "logs\telegram_bot_stderr.log"
 
+# No stdout redirect (can fail under SYSTEM if log handle stuck). Logging goes to chronoscalp_*.log.
 Start-Process -FilePath $py `
   -ArgumentList @("scripts\telegram_control_bot.py") `
   -WorkingDirectory (Get-Location) `
-  -WindowStyle Hidden `
-  -RedirectStandardOutput $log `
-  -RedirectStandardError $err
+  -WindowStyle Hidden
 
-Start-Sleep -Seconds 4
+Start-Sleep -Seconds 5
 if (Test-TelegramBotRunning) {
   Write-Output "TG_STARTED_OK"
 } else {
   Write-Output "TG_START_FAIL"
-  if (Test-Path $err) { Get-Content $err -Tail 30 }
 }
