@@ -21,11 +21,11 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, pd.NA)
+    rs = avg_gain / avg_loss.where(avg_loss != 0)
     result = 100 - (100 / (1 + rs))
     result = result.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
     result = result.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
-    return result.fillna(50.0)
+    return result.fillna(50.0).astype("float64")
 
 
 def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
@@ -63,7 +63,9 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 def relative_volume(series: pd.Series, period: int = 20) -> pd.Series:
     """Volume ÷ rolling average volume (RVOL). Values > 1.0 = above average."""
     avg = series.rolling(window=period, min_periods=max(3, period // 2)).mean()
-    return (series / avg.replace(0, pd.NA)).fillna(1.0)
+    # Avoid pd.NA → object dtype → FutureWarning on fillna downcasting.
+    ratio = series.astype("float64") / avg.where(avg != 0)
+    return ratio.fillna(1.0).astype("float64")
 
 
 def enrich_with_indicators(
