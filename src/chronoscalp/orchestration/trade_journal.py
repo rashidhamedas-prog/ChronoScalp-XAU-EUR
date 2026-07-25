@@ -268,7 +268,7 @@ class TradeJournal:
             self.open_trades = {}
             self.closed_trades = []
             return
-        with self.path.open(encoding="utf-8") as f:
+        with self.path.open(encoding="utf-8-sig") as f:
             raw = json.load(f)
         self.mode = str(raw.get("mode") or self.mode)
         self.open_trades = {
@@ -279,6 +279,36 @@ class TradeJournal:
         self.closed_trades = [
             ClosedTradeRecord.from_dict(row) for row in (raw.get("closed_trades") or [])
         ]
+        # #region agent log
+        try:
+            import time as _time
+            from pathlib import Path as _Path
+
+            _lp = _Path("debug-eb4742.log")
+            with _lp.open("a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "eb4742",
+                            "runId": "pre-fix",
+                            "hypothesisId": "C",
+                            "location": "trade_journal.py:load",
+                            "message": "journal loaded for snapshot/bot",
+                            "data": {
+                                "path": str(self.path),
+                                "mode": self.mode,
+                                "open_count": len(self.open_trades),
+                                "closed_count": len(self.closed_trades),
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=True,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         logger.info(
             "Loaded trade journal {}: {} open, {} closed",
             self.path,
@@ -374,8 +404,45 @@ class TradeJournal:
         return record
 
     def sync_open_from_broker(self, positions: list[Position]) -> None:
-        """Adopt broker open positions missing from the journal (after reconcile)."""
+        """Reconcile journal opens with broker: adopt missing, drop ghosts."""
         changed = False
+        broker_tickets = {position.ticket for position in positions}
+        # #region agent log
+        try:
+            import time as _time
+            from pathlib import Path as _Path
+
+            _ghosts = [t for t in self.open_trades if t not in broker_tickets]
+            _lp = _Path("debug-eb4742.log")
+            with _lp.open("a", encoding="utf-8") as _df:
+                _df.write(
+                    json.dumps(
+                        {
+                            "sessionId": "eb4742",
+                            "runId": "pre-fix",
+                            "hypothesisId": "A",
+                            "location": "trade_journal.py:sync_open_from_broker",
+                            "message": "sync before prune/adopt",
+                            "data": {
+                                "journal_open": len(self.open_trades),
+                                "broker_open": len(broker_tickets),
+                                "ghost_count": len(_ghosts),
+                                "ghost_sample": _ghosts[:20],
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        },
+                        ensure_ascii=True,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        for ticket in list(self.open_trades):
+            if ticket not in broker_tickets:
+                self.open_trades.pop(ticket, None)
+                changed = True
+                logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
         for position in positions:
             if position.ticket not in self.open_trades:
                 self.open_trades[position.ticket] = OpenTradeRecord.from_position(

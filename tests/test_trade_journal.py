@@ -160,3 +160,48 @@ def test_external_close_uses_open_record(tmp_path: Path) -> None:
     assert closed.pnl == 25.5
     assert closed.direction == "sell"
     assert 7 not in journal.open_trades
+
+
+def test_sync_open_from_broker_drops_ghosts(tmp_path: Path) -> None:
+    journal = TradeJournal(tmp_path / "j.json", mode="live")
+    journal.record_open(
+        Position(
+            ticket=100,
+            symbol="BTCUSD",
+            direction=SignalType.BUY,
+            volume=0.1,
+            entry_price=60000.0,
+            stop_loss=59000.0,
+            take_profit=61000.0,
+            open_time=datetime(2026, 7, 25, 10, 0, tzinfo=UTC),
+        )
+    )
+    journal.record_open(
+        Position(
+            ticket=200,
+            symbol="ETHUSD",
+            direction=SignalType.SELL,
+            volume=0.1,
+            entry_price=2000.0,
+            stop_loss=2050.0,
+            take_profit=1900.0,
+            open_time=datetime(2026, 7, 25, 10, 0, tzinfo=UTC),
+        )
+    )
+    # Broker only still has ticket 200
+    still_open = Position(
+        ticket=200,
+        symbol="ETHUSD",
+        direction=SignalType.SELL,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=2050.0,
+        take_profit=1900.0,
+        open_time=datetime(2026, 7, 25, 10, 0, tzinfo=UTC),
+    )
+    journal.sync_open_from_broker([still_open])
+    assert 100 not in journal.open_trades
+    assert 200 in journal.open_trades
+    # Empty broker clears all ghosts
+    journal.sync_open_from_broker([])
+    assert journal.open_trades == {}
