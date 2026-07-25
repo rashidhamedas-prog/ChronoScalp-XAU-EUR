@@ -50,6 +50,9 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] EURJPY multi-symbol + volume-confirmed liquidity strategy (`use_liquidity_volume`, RVOL + `liquidity_sweep_*_vol`)
 - [x] USDJPY + ETHUSD symbols; panel multi-select for symbols & strategies (default all on; OR confluence)
 - [x] Ultra-scalp mode (S15 from MT5 ticks, impulse+RVOL entry, panel strategy option)
+- [x] Ultra-scalp scoped 1:1 R:R exception (`strategy.ultra_scalp.min_reward_risk_ratio`); global floor stays 1.5
+- [x] MT5 reconnect + data-starvation alerts + skip heartbeat (avoids silent no-trade stalls)
+- [x] Control API + Windows desktop client with proxy (`scripts/run_api.py`, `scripts/desktop_client.py`)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
 - [x] Windows VPS one-shot setup: `scripts/windows_vps_setup.ps1` (MT5 + paper path)

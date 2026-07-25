@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 
 from loguru import logger
@@ -25,6 +26,13 @@ def setup_logging(log_level: str | None = None, log_dir: str | Path = "logs") ->
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Keep bot logs usable — pandas FutureWarnings previously flooded 12MB+ files.
+    warnings.filterwarnings(
+        "ignore",
+        category=FutureWarning,
+        message=r".*Downcasting object dtype arrays.*",
+    )
+
     logger.remove()
     logger.add(sys.stderr, level=level, colorize=True, backtrace=False, diagnose=False)
     logger.add(
@@ -35,6 +43,7 @@ def setup_logging(log_level: str | None = None, log_dir: str | Path = "logs") ->
         encoding="utf-8",
         backtrace=True,
         diagnose=False,
+        filter=lambda record: "FutureWarning" not in record["message"],
     )
 
     sentry_dsn = os.getenv("SENTRY_DSN")

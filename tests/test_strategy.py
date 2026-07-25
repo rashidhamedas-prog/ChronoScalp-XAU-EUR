@@ -172,4 +172,42 @@ def test_ultra_scalp_impulse_buy():
     )
     assert signal.signal_type == SignalType.BUY
     assert "ultra_scalp" in signal.reason
-    assert signal.risk_reward_ratio >= 1.5
+    assert signal.risk_reward_ratio >= 1.0
+
+
+def test_ultra_scalp_allows_one_to_one_rr():
+    from chronoscalp.strategy.multi_timeframe import generate_ultra_scalp_signal
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.array([100.0, 100.1, 100.2, 100.3, 101.0])
+    open_ = close - 0.4
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 0.1,
+            "low": open_ - 0.1,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 1.5),
+            "rsi": np.full(n, 55.0),
+            "macd": np.zeros(n),
+            "histogram": np.zeros(n),
+            "bb_upper": close + 2,
+            "bb_lower": close - 2,
+        },
+        index=index,
+    )
+    signal = generate_ultra_scalp_signal(
+        "XAUUSD",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.S15,
+        use_smc_confluence=False,
+        use_liquidity_volume=False,
+        min_reward_risk_ratio=1.0,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.0,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert abs(signal.risk_reward_ratio - 1.0) < 1e-9

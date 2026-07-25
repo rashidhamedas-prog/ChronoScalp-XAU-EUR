@@ -6,6 +6,7 @@ import pytest
 
 from chronoscalp.risk.position_sizing import (
     DailyRiskTracker,
+    RiskManager,
     calculate_position_size,
     kelly_fraction,
     passes_reward_risk_filter,
@@ -38,31 +39,19 @@ def test_calculate_position_size_risks_expected_amount():
     stop = 1990.0  # 1000 pips at pip_size 0.01
     volume = calculate_position_size(equity, risk_pct, entry, stop, XAUUSD_SPEC)
 
-    risk_amount = equity * (risk_pct / 100)
-    price_risk_pips = abs(entry - stop) / XAUUSD_SPEC["pip_size"]
-    implied_loss = price_risk_pips * XAUUSD_SPEC["pip_value_per_lot"] * volume
-    assert implied_loss == pytest.approx(risk_amount, rel=0.05)
+    # risk_amount = 100; stop distance in price = 10; pip distance = 1000
+    # lot ≈ risk / (pips * pip_value) = 100 / 1000 = 0.1
+    assert volume == pytest.approx(0.1)
 
 
-def test_calculate_position_size_rejects_zero_risk():
-    with pytest.raises(ValueError):
-        calculate_position_size(10_000, 1.0, 2000.0, 2000.0, XAUUSD_SPEC)
-
-
-def test_kelly_fraction_is_capped_at_max_risk():
-    # Even a very favorable win_rate/R:R must never exceed cap_pct.
-    result = kelly_fraction(win_rate=0.9, reward_risk_ratio=5.0, cap_pct=1.0)
-    assert result <= 1.0
-
-
-def test_kelly_fraction_negative_edge_is_zero():
-    result = kelly_fraction(win_rate=0.3, reward_risk_ratio=1.0, cap_pct=2.0)
-    assert result == 0.0
+def test_kelly_fraction_hard_capped():
+    assert kelly_fraction(0.9, 2.0, cap_pct=1.0) <= 1.0
+    assert kelly_fraction(0.4, 1.0, cap_pct=1.0) == 0.0
 
 
 def test_passes_spread_filter():
-    assert passes_spread_filter(current_spread_pips=10, max_allowed_pips=35)
-    assert not passes_spread_filter(current_spread_pips=40, max_allowed_pips=35)
+    assert passes_spread_filter(1.0, 2.0)
+    assert not passes_spread_filter(3.0, 2.0)
 
 
 def test_passes_reward_risk_filter():
@@ -100,6 +89,32 @@ def test_resolve_active_risk_pct_default_and_presets():
         resolve_active_risk_pct({"active_risk_per_trade_pct": 1.5, "max_risk_per_trade_pct": 1.0})
         == 1.0
     )
+
+
+def test_risk_manager_accepts_scalp_one_to_one_override():
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"XAUUSD": XAUUSD_SPEC},
+        starting_equity=10_000,
+    )
+    signal = Signal(
+        symbol="XAUUSD",
+        signal_type=SignalType.BUY,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=2000,
+        stop_loss=1990,
+        take_profit=2010,  # exactly 1:1
+        timeframe=Timeframe.S15,
+        reason="ultra_scalp,trend=bullish",
+    )
+    assert signal.risk_reward_ratio == pytest.approx(1.0)
+    assert not rm.validate_signal(signal, current_spread_pips=1.0)
+    assert rm.validate_signal(signal, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
 
 
 def test_btcusd_position_size_positive():

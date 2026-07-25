@@ -131,14 +131,16 @@ def generate_ultra_scalp_signal(
     timeframe: Timeframe,
     use_smc_confluence: bool = False,
     use_liquidity_volume: bool = False,
-    min_reward_risk_ratio: float = 1.5,
+    min_reward_risk_ratio: float = 1.0,
     atr_stop_multiple: float = 1.0,
-    atr_target_multiple: float = 1.5,
+    atr_target_multiple: float = 1.0,
     rvol_min: float = 1.2,
 ) -> Signal:
     """High-frequency scalp entry on sub-minute (or M1 fallback) bars.
 
-    Industry-style short-burst filters (still hard-capped at min 1:1.5 R:R):
+    Industry-style short-burst filters.
+    R:R floor defaults to 1.5 but may be set to 1.0 via ``min_reward_risk_ratio``
+    for ultra-scalp only (global strategies remain at risk.min_reward_risk_ratio).
     - Micro-trend from higher TFs must be non-neutral
     - Impulse candle in trend direction (body ≥ 0.45×ATR)
     - Relative volume ≥ ``rvol_min``
@@ -386,8 +388,9 @@ class MultiTimeframeStrategy:
                 timeframe=trigger_timeframe,
                 use_smc_confluence=use_smc,
                 use_liquidity_volume=use_liq,
+                min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
                 atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
-                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.5)),
+                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.0)),
                 rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
             )
         else:

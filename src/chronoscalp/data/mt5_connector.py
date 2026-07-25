@@ -10,8 +10,10 @@ See docs/ARCHITECTURE.md "Broker abstraction".
 
 from __future__ import annotations
 
+import contextlib
 import platform
-from datetime import datetime
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -57,7 +59,7 @@ def ticks_to_ohlcv(ticks: pd.DataFrame, seconds: int) -> pd.DataFrame:
         raise ValueError("ticks must be indexed by time")
 
     if "last" in df.columns and df["last"].fillna(0).ne(0).any():
-        price = df["last"].replace(0, pd.NA).ffill()
+        price = df["last"].mask(df["last"] == 0).ffill()
     elif "bid" in df.columns and "ask" in df.columns:
         price = (df["bid"].astype(float) + df["ask"].astype(float)) / 2.0
     elif "bid" in df.columns:
@@ -94,6 +96,9 @@ class MT5Connector:
         self._server = server
         self._terminal_path = terminal_path
         self._connected = False
+        self._last_warn_at: dict[str, float] = {}
+        self._consecutive_empty = 0
+        self.last_successful_fetch_at: datetime | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -107,17 +112,24 @@ class MT5Connector:
         if self._terminal_path:
             kwargs["path"] = self._terminal_path
 
+        # Clean re-init if a previous session went stale.
+        with contextlib.suppress(Exception):
+            mt5.shutdown()
+
         if not mt5.initialize(**kwargs):
             logger.error("MT5 initialize() failed: {}", mt5.last_error())
+            self._connected = False
             return False
 
         authorized = mt5.login(self._login, password=self._password, server=self._server)
         if not authorized:
             logger.error("MT5 login() failed: {}", mt5.last_error())
             mt5.shutdown()
+            self._connected = False
             return False
 
         self._connected = True
+        self._consecutive_empty = 0
         logger.info("Connected to MT5 server={} login={}", self._server, self._login)
         return True
 
@@ -130,14 +142,105 @@ class MT5Connector:
         mt5.shutdown()
         self._connected = False
 
+    def ensure_connected(self) -> bool:
+        """Probe terminal health and reconnect when the IPC link is dead."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        if self._connected:
+            info = mt5.terminal_info()
+            if info is not None:
+                return True
+            logger.warning("MT5 terminal_info() is None — reconnecting")
+            self._connected = False
+
+        return self.connect()
+
+    def _warn_rate_limited(self, key: str, message: str, *args: object) -> None:
+        now = time.monotonic()
+        last = self._last_warn_at.get(key, 0.0)
+        if now - last < 60.0:
+            return
+        self._last_warn_at[key] = now
+        logger.warning(message, *args)
+
+    def _ensure_symbol(self, symbol: str) -> bool:
+        import MetaTrader5 as mt5
+
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            # Some brokers use a suffix (e.g. XAUUSD.m) — still try select.
+            if not mt5.symbol_select(symbol, True):
+                self._warn_rate_limited(
+                    f"sym_missing:{symbol}",
+                    "MT5 symbol_info missing for {} — last_error={}",
+                    symbol,
+                    mt5.last_error(),
+                )
+                return False
+            info = mt5.symbol_info(symbol)
+            if info is None:
+                return False
+        if not info.visible:
+            mt5.symbol_select(symbol, True)
+        return True
+
+    def _empty_frame(self) -> pd.DataFrame:
+        return pd.DataFrame(columns=OHLCV_COLUMNS).set_index(
+            pd.DatetimeIndex([], tz="UTC", name="time")
+        )
+
+    def _mark_empty(self) -> None:
+        self._consecutive_empty += 1
+        if self._consecutive_empty >= 8:
+            logger.warning(
+                "MT5 returned empty data {} times — forcing reconnect",
+                self._consecutive_empty,
+            )
+            self._connected = False
+            self.ensure_connected()
+            self._consecutive_empty = 0
+
+    def _mark_success(self) -> None:
+        self._consecutive_empty = 0
+        self.last_successful_fetch_at = datetime.now(tz=UTC)
+
     def fetch_ohlcv(self, symbol: str, timeframe: Timeframe, count: int = 500) -> pd.DataFrame:
         """Fetch the most recent `count` completed bars for symbol/timeframe.
 
         Sub-minute frames (``S15`` / ``S30``) are aggregated from ticks because
         the MetaTrader5 Python API has no native second-bar timeframes.
+        Retries once after reconnect on terminal IPC failures.
         """
         _require_windows()
+        if not self.ensure_connected():
+            return self._empty_frame()
+
+        for attempt in range(2):
+            df = self._fetch_ohlcv_once(symbol, timeframe, count)
+            if not df.empty:
+                self._mark_success()
+                return df
+            if attempt == 0:
+                self._warn_rate_limited(
+                    f"retry:{symbol}:{timeframe.value}",
+                    "Empty {} {} — reconnect + retry",
+                    symbol,
+                    timeframe.value,
+                )
+                self._connected = False
+                if not self.ensure_connected():
+                    break
+        self._mark_empty()
+        return self._empty_frame()
+
+    def _fetch_ohlcv_once(
+        self, symbol: str, timeframe: Timeframe, count: int
+    ) -> pd.DataFrame:
         import MetaTrader5 as mt5
+
+        if not self._ensure_symbol(symbol):
+            return self._empty_frame()
 
         if timeframe.is_subminute:
             return self._fetch_ohlcv_from_ticks(symbol, timeframe, count)
@@ -145,10 +248,14 @@ class MT5Connector:
         mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
         rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
         if rates is None or len(rates) == 0:
-            logger.warning(
-                "No rates returned for {} {}: {}", symbol, timeframe.value, mt5.last_error()
+            self._warn_rate_limited(
+                f"rates:{symbol}:{timeframe.value}",
+                "No rates returned for {} {}: {}",
+                symbol,
+                timeframe.value,
+                mt5.last_error(),
             )
-            return pd.DataFrame(columns=OHLCV_COLUMNS).set_index("time")
+            return self._empty_frame()
 
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
@@ -165,25 +272,23 @@ class MT5Connector:
         self, symbol: str, timeframe: Timeframe, count: int
     ) -> pd.DataFrame:
         """Build sub-minute OHLCV from recent ticks."""
-        from datetime import timedelta
-
         import MetaTrader5 as mt5
 
         seconds = timeframe.seconds
         # Extra headroom: thin markets / gaps need more wall-clock than count*seconds
         window = timedelta(seconds=max(seconds * count * 3, 900))
-        from datetime import UTC as _UTC
-
-        end = datetime.now(tz=_UTC)
+        end = datetime.now(tz=UTC)
         start = end - window
         ticks = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
         if ticks is None or len(ticks) == 0:
-            logger.warning(
-                "No ticks for {} {}: {}", symbol, timeframe.value, mt5.last_error()
+            self._warn_rate_limited(
+                f"ticks:{symbol}:{timeframe.value}",
+                "No ticks for {} {}: {}",
+                symbol,
+                timeframe.value,
+                mt5.last_error(),
             )
-            return pd.DataFrame(columns=OHLCV_COLUMNS).set_index(
-                pd.DatetimeIndex([], tz="UTC", name="time")
-            )
+            return self._empty_frame()
 
         tdf = pd.DataFrame(ticks)
         # MT5 tick time is seconds; time_msc is milliseconds
@@ -204,10 +309,16 @@ class MT5Connector:
         _require_windows()
         import MetaTrader5 as mt5
 
+        if not self.ensure_connected():
+            return self._empty_frame()
+        if not self._ensure_symbol(symbol):
+            return self._empty_frame()
+
         mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
         rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
         if rates is None or len(rates) == 0:
-            logger.warning(
+            self._warn_rate_limited(
+                f"range:{symbol}:{timeframe.value}",
                 "No rates returned for {} {} [{} .. {}]: {}",
                 symbol,
                 timeframe.value,
@@ -215,7 +326,7 @@ class MT5Connector:
                 end,
                 mt5.last_error(),
             )
-            return pd.DataFrame(columns=OHLCV_COLUMNS).set_index("time")
+            return self._empty_frame()
 
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
@@ -232,6 +343,8 @@ class MT5Connector:
         _require_windows()
         import MetaTrader5 as mt5
 
+        if not self.ensure_connected() or not self._ensure_symbol(symbol):
+            return None
         info = mt5.symbol_info(symbol)
         if info is None:
             return None
@@ -242,6 +355,8 @@ class MT5Connector:
         _require_windows()
         import MetaTrader5 as mt5
 
+        if not self.ensure_connected() or not self._ensure_symbol(symbol):
+            return None
         info = mt5.symbol_info(symbol)
         if info is None:
             return None
