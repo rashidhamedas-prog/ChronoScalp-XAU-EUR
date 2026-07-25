@@ -8,7 +8,11 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 
 function Test-TelegramBotRunning {
   $hit = Get-CimInstance Win32_Process |
-    Where-Object { $_.CommandLine -and ($_.CommandLine -match 'telegram_control_bot\.py') }
+    Where-Object {
+      $_.Name -match 'python' -and
+      $_.CommandLine -and
+      ($_.CommandLine -match 'telegram_control_bot\.py')
+    }
   return [bool]$hit
 }
 
@@ -16,6 +20,15 @@ if (Test-TelegramBotRunning) {
   Write-Output "TG_ALREADY_UP"
   exit 0
 }
+
+# Avoid duplicate pollers if a stale non-python match confused us earlier
+Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.Name -match 'python' -and
+    $_.CommandLine -and
+    ($_.CommandLine -match 'telegram_control_bot\.py')
+  } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 New-Item -ItemType Directory -Path "logs" -Force | Out-Null
 
