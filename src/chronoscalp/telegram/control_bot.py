@@ -10,6 +10,7 @@ bypasses that gate.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -161,8 +162,15 @@ class TelegramControlBot:
         return "paper"
 
     def _api(self, method: str, **params: Any) -> dict[str, Any]:
+        """POST to Telegram Bot API with explicit UTF-8 JSON (Persian-safe)."""
         url = API.format(token=self.token, method=method)
-        response = requests.post(url, json=params, timeout=max(35.0, self.timeout))
+        body = json.dumps(params, ensure_ascii=False).encode("utf-8")
+        response = requests.post(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=max(35.0, self.timeout),
+        )
         response.raise_for_status()
         data = response.json()
         if not data.get("ok"):

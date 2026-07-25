@@ -68,3 +68,20 @@ docker compose logs -f chronoscalp-telegram
 
 - Live بدون تأیید `.env` از تلگرام استارت **نمی‌شود** (عمدی؛ مثل پنل).
 - `/stop` دیگر فرآیند را نمی‌کشد — فقط ورود جدید را متوقف می‌کند. برای خاموش کردن فرآیند از **توقف ربات** / `/bot_stop` استفاده کنید.
+
+## ۵) عکس پروفایل بات
+
+فایل آماده: `assets/brand/chronoscalp-bot-avatar.png`
+
+1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کنید
+2. `/setuserpic` بزنید
+3. بات `Chronoscalp_bot` را انتخاب کنید
+4. همان فایل PNG را بفرستید
+
+اگر دکمه‌های فارسی خراب (حروف عجیب) شدند:
+
+```bat
+python scripts\restore_telegram_keyboard.py
+```
+
+روی VPS هم همین اسکریپت را یک‌بار اجرا کنید تا کیبورد UTF-8 برگردد.
