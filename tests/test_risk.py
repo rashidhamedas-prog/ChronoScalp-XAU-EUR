@@ -81,6 +81,15 @@ def test_daily_loss_limit_triggers_and_resets_next_day():
     assert not tracker.daily_loss_limit_hit(next_day)
 
 
+def test_daily_tracker_manual_reset():
+    tracker = DailyRiskTracker(max_daily_loss_pct=3.0, starting_equity=10_000)
+    now = datetime.now(tz=UTC)
+    tracker.record_trade_pnl(-400, at=now)
+    assert tracker.daily_loss_limit_hit(now)
+    tracker.reset()
+    assert not tracker.daily_loss_limit_hit(now)
+
+
 def test_resolve_active_risk_pct_default_and_presets():
     assert resolve_active_risk_pct({"active_risk_per_trade_pct": 0.5}) == 0.5
     assert resolve_active_risk_pct({"active_risk_per_trade_pct": 1.0}) == 1.0
