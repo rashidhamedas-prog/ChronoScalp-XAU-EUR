@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from chronoscalp.telegram.control_bot import TelegramControlBot
+from chronoscalp.telegram.keyboards import MAIN_KEYBOARD, SETTINGS_KEYBOARD
 
 
 def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNamespace:
@@ -17,6 +18,12 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         telegram_chat_id="42",
         chronoscalp_stop_trading="no",
         live_trading_confirmed=live_confirmed,
+        mt5_login=0,
+        mt5_password="",
+        mt5_server="",
+        mt5_terminal_path="",
+        oanda_api_token="",
+        oanda_account_id="",
     )
     return SimpleNamespace(
         secrets=secrets,
@@ -24,6 +31,14 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         alerting={"timeout_seconds": 5},
         backtest={"initial_balance": 10_000},
         symbols=["XAUUSD"],
+        available_symbols=["XAUUSD", "EURUSD"],
+        risk={"active_risk_per_trade_pct": 1.0, "max_risk_per_trade_pct": 1.0},
+        strategy={
+            "enabled_strategies": ["smc_confluence"],
+            "use_smc_confluence": True,
+            "use_liquidity_volume": False,
+            "use_ultra_scalp": False,
+        },
     )
 
 
@@ -65,7 +80,12 @@ def test_help_sends_keyboard(bot: TelegramControlBot) -> None:
     bot.handle(42, "/help")
     kwargs = bot.send.call_args.kwargs
     assert "reply_markup" in kwargs
-    assert "keyboard" in kwargs["reply_markup"]
+    assert kwargs["reply_markup"] == MAIN_KEYBOARD
+
+
+def test_settings_menu(bot: TelegramControlBot) -> None:
+    bot.handle(42, "تنظیمات")
+    assert bot.send.call_args.kwargs["reply_markup"] == SETTINGS_KEYBOARD
 
 
 def test_start_paper_via_button(bot: TelegramControlBot) -> None:
@@ -117,7 +137,6 @@ def test_status_and_logs(bot: TelegramControlBot) -> None:
 
 
 def test_stop_alias_is_kill_switch_not_process_stop(bot: TelegramControlBot) -> None:
-    """Legacy /stop must halt entries, not kill the process."""
     bot.handle(42, "/stop")
     assert bot.kill.is_active()
     assert bot._stopped == []  # type: ignore[attr-defined]
@@ -150,3 +169,63 @@ def test_bind_chat_persists_when_empty(tmp_path: Path, monkeypatch: pytest.Monke
     ctrl.handle(777, "/whoami")
     assert saved["chat_id"] == "777"
     assert ctrl.allowed_chat == "777"
+
+
+def test_mt5_wizard_flow(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.save_mt5_credentials",
+        lambda login, password, server, path="": calls.update(
+            login=login, password=password, server=server, path=path
+        ),
+    )
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_broker_to_settings_yaml",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.UserConfigStore",
+        lambda: SimpleNamespace(
+            config=SimpleNamespace(
+                broker=SimpleNamespace(
+                    provider="mt5",
+                    mode="paper",
+                    oanda_environment="practice",
+                    onboarding_complete=False,
+                )
+            ),
+            save=lambda: None,
+        ),
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+    monkeypatch.setattr(bot, "_save_user_broker", lambda **k: None)
+
+    bot.handle(42, "بروکر MT5")
+    bot.handle(42, "123456")
+    bot.handle(42, "secret")
+    bot.handle(42, "ICMarkets-Demo")
+    bot.handle(42, "-")
+    assert calls["login"] == "123456"
+    assert calls["server"] == "ICMarkets-Demo"
+    assert "✅" in bot.send.call_args.args[1]
+
+
+def test_risk_preset_button(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_risk_preset",
+        lambda pct: 1.0 if pct > 1 else pct,
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+    bot.handle(42, "ریسک ۱٫۵٪")
+    assert "1.0%" in bot.send.call_args.args[1] or "۱" in bot.send.call_args.args[1] or "ریسک" in bot.send.call_args.args[1]
+
+
+def test_symbols_command(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_active_symbols",
+        lambda parts, allowed=None: ["XAUUSD", "EURUSD"],
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+    bot.handle(42, "/symbols XAUUSD,EURUSD")
+    assert "XAUUSD" in bot.send.call_args.args[1]

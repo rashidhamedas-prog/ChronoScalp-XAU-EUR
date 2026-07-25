@@ -1,87 +1,65 @@
 # راه‌اندازی ربات تلگرام ChronoScalp
 
-هشدارهای معامله (باز/بسته شدن) و **کنترل کامل برنامه** از تلگرام کار می‌کنند:
-استارت/توقف فرآیند، وضعیت، سود/زیان، پوزیشن‌ها، kill switch، لاگ.
+هشدارهای معامله + **کنترل کامل** + **تنظیمات اتصال و کنترل** از تلگرام:
+استارت/توقف، وضعیت، P&L، kill switch، لاگ، بروکر MT5/OANDA، mode، Live confirm، نمادها، استراتژی، ریسک.
 
 ## ۱) ساخت بات در Telegram
 
-1. در تلگرام به [@BotFather](https://t.me/BotFather) بروید
-2. `/newbot` بزنید و نام + یوزرنیم بدهید (یوزرنیم باید به `bot` ختم شود)
-3. **توکن** را کپی کنید (مثل `123456:ABC-DEF...`)
+1. [@BotFather](https://t.me/BotFather) → `/newbot`
+2. توکن را در `.env` بگذارید: `TELEGRAM_BOT_TOKEN=...`
+3. `/whoami` بزنید و `TELEGRAM_CHAT_ID` را ست کنید
 
-## ۲) گرفتن Chat ID
-
-```bash
-# روی سرور، موقتاً فقط توکن را در .env بگذارید، بعد:
-cd ~/ChronoScalp-XAU-EUR
-# بات را در تلگرام Start کنید، بعد:
-curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
-```
-
-عدد `chat.id` را در `.env` بگذارید:
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...
-```
-
-یا بعد از استارت کنترل‌بات، دستور `/whoami` را بزنید و همان عدد را در `.env` بگذارید.
-
-> بدون `TELEGRAM_CHAT_ID` هر کسی که به بات پیام بدهد می‌تواند دستور بزند — برای production حتماً ست کنید.
-
-## ۳) روشن کردن
-
-### ویندوز / لوکال
+## ۲) روشن کردن
 
 ```bat
-.venv\Scripts\python.exe scripts\telegram_control_bot.py
+python scripts\telegram_control_bot.py
 ```
 
-یا در کنار پنل، یک ترمینال جدا باز بگذارید. برای اجرای دائمی روی VPS ویندوز می‌توانید از Task Scheduler استفاده کنید.
+VPS: Task `ChronoScalpWatchTelegram` یا همان اسکریپت.
 
-### Docker
+## ۳) منوها
 
-```bash
-cd ~/ChronoScalp-XAU-EUR/docker
-docker compose --profile telegram up -d chronoscalp-telegram
-docker compose logs -f chronoscalp-telegram
-```
-
-## ۴) کنترل برنامه از تلگرام
-
-بعد از `/start` یک کیبورد فارسی ظاهر می‌شود. معادل دستورها:
-
-| دکمه / دستور | کار |
+| دکمه | کار |
 |---|---|
-| وضعیت `/status` | فرآیند ربات، PID، بروکر، نمادها، kill switch، تأیید Live |
-| استارت Paper `/start_paper` | شروع فرآیند معامله در حالت paper |
-| استارت Live `/start_live` | شروع live — **فقط** اگر `CHRONOSCALP_CONFIRM_LIVE=yes` |
-| توقف ربات `/bot_stop` | توقف فرآیند ربات |
-| سود/زیان `/pnl` | آمار ژورنال |
-| پوزیشن‌ها `/open` | لیست پوزیشن‌های باز |
-| توقف ورود `/halt` (قدیمی: `/stop`) | kill switch — ورود جدید متوقف |
-| ادامه ورود `/resume` | برداشتن kill switch |
-| لاگ `/logs` | آخرین خطوط لاگ |
-| `/whoami` | نمایش chat id |
+| وضعیت / سود / پوزیشن | مانیتور |
+| استارت Paper / Live / توقف ربات | فرآیند |
+| توقف ورود / ادامه ورود | kill switch |
+| **تنظیمات** | هاب اتصال + کنترل |
+| اتصال | بروکر، mode، تست، تأیید Live |
+| کنترل | نمادها، استراتژی، ریسک |
 
-### نکات امنیتی
+### اتصال (دکمه یا دستور)
 
-- Live بدون تأیید `.env` از تلگرام استارت **نمی‌شود** (عمدی؛ مثل پنل).
-- `/stop` دیگر فرآیند را نمی‌کشد — فقط ورود جدید را متوقف می‌کند. برای خاموش کردن فرآیند از **توقف ربات** / `/bot_stop` استفاده کنید.
+| دستور | کار |
+|---|---|
+| `/conn` | خلاصه اتصال |
+| `/provider mt5\|oanda` | انتخاب بروکر |
+| `/mode paper\|live` | حالت پروفایل |
+| `/set_mt5 LOGIN PASS SERVER [PATH]` | ذخیره MT5 |
+| `/set_oanda TOKEN ACCOUNT [practice\|live]` | ذخیره OANDA |
+| دکمه «بروکر MT5/OANDA» | ویزارد گام‌به‌گام |
+| `/test_conn` | تست اتصال |
+| `/live_confirm yes\|no` | گیت Live (عمدی؛ مثل پنل) |
 
-## ۵) عکس پروفایل بات
+### کنترل
 
-فایل آماده: `assets/brand/chronoscalp-bot-avatar.png`
+| دستور | کار |
+|---|---|
+| `/config` | همه تنظیمات |
+| `/symbols XAUUSD,EURUSD` | نمادهای فعال |
+| `/strategies smc_confluence,liquidity_volume` | استراتژی‌ها |
+| `/risk 0.5\|1\|1.5` | ریسک (سقف سخت ۱٪) |
 
-1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کنید
-2. `/setuserpic` بزنید
-3. بات `Chronoscalp_bot` را انتخاب کنید
-4. همان فایل PNG را بفرستید
+بعد از تغییر نماد/استراتژی/mode معمولاً **ری‌استارت ربات معامله** لازم است.
 
-اگر دکمه‌های فارسی خراب (حروف عجیب) شدند:
+## ۴) امنیت
 
-```bat
-python scripts\restore_telegram_keyboard.py
-```
+- بدون `TELEGRAM_CHAT_ID` هر کسی می‌تواند دستور بزند
+- Live بدون تأیید استارت نمی‌شود
+- رمزها را در چت گروهی نفرستید؛ فقط چت خصوصی با بات
 
-روی VPS هم همین اسکریپت را یک‌بار اجرا کنید تا کیبورد UTF-8 برگردد.
+## ۵) عکس پروفایل
+
+`assets/brand/chronoscalp-bot-avatar.png` → BotFather `/setuserpic`
+
+کیبورد خراب شد؟ `python scripts\restore_telegram_keyboard.py`

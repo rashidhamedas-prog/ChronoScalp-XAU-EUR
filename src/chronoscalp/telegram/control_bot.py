@@ -1,11 +1,11 @@
-"""Telegram control plane for ChronoScalp (start/stop, status, P&L, kill switch).
+"""Telegram control plane for ChronoScalp.
 
-Mirrors the user-panel process controls via long-polling. Requires
-``TELEGRAM_BOT_TOKEN`` in ``.env``. When ``TELEGRAM_CHAT_ID`` is set, only that
-chat may issue commands (recommended for production).
+Covers process start/stop, P&L, kill switch, broker connection, and
+panel-equivalent control settings (symbols / strategies / risk / live gate).
 
 Live start still requires ``CHRONOSCALP_CONFIRM_LIVE=yes`` — this bot never
-bypasses that gate.
+bypasses that gate; ``/live_confirm yes`` is an explicit operator action
+(same as the Streamlit panel).
 """
 
 from __future__ import annotations
@@ -22,6 +22,19 @@ from chronoscalp.config import Settings, get_settings
 from chronoscalp.logging_setup import logger
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.trade_journal import load_journal_snapshot
+from chronoscalp.saas.broker_wizard import (
+    KNOWN_STRATEGIES,
+    apply_active_symbols,
+    apply_broker_to_settings_yaml,
+    apply_enabled_strategies,
+    apply_risk_preset,
+    disable_live_confirm,
+    enable_live_confirm,
+    save_mt5_credentials,
+    save_oanda_credentials,
+    test_mt5_connection,
+    test_oanda_connection,
+)
 from chronoscalp.saas.process_control import (
     PID_FILE,
     bot_is_running,
@@ -31,86 +44,18 @@ from chronoscalp.saas.process_control import (
     tail_logs,
 )
 from chronoscalp.saas.user_config import UserConfigStore
-
-API = "https://api.telegram.org/bot{token}/{method}"
-
-# Reply-keyboard labels (Persian) — also accepted as free-text commands.
-BTN_STATUS = "وضعیت"
-BTN_PNL = "سود/زیان"
-BTN_OPEN = "پوزیشن‌ها"
-BTN_START_PAPER = "استارت Paper"
-BTN_START_LIVE = "استارت Live"
-BTN_STOP_BOT = "توقف ربات"
-BTN_HALT = "توقف ورود"
-BTN_RESUME = "ادامه ورود"
-BTN_LOGS = "لاگ"
-BTN_HELP = "راهنما"
-
-MAIN_KEYBOARD: dict[str, Any] = {
-    "keyboard": [
-        [{"text": BTN_STATUS}, {"text": BTN_PNL}, {"text": BTN_OPEN}],
-        [{"text": BTN_START_PAPER}, {"text": BTN_START_LIVE}, {"text": BTN_STOP_BOT}],
-        [{"text": BTN_HALT}, {"text": BTN_RESUME}],
-        [{"text": BTN_LOGS}, {"text": BTN_HELP}],
-    ],
-    "resize_keyboard": True,
-    "is_persistent": True,
-}
-
-HELP_TEXT = (
-    "ChronoScalp — کنترل از تلگرام\n\n"
-    "دکمه‌ها یا دستورها:\n"
-    "/status — وضعیت فرآیند + kill switch\n"
-    "/start_paper — شروع ربات (paper)\n"
-    "/start_live — شروع ربات (live؛ نیاز به تأیید .env)\n"
-    "/bot_stop — توقف فرآیند ربات\n"
-    "/pnl — آمار سود/زیان\n"
-    "/open — پوزیشن‌های باز\n"
-    "/halt — توقف ورود جدید (kill switch)\n"
-    "/resume — برداشتن kill switch\n"
-    "/logs — آخرین خطوط لاگ\n"
-    "/whoami — شناسه چت شما\n"
-    "/help — همین راهنما\n\n"
-    "نکته: Live بدون CHRONOSCALP_CONFIRM_LIVE=yes استارت نمی‌شود."
+from chronoscalp.telegram.keyboards import (
+    ALIASES,
+    CONN_KEYBOARD,
+    CONTROL_KEYBOARD,
+    HELP_TEXT,
+    MAIN_KEYBOARD,
+    OANDA_ENV_KEYBOARD,
+    SETTINGS_KEYBOARD,
 )
 
-# Map button labels / command aliases → canonical command key.
-_ALIASES: dict[str, str] = {
-    "/start": "help",
-    "/help": "help",
-    BTN_HELP: "help",
-    "راهنما": "help",
-    "/whoami": "whoami",
-    "/status": "status",
-    BTN_STATUS: "status",
-    "وضعیت": "status",
-    "/pnl": "pnl",
-    BTN_PNL: "pnl",
-    "سود/زیان": "pnl",
-    "/open": "open",
-    BTN_OPEN: "open",
-    "پوزیشن‌ها": "open",
-    "/start_paper": "start_paper",
-    BTN_START_PAPER: "start_paper",
-    "استارت paper": "start_paper",
-    "/start_live": "start_live",
-    BTN_START_LIVE: "start_live",
-    "استارت live": "start_live",
-    "/bot_stop": "bot_stop",
-    "/stop_bot": "bot_stop",
-    BTN_STOP_BOT: "bot_stop",
-    "توقف ربات": "bot_stop",
-    "/halt": "halt",
-    "/stop": "halt",  # backward-compatible kill-switch alias
-    BTN_HALT: "halt",
-    "توقف ورود": "halt",
-    "/resume": "resume",
-    BTN_RESUME: "resume",
-    "ادامه ورود": "resume",
-    "/logs": "logs",
-    BTN_LOGS: "logs",
-    "لاگ": "logs",
-}
+API = "https://api.telegram.org/bot{token}/{method}"
+DEFAULT_MT5_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
 
 
 class TelegramControlBot:
@@ -127,6 +72,7 @@ class TelegramControlBot:
         logs_fn: Callable[[int], list[str]] | None = None,
         license_check: Callable[[Settings], Any] | None = None,
     ) -> None:
+        self._settings_injected = settings is not None
         self.settings = settings or get_settings()
         self.token = self.settings.secrets.telegram_bot_token.strip()
         if not self.token:
@@ -141,12 +87,24 @@ class TelegramControlBot:
             env_stop=self.settings.secrets.chronoscalp_stop_trading,
         )
         self.offset = 0
+        self._pending: dict[int, dict[str, Any]] = {}
         self._start_fn = start_fn or (lambda mode: start_bot(mode=mode, pid_file=self.pid_file))
         self._stop_fn = stop_fn or (lambda: stop_bot(pid_file=self.pid_file))
         self._running_fn = running_fn or (lambda: bot_is_running(self.pid_file))
         self._pid_fn = pid_fn or (lambda: bot_pid(self.pid_file))
         self._logs_fn = logs_fn or (lambda n: tail_logs(n))
         self._license_check = license_check
+
+    def _reload_settings(self) -> None:
+        if self._settings_injected:
+            return
+        get_settings.cache_clear()
+        self.settings = get_settings()
+        self.allowed_chat = self.settings.secrets.telegram_chat_id.strip() or self.allowed_chat
+        self.kill = KillSwitch(
+            state_dir=Path(self.settings.execution.get("state_dir", "data/state")),
+            env_stop=self.settings.secrets.chronoscalp_stop_trading,
+        )
 
     def _detect_mode(self) -> str:
         if (self.state_dir / "trade_journal_live.json").exists():
@@ -221,29 +179,52 @@ class TelegramControlBot:
         raw = (text or "").strip()
         if not raw:
             return None
-        # Strip @BotUsername from /cmd@BotUsername
         first = raw.split()[0]
         if first.startswith("/") and "@" in first:
             first = first.split("@", 1)[0]
         key = first.lower() if first.startswith("/") else first
-        # Normalize Persian button labels (exact + lowercased latin cmds)
-        if key in _ALIASES:
-            return _ALIASES[key]
+        if key in ALIASES:
+            return ALIASES[key]
         lowered = key.lower()
-        if lowered in _ALIASES:
-            return _ALIASES[lowered]
-        return _ALIASES.get(raw) or _ALIASES.get(raw.lower())
+        if lowered in ALIASES:
+            return ALIASES[lowered]
+        return ALIASES.get(raw) or ALIASES.get(raw.lower())
 
-    def _cmd_help(self, chat_id: int) -> None:
+    def _args(self, text: str) -> list[str]:
+        parts = (text or "").strip().split()
+        if not parts:
+            return []
+        # Drop command token
+        return parts[1:]
+
+    # --- core ops ---
+
+    def _cmd_help(self, chat_id: int, _text: str = "") -> None:
         self.send(chat_id, HELP_TEXT, reply_markup=MAIN_KEYBOARD)
 
-    def _cmd_whoami(self, chat_id: int) -> None:
+    def _cmd_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(chat_id, "منوی اصلی", reply_markup=MAIN_KEYBOARD)
+
+    def _cmd_settings(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(chat_id, "تنظیمات — اتصال یا کنترل را انتخاب کنید.", reply_markup=SETTINGS_KEYBOARD)
+
+    def _cmd_conn_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(chat_id, "تنظیمات اتصال", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_control_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(chat_id, "تنظیمات کنترل (نماد / استراتژی / ریسک)", reply_markup=CONTROL_KEYBOARD)
+
+    def _cmd_whoami(self, chat_id: int, _text: str = "") -> None:
         self.send(
             chat_id,
             f"chat_id = {chat_id}\nاین مقدار را در .env به‌صورت TELEGRAM_CHAT_ID بگذارید.",
         )
 
-    def _cmd_status(self, chat_id: int) -> None:
+    def _cmd_status(self, chat_id: int, _text: str = "") -> None:
         running = self._running_fn()
         pid = self._pid_fn() if running else None
         mode = self._detect_mode()
@@ -252,20 +233,22 @@ class TelegramControlBot:
         broker = self.settings.execution.get("broker", "?")
         symbols = ", ".join(self.settings.symbols) if self.settings.symbols else "—"
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
+        user = UserConfigStore().config
         lines = [
             "وضعیت ChronoScalp",
             f"فرآیند: {'در حال اجرا' if running else 'متوقف'}"
             + (f" (PID {pid})" if pid else ""),
             f"حالت ژورنال: {mode}",
-            f"بروکر: {broker}",
+            f"پروفایل: provider={user.broker.provider} mode={user.broker.mode}",
+            f"بروکر اجرا: {broker}",
             f"نمادها: {symbols}",
             f"kill_switch: {ks}",
             f"دلیل: {reason}",
             f"تأیید Live (.env): {live_ok}",
         ]
-        self.send(chat_id, "\n".join(lines))
+        self.send(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
 
-    def _cmd_pnl(self, chat_id: int) -> None:
+    def _cmd_pnl(self, chat_id: int, _text: str = "") -> None:
         mode = self._detect_mode()
         snap = load_journal_snapshot(
             self.state_dir, mode, reference_equity=self.reference_equity
@@ -282,7 +265,7 @@ class TelegramControlBot:
             ),
         )
 
-    def _cmd_open(self, chat_id: int) -> None:
+    def _cmd_open(self, chat_id: int, _text: str = "") -> None:
         mode = self._detect_mode()
         snap = load_journal_snapshot(self.state_dir, mode)
         if not snap.open_trades:
@@ -295,7 +278,6 @@ class TelegramControlBot:
         self.send(chat_id, "پوزیشن‌های باز:\n" + "\n".join(lines))
 
     def _ensure_license(self) -> str | None:
-        """Return an error message when license check fails, else None."""
         checker = self._license_check
         if checker is None:
             try:
@@ -310,7 +292,7 @@ class TelegramControlBot:
             return str(exc)
         return None
 
-    def _cmd_start_paper(self, chat_id: int) -> None:
+    def _cmd_start_paper(self, chat_id: int, _text: str = "") -> None:
         err = self._ensure_license()
         if err:
             self.send(chat_id, f"لایسنس: {err}")
@@ -318,12 +300,13 @@ class TelegramControlBot:
         ok, msg = self._start_fn("paper")
         self.send(chat_id, ("✅ " if ok else "❌ ") + msg)
 
-    def _cmd_start_live(self, chat_id: int) -> None:
+    def _cmd_start_live(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
         if not self.settings.secrets.live_trading_confirmed:
             self.send(
                 chat_id,
-                "❌ حالت Live نیاز به CHRONOSCALP_CONFIRM_LIVE=yes در .env دارد.\n"
-                "از پنل کنترل تأیید کنید یا .env را دستی تنظیم کنید — این گیت عمدی است.",
+                "❌ حالت Live نیاز به CHRONOSCALP_CONFIRM_LIVE=yes دارد.\n"
+                "دکمه «تأیید Live روشن» یا /live_confirm yes را بزنید.",
             )
             return
         err = self._ensure_license()
@@ -333,19 +316,19 @@ class TelegramControlBot:
         ok, msg = self._start_fn("live")
         self.send(chat_id, ("✅ " if ok else "❌ ") + msg)
 
-    def _cmd_bot_stop(self, chat_id: int) -> None:
+    def _cmd_bot_stop(self, chat_id: int, _text: str = "") -> None:
         ok, msg = self._stop_fn()
         self.send(chat_id, ("✅ " if ok else "⚠️ ") + msg)
 
-    def _cmd_halt(self, chat_id: int) -> None:
+    def _cmd_halt(self, chat_id: int, _text: str = "") -> None:
         self.kill.activate("telegram /halt")
         self.send(chat_id, "🛑 Kill switch فعال شد — ورود جدید متوقف است.")
 
-    def _cmd_resume(self, chat_id: int) -> None:
+    def _cmd_resume(self, chat_id: int, _text: str = "") -> None:
         self.kill.deactivate()
         self.send(chat_id, "✅ Kill switch برداشته شد.")
 
-    def _cmd_logs(self, chat_id: int) -> None:
+    def _cmd_logs(self, chat_id: int, _text: str = "") -> None:
         lines = self._logs_fn(25)
         if not lines:
             self.send(chat_id, "لاگی پیدا نشد.")
@@ -354,6 +337,427 @@ class TelegramControlBot:
         if len(body) > 3800:
             body = body[-3800:]
         self.send(chat_id, f"آخرین لاگ:\n{body}")
+
+    def _cmd_cancel(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(chat_id, "لغو شد.", reply_markup=SETTINGS_KEYBOARD)
+
+    # --- connection ---
+
+    def _connection_summary(self) -> str:
+        user = UserConfigStore().config
+        s = self.settings.secrets
+        live = "yes" if s.live_trading_confirmed else "no"
+        mt5_login = s.mt5_login or "—"
+        mt5_server = s.mt5_server or "—"
+        oanda_acc = (s.oanda_account_id or "—")[:8] + ("…" if s.oanda_account_id else "")
+        has_oanda = "set" if s.oanda_api_token else "empty"
+        return "\n".join(
+            [
+                "اتصال / Connection",
+                f"provider={user.broker.provider}",
+                f"mode={user.broker.mode}",
+                f"oanda_env={user.broker.oanda_environment}",
+                f"execution.broker={self.settings.execution.get('broker')}",
+                f"live_confirm={live}",
+                f"MT5 login={mt5_login} server={mt5_server}",
+                f"OANDA token={has_oanda} account={oanda_acc}",
+                f"onboarding={user.broker.onboarding_complete}",
+            ]
+        )
+
+    def _cmd_conn(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        self.send(chat_id, self._connection_summary(), reply_markup=CONN_KEYBOARD)
+
+    def _cmd_config(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        from chronoscalp.risk.position_sizing import resolve_active_risk_pct
+        from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+
+        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.settings.strategy)
+        strats = []
+        if use_smc:
+            strats.append("smc_confluence")
+        if use_liq:
+            strats.append("liquidity_volume")
+        if use_scalp:
+            strats.append("ultra_scalp")
+        risk = resolve_active_risk_pct(self.settings.risk)
+        symbols = ", ".join(self.settings.symbols) or "—"
+        text = (
+            self._connection_summary()
+            + "\n\nکنترل / Control\n"
+            + f"symbols={symbols}\n"
+            + f"strategies={','.join(strats) or '(MACD/trend only)'}\n"
+            + f"risk_effective={risk}%"
+        )
+        self.send(chat_id, text, reply_markup=CONTROL_KEYBOARD)
+
+    def _save_user_broker(
+        self,
+        *,
+        provider: str | None = None,
+        mode: str | None = None,
+        oanda_environment: str | None = None,
+        onboarding_complete: bool | None = None,
+    ) -> None:
+        store = UserConfigStore()
+        cfg = store.config
+        if provider is not None:
+            cfg.broker.provider = provider
+        if mode is not None:
+            cfg.broker.mode = mode
+        if oanda_environment is not None:
+            cfg.broker.oanda_environment = oanda_environment
+        if onboarding_complete is not None:
+            cfg.broker.onboarding_complete = onboarding_complete
+        store.save()
+
+    def _apply_provider_mode(self, provider: str, mode: str, oanda_env: str = "practice") -> None:
+        apply_broker_to_settings_yaml(provider, mode, oanda_env)
+        self._save_user_broker(
+            provider=provider,
+            mode=mode,
+            oanda_environment=oanda_env,
+            onboarding_complete=True,
+        )
+        self._reload_settings()
+
+    def _cmd_mode_paper(self, chat_id: int, _text: str = "") -> None:
+        user = UserConfigStore().config
+        self._apply_provider_mode(user.broker.provider or "mt5", "paper", user.broker.oanda_environment)
+        self.send(chat_id, "✅ mode=paper ذخیره شد. برای اعمال، ربات را ری‌استارت کنید.", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_mode_live(self, chat_id: int, _text: str = "") -> None:
+        user = UserConfigStore().config
+        self._apply_provider_mode(user.broker.provider or "mt5", "live", user.broker.oanda_environment)
+        self.send(
+            chat_id,
+            "✅ mode=live ذخیره شد.\n"
+            "استارت Live هنوز به تأیید Live نیاز دارد (/live_confirm yes).",
+            reply_markup=CONN_KEYBOARD,
+        )
+
+    def _cmd_mode(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args or args[0].lower() not in ("paper", "live"):
+            self.send(chat_id, "استفاده: /mode paper|live")
+            return
+        if args[0].lower() == "paper":
+            self._cmd_mode_paper(chat_id)
+        else:
+            self._cmd_mode_live(chat_id)
+
+    def _cmd_provider(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args or args[0].lower() not in ("mt5", "oanda"):
+            self.send(chat_id, "استفاده: /provider mt5|oanda")
+            return
+        provider = args[0].lower()
+        user = UserConfigStore().config
+        self._apply_provider_mode(provider, user.broker.mode or "paper", user.broker.oanda_environment)
+        self.send(chat_id, f"✅ provider={provider} ذخیره شد.", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_live_on(self, chat_id: int, _text: str = "") -> None:
+        enable_live_confirm()
+        self._reload_settings()
+        self.send(chat_id, "✅ CHRONOSCALP_CONFIRM_LIVE=yes", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_live_off(self, chat_id: int, _text: str = "") -> None:
+        disable_live_confirm()
+        self._reload_settings()
+        self.send(chat_id, "✅ CHRONOSCALP_CONFIRM_LIVE=no", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_live_confirm(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args or args[0].lower() not in ("yes", "no", "on", "off", "1", "0"):
+            self.send(chat_id, "استفاده: /live_confirm yes|no")
+            return
+        if args[0].lower() in ("yes", "on", "1"):
+            self._cmd_live_on(chat_id)
+        else:
+            self._cmd_live_off(chat_id)
+
+    def _cmd_test_conn(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        user = UserConfigStore().config
+        provider = user.broker.provider or "mt5"
+        self.send(chat_id, f"در حال تست اتصال {provider}…")
+        if provider == "oanda":
+            res = test_oanda_connection(
+                self.settings.secrets.oanda_api_token,
+                self.settings.secrets.oanda_account_id,
+                user.broker.oanda_environment or "practice",
+            )
+        else:
+            try:
+                res = test_mt5_connection(
+                    int(self.settings.secrets.mt5_login or 0),
+                    self.settings.secrets.mt5_password,
+                    self.settings.secrets.mt5_server,
+                    self.settings.secrets.mt5_terminal_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.send(chat_id, f"❌ {exc}", reply_markup=CONN_KEYBOARD)
+                return
+        self.send(chat_id, ("✅ " if res.ok else "❌ ") + res.message, reply_markup=CONN_KEYBOARD)
+
+    def _cmd_wizard_mt5(self, chat_id: int, _text: str = "") -> None:
+        self._pending[chat_id] = {"flow": "mt5", "step": "login", "data": {}}
+        self.send(chat_id, "MT5 Login (عدد) را بفرستید — یا /cancel", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_wizard_oanda(self, chat_id: int, _text: str = "") -> None:
+        self._pending[chat_id] = {"flow": "oanda", "step": "token", "data": {}}
+        self.send(chat_id, "OANDA API Token را بفرستید — یا /cancel", reply_markup=CONN_KEYBOARD)
+
+    def _cmd_set_mt5(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if len(args) < 3:
+            self.send(
+                chat_id,
+                "استفاده:\n/set_mt5 LOGIN PASSWORD SERVER [PATH]\n"
+                "یا دکمه «بروکر MT5» برای ویزارد.",
+            )
+            return
+        login, password, server = args[0], args[1], args[2]
+        path = " ".join(args[3:]) if len(args) > 3 else DEFAULT_MT5_PATH
+        self._finish_mt5(chat_id, login, password, server, path)
+
+    def _cmd_set_oanda(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if len(args) < 2:
+            self.send(
+                chat_id,
+                "استفاده:\n/set_oanda TOKEN ACCOUNT_ID [practice|live]\n"
+                "یا دکمه «بروکر OANDA» برای ویزارد.",
+            )
+            return
+        token, account = args[0], args[1]
+        env = args[2].lower() if len(args) > 2 else "practice"
+        if env not in ("practice", "live"):
+            env = "practice"
+        self._finish_oanda(chat_id, token, account, env)
+
+    def _finish_mt5(
+        self, chat_id: int, login: str, password: str, server: str, path: str
+    ) -> None:
+        try:
+            int(login)
+        except ValueError:
+            self.send(chat_id, "❌ Login باید عدد باشد.")
+            return
+        save_mt5_credentials(login, password, server, path)
+        user = UserConfigStore().config
+        mode = user.broker.mode if user.broker.mode in ("paper", "live") else "paper"
+        self._apply_provider_mode("mt5", mode)
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            f"✅ MT5 ذخیره شد (login={login}, server={server}).\n"
+            "برای تست: /test_conn",
+            reply_markup=CONN_KEYBOARD,
+        )
+
+    def _finish_oanda(self, chat_id: int, token: str, account: str, env: str) -> None:
+        save_oanda_credentials(token, account)
+        user = UserConfigStore().config
+        mode = user.broker.mode if user.broker.mode in ("paper", "live") else "paper"
+        self._apply_provider_mode("oanda", mode, env)
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            f"✅ OANDA ذخیره شد (env={env}).\nبرای تست: /test_conn",
+            reply_markup=CONN_KEYBOARD,
+        )
+
+    def _cmd_oanda_env_practice(self, chat_id: int, _text: str = "") -> None:
+        pending = self._pending.get(chat_id)
+        if not pending or pending.get("flow") != "oanda" or pending.get("step") != "env":
+            self.send(chat_id, "ابتدا ویزارد OANDA را شروع کنید.")
+            return
+        data = pending["data"]
+        self._finish_oanda(chat_id, data["token"], data["account"], "practice")
+
+    def _cmd_oanda_env_live(self, chat_id: int, _text: str = "") -> None:
+        pending = self._pending.get(chat_id)
+        if not pending or pending.get("flow") != "oanda" or pending.get("step") != "env":
+            self.send(chat_id, "ابتدا ویزارد OANDA را شروع کنید.")
+            return
+        data = pending["data"]
+        self._finish_oanda(chat_id, data["token"], data["account"], "live")
+
+    # --- control: symbols / strategies / risk ---
+
+    def _cmd_symbols_prompt(self, chat_id: int, _text: str = "") -> None:
+        catalog = list(self.settings.available_symbols) or list(self.settings.symbols)
+        current = ", ".join(self.settings.symbols) or "—"
+        avail = ", ".join(catalog) or "—"
+        self._pending[chat_id] = {"flow": "symbols", "step": "list", "data": {}}
+        self.send(
+            chat_id,
+            f"نمادهای فعال: {current}\nموجود: {avail}\n\n"
+            "لیست جدید را با ویرگول بفرستید:\nXAUUSD,EURUSD\nیا /cancel",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_symbols(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        raw = " ".join(args) if args else ""
+        if not raw:
+            self._cmd_symbols_prompt(chat_id)
+            return
+        self._apply_symbols(chat_id, raw)
+
+    def _apply_symbols(self, chat_id: int, raw: str) -> None:
+        parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
+        catalog = list(self.settings.available_symbols) or list(self.settings.symbols)
+        try:
+            saved = apply_active_symbols(parts, allowed=catalog or None)
+        except ValueError as exc:
+            self.send(chat_id, f"❌ {exc}")
+            return
+        self._reload_settings()
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            f"✅ نمادها: {', '.join(saved)}\nربات را ری‌استارت کنید.",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_strategies_prompt(self, chat_id: int, _text: str = "") -> None:
+        known = ", ".join(KNOWN_STRATEGIES)
+        self._pending[chat_id] = {"flow": "strategies", "step": "list", "data": {}}
+        self.send(
+            chat_id,
+            f"استراتژی‌های شناخته‌شده:\n{known}\n\n"
+            "لیست را با ویرگول بفرستید (خالی = فقط MACD/trend):\n"
+            "smc_confluence,liquidity_volume\nیا /cancel",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_strategies(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args:
+            self._cmd_strategies_prompt(chat_id)
+            return
+        raw = " ".join(args)
+        self._apply_strategies(chat_id, raw)
+
+    def _apply_strategies(self, chat_id: int, raw: str) -> None:
+        parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
+        saved = apply_enabled_strategies(parts)
+        self._reload_settings()
+        self._pending.pop(chat_id, None)
+        label = ", ".join(saved) if saved else "(MACD/trend only)"
+        self.send(
+            chat_id,
+            f"✅ استراتژی‌ها: {label}\nربات را ری‌استارت کنید.",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _set_risk(self, chat_id: int, pct: float) -> None:
+        effective = apply_risk_preset(pct)
+        self._reload_settings()
+        note = ""
+        if pct > 1.0:
+            note = f"\n(انتخاب {pct}% بود؛ سقف امنیتی → {effective}%)"
+        self.send(
+            chat_id,
+            f"✅ ریسک مؤثر = {effective}%{note}",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_risk_05(self, chat_id: int, _text: str = "") -> None:
+        self._set_risk(chat_id, 0.5)
+
+    def _cmd_risk_10(self, chat_id: int, _text: str = "") -> None:
+        self._set_risk(chat_id, 1.0)
+
+    def _cmd_risk_15(self, chat_id: int, _text: str = "") -> None:
+        self._set_risk(chat_id, 1.5)
+
+    def _cmd_risk(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args:
+            self.send(chat_id, "استفاده: /risk 0.5|1|1.5")
+            return
+        try:
+            pct = float(args[0].replace("%", "").replace("٫", ".").replace(",", "."))
+        except ValueError:
+            self.send(chat_id, "❌ عدد نامعتبر")
+            return
+        if pct not in (0.5, 1.0, 1.5):
+            self.send(chat_id, "فقط presetهای 0.5 / 1 / 1.5 مجاز است.")
+            return
+        self._set_risk(chat_id, pct)
+
+    # --- pending wizard input ---
+
+    def _handle_pending(self, chat_id: int, text: str) -> bool:
+        pending = self._pending.get(chat_id)
+        if not pending:
+            return False
+        raw = (text or "").strip()
+        if not raw:
+            return True
+        if raw.startswith("/"):
+            return False  # allow command to cancel/override via normal dispatch
+        flow = pending.get("flow")
+        step = pending.get("step")
+        data = pending.setdefault("data", {})
+
+        if flow == "mt5":
+            if step == "login":
+                data["login"] = raw
+                pending["step"] = "password"
+                self.send(chat_id, "رمز MT5 را بفرستید:")
+                return True
+            if step == "password":
+                data["password"] = raw
+                pending["step"] = "server"
+                self.send(chat_id, "نام Server بروکر را بفرستید:")
+                return True
+            if step == "server":
+                data["server"] = raw
+                pending["step"] = "path"
+                self.send(
+                    chat_id,
+                    f"مسیر terminal64.exe را بفرستید\n(یا `-` برای پیش‌فرض:\n{DEFAULT_MT5_PATH})",
+                )
+                return True
+            if step == "path":
+                path = DEFAULT_MT5_PATH if raw in ("-", "default", "پیش‌فرض") else raw
+                self._finish_mt5(
+                    chat_id, data["login"], data["password"], data["server"], path
+                )
+                return True
+
+        if flow == "oanda":
+            if step == "token":
+                data["token"] = raw
+                pending["step"] = "account"
+                self.send(chat_id, "OANDA Account ID را بفرستید:")
+                return True
+            if step == "account":
+                data["account"] = raw
+                pending["step"] = "env"
+                self.send(
+                    chat_id,
+                    "محیط OANDA را انتخاب کنید:",
+                    reply_markup=OANDA_ENV_KEYBOARD,
+                )
+                return True
+
+        if flow == "symbols" and step == "list":
+            self._apply_symbols(chat_id, raw)
+            return True
+
+        if flow == "strategies" and step == "list":
+            self._apply_strategies(chat_id, raw)
+            return True
+
+        return False
 
     def handle(self, chat_id: int, text: str) -> None:
         """Dispatch one inbound message."""
@@ -364,13 +768,20 @@ class TelegramControlBot:
 
         self._bind_chat_if_needed(chat_id)
 
-        cmd = self._resolve_command(text)
-        if cmd is None:
-            self.send(chat_id, "دستور ناشناخته. /help را بزنید.", reply_markup=MAIN_KEYBOARD)
+        if self._handle_pending(chat_id, text):
             return
 
-        handlers: dict[str, Callable[[int], None]] = {
+        cmd = self._resolve_command(text)
+        if cmd is None:
+            self.send(chat_id, "دستور ناشناخته. /help یا /settings را بزنید.", reply_markup=MAIN_KEYBOARD)
+            return
+
+        handlers: dict[str, Callable[[int, str], None]] = {
             "help": self._cmd_help,
+            "menu": self._cmd_menu,
+            "settings": self._cmd_settings,
+            "conn_menu": self._cmd_conn_menu,
+            "control_menu": self._cmd_control_menu,
             "whoami": self._cmd_whoami,
             "status": self._cmd_status,
             "pnl": self._cmd_pnl,
@@ -381,8 +792,33 @@ class TelegramControlBot:
             "halt": self._cmd_halt,
             "resume": self._cmd_resume,
             "logs": self._cmd_logs,
+            "cancel": self._cmd_cancel,
+            "conn": self._cmd_conn,
+            "config": self._cmd_config,
+            "mode_paper": self._cmd_mode_paper,
+            "mode_live": self._cmd_mode_live,
+            "mode": self._cmd_mode,
+            "provider": self._cmd_provider,
+            "live_on": self._cmd_live_on,
+            "live_off": self._cmd_live_off,
+            "live_confirm": self._cmd_live_confirm,
+            "test_conn": self._cmd_test_conn,
+            "wizard_mt5": self._cmd_wizard_mt5,
+            "wizard_oanda": self._cmd_wizard_oanda,
+            "set_mt5": self._cmd_set_mt5,
+            "set_oanda": self._cmd_set_oanda,
+            "oanda_env_practice": self._cmd_oanda_env_practice,
+            "oanda_env_live": self._cmd_oanda_env_live,
+            "symbols_prompt": self._cmd_symbols_prompt,
+            "symbols": self._cmd_symbols,
+            "strategies_prompt": self._cmd_strategies_prompt,
+            "strategies": self._cmd_strategies,
+            "risk_05": self._cmd_risk_05,
+            "risk_10": self._cmd_risk_10,
+            "risk_15": self._cmd_risk_15,
+            "risk": self._cmd_risk,
         }
-        handlers[cmd](chat_id)
+        handlers[cmd](chat_id, text)
 
     def run_forever(self) -> None:
         """Block forever, long-polling Telegram updates."""
