@@ -71,7 +71,7 @@ services:
       ]
     restart: unless-stopped
 
-  # Telegram control bot (/status /pnl /stop /resume). Needs TELEGRAM_BOT_TOKEN.
+  # Telegram control bot (start/stop, status, P&L, kill switch, logs). Needs TELEGRAM_BOT_TOKEN.
   chronoscalp-telegram:
     build:
       context: ..

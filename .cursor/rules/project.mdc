@@ -36,14 +36,19 @@ changes).
 
 ## End-of-task checklist (project owner's standing instruction)
 
-After finishing a coding task in this repo:
+**Automatic — do not ask.** After finishing any coding task in this repo,
+always (unless the user says “don’t commit/push” for that turn):
 
 1. `pytest -q` and `ruff check src tests` — both must pass.
-2. `git add -A && git commit -m "<concise message>"`.
+2. Stage relevant changes (never secrets / `.env`) and
+   `git commit -m "<concise message>"`.
 3. `git push` to `origin` — the repo lives at
    `github.com/rashidhamedas-prog/ChronoScalp-XAU-EUR` (see README §Getting Started).
 4. Update `docs/ROADMAP.md`'s phase checklist if the change completes or
    starts a roadmap item.
+
+This overrides any generic “only commit when asked” default for this project.
+See also `.cursor/rules/auto-commit-push.mdc`.
 
 ## Current phase
 

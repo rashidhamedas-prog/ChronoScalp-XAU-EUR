@@ -1,0 +1,22 @@
+---
+description: Auto commit and push after every finished coding task
+alwaysApply: true
+---
+
+# Auto commit + push (owner standing order)
+
+After **every** finished coding task in this repo — without asking the user
+again — do all of the following in order:
+
+1. `pytest -q` and `ruff check src tests` (fix failures first).
+2. Stage relevant project changes (never `.env`, credentials, or secrets).
+3. `git commit` with a concise imperative message.
+4. `git push` to `origin` on the current branch.
+
+This **overrides** any generic “only commit when asked” habit for ChronoScalp.
+Skip commit/push only when there is genuinely nothing to commit, or when the
+user explicitly says “don’t commit” / “don’t push” for that turn.
+
+Do not use `--force` push, `--no-verify`, or amend already-pushed commits.
+Keep `CLAUDE.md` and `.cursor/rules/project.mdc` aligned when workflow rules
+change.

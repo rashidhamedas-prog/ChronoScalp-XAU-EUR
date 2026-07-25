@@ -313,7 +313,7 @@ CHRONOSCALP_STOP_TRADING=yes
 
 ---
 
-## ۱۲. هشدار تلگرام
+## ۱۲. هشدار و کنترل تلگرام
 
 ### قدم ۱
 با [@BotFather](https://t.me/BotFather) یک bot بسازید → Token بگیرید.
@@ -322,10 +322,25 @@ CHRONOSCALP_STOP_TRADING=yes
 به bot پیام بدهید، سپس Chat ID را پیدا کنید:
 `https://api.telegram.org/bot<TOKEN>/getUpdates`
 
-### قدم ۳
-در `.env` و `settings.yaml` (بخش alerting) پر کنید.
+یا کنترل‌بات را روشن کنید و `/whoami` بزنید.
 
-هر باز/بسته شدن معامله، قطع اتصال، و daily loss limit به تلگرام می‌رود.
+### قدم ۳
+در `.env` و `settings.yaml` (بخش alerting) پر کنید:
+
+```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+```
+
+### قدم ۴ — کنترل برنامه از تلگرام
+```bat
+.\.venv\Scripts\python.exe scripts\telegram_control_bot.py
+```
+
+با `/start` کیبورد فارسی می‌آید: استارت Paper/Live، توقف ربات، وضعیت، سود/زیان، پوزیشن‌ها، توقف/ادامه ورود، لاگ.
+جزئیات: [TELEGRAM_BOT_FA.md](TELEGRAM_BOT_FA.md)
+
+هر باز/بسته شدن معامله، قطع اتصال، و daily loss limit هم به تلگرام می‌رود (alerting).
 
 ---
 

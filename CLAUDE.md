@@ -41,17 +41,23 @@ starting new work — update it when a phase item is completed.
 
 ## Workflow expected at the end of every unit of work
 
-Per project owner's standing instruction: after finishing any coding task in
-this repo, always:
+**Automatic — do not ask the user.** After finishing any coding task in this
+repo, always (unless the user explicitly says “don’t commit” / “don’t push”
+for that turn):
 
 1. Run `pytest -q` and `ruff check src tests` — fix failures before proceeding.
-2. `git add -A && git commit -m "<concise, imperative summary>"`.
-3. `git push` (to the configured `origin` remote — see README §Getting Started
-   for the GitHub URL; if `origin` isn't configured yet, ask the user for the
-   real GitHub repo URL and run `git remote add origin <url>` first).
+2. Stage relevant project files (never `.env` or secrets) and
+   `git commit -m "<concise, imperative summary>"`.
+3. `git push` to the configured `origin` remote (see README §Getting Started
+   for the GitHub URL; if `origin` isn't configured yet, ask once for the URL
+   and run `git remote add origin <url>` first).
 4. Leave a short note in `docs/ROADMAP.md` (checklist) or `CLAUDE.md` itself
    if the change affects how future sessions (Claude Code or Cursor) should
    approach the project — this keeps both tools' context in sync.
+
+This standing order **overrides** any generic “only commit when asked” habit
+for ChronoScalp. Mirrored in `.cursor/rules/auto-commit-push.mdc` and
+`.cursor/rules/project.mdc`.
 
 ## Conventions
 
@@ -74,6 +80,7 @@ this repo, always:
 | Change entry/trend-alignment logic | `src/chronoscalp/strategy/multi_timeframe.py` |
 | Change position sizing / breakeven / trailing | `src/chronoscalp/risk/position_sizing.py` |
 | Add a news source | `src/chronoscalp/filters/news_filter.py` |
+| Control via Telegram | `src/chronoscalp/telegram/control_bot.py`, `scripts/telegram_control_bot.py` |
 | Add a broker | `src/chronoscalp/execution/broker.py` (interface) + new impl file |
 | Change backtest fill/slippage assumptions | `src/chronoscalp/backtest/engine.py` |
 | Tune session windows, risk %, spread caps | `config/settings.yaml` (no code change needed) |

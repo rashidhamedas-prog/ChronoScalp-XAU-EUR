@@ -14,7 +14,13 @@ from chronoscalp.saas.broker_wizard import (
     test_mt5_connection,
     test_oanda_connection,
 )
-from chronoscalp.saas.process_control import bot_is_running, start_bot, stop_bot
+from chronoscalp.saas.process_control import (
+    bot_is_running,
+    bot_pid,
+    start_bot,
+    stop_bot,
+    tail_logs,
+)
 from chronoscalp.saas.user_config import UserConfig, UserConfigStore
 
 __all__ = [
@@ -26,6 +32,7 @@ __all__ = [
     "apply_enabled_strategies",
     "apply_risk_preset",
     "bot_is_running",
+    "bot_pid",
     "disable_live_confirm",
     "enable_live_confirm",
     "save_mt5_credentials",
@@ -33,6 +40,7 @@ __all__ = [
     "save_telegram_credentials",
     "start_bot",
     "stop_bot",
+    "tail_logs",
     "test_mt5_connection",
     "test_oanda_connection",
 ]

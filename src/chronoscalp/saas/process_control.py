@@ -140,3 +140,32 @@ def stop_bot(pid_file: Path = PID_FILE) -> tuple[bool, str]:
     pid_file.unlink(missing_ok=True)
     logger.info("Stopped bot pid={}", pid)
     return True, f"ربات (PID {pid}) متوقف شد"
+
+
+def bot_pid(pid_file: Path = PID_FILE) -> int | None:
+    """Return the managed bot PID when the pid file is valid, else None."""
+    if not pid_file.exists():
+        return None
+    try:
+        return int(pid_file.read_text(encoding="utf-8").strip())
+    except ValueError:
+        return None
+
+
+def tail_logs(n: int = 40, log_dir: Path | None = None) -> list[str]:
+    """Return the last ``n`` lines from the newest chronoscalp_*.log file."""
+    directory = Path(log_dir) if log_dir is not None else ROOT / "logs"
+    logs = sorted(directory.glob("chronoscalp_*.log"))
+    if not logs:
+        # Fall back to subprocess stdout captured by start_bot.
+        stdout_path = directory / "bot_stdout.log"
+        if stdout_path.exists():
+            logs = [stdout_path]
+        else:
+            return []
+    path = logs[-1]
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return text[-max(1, n) :]
