@@ -51,7 +51,8 @@ class TradingStateStore:
             self.state = TradingState()
             return self.state
 
-        with self.path.open("r", encoding="utf-8") as f:
+        # utf-8-sig strips an optional BOM (PowerShell/Windows editors often add one).
+        with self.path.open("r", encoding="utf-8-sig") as f:
             raw = json.load(f)
         self.state = TradingState.from_dict(raw)
         logger.info(

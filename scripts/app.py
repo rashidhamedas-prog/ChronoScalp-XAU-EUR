@@ -593,7 +593,8 @@ def page_monitor(settings) -> None:
     path = state_dir / f"trading_state_{mode}.json"
     with st.expander("State JSON", expanded=False):
         if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig tolerates BOM (e.g. Windows PowerShell Set-Content -Encoding utf8).
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
             st.json(data)
         else:
             st.info("هنوز state ذخیره نشده — ربات را یک‌بار اجرا کنید")

@@ -28,3 +28,17 @@ def test_state_store_reconcile_adopts_broker_positions(tmp_path: Path):
     store.reconcile_open_tickets({"EURUSD": 55})
     assert store.state.open_tickets == {"EURUSD": 55}
     assert json.loads(path.read_text(encoding="utf-8"))["open_tickets"]["EURUSD"] == 55
+
+
+def test_state_store_loads_utf8_bom(tmp_path: Path):
+    path = tmp_path / "state_bom.json"
+    payload = {
+        "open_tickets": {"BTCUSD": 7},
+        "processed_signals": [],
+        "last_evaluated_bars": {},
+        "updated_at": "2026-07-25T00:00:00",
+    }
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8"))
+    store = TradingStateStore(path)
+    store.load()
+    assert store.state.open_tickets == {"BTCUSD": 7}
