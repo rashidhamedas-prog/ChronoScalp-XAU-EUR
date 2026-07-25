@@ -145,6 +145,8 @@ class TradingBot:
         self._daily_loss_alerted = False
         self._connection_loss_alerted = False
         self._kill_switch_alerted = False
+        self._skip_counts: dict[str, int] = {}
+        self._last_skip_log_at: datetime | None = None
 
         self.open_tickets: dict[str, int] = dict(self.state_store.state.open_tickets)
         self.bar_gate = BarCloseGate()
@@ -255,6 +257,23 @@ class TradingBot:
             self._reconcile_state_with_broker(alert_on_change=True)
             self._last_reconcile_at = now
 
+    def _note_skip(self, reason: str) -> None:
+        self._skip_counts[reason] = self._skip_counts.get(reason, 0) + 1
+
+    def _maybe_log_skip_heartbeat(self, now: datetime) -> None:
+        if self._last_skip_log_at is None:
+            self._last_skip_log_at = now
+            return
+        if (now - self._last_skip_log_at).total_seconds() < 300:
+            return
+        if self._skip_counts:
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(self._skip_counts.items()))
+            logger.info("Entry skip heartbeat (5m): {}", summary)
+        else:
+            logger.info("Entry skip heartbeat (5m): no skips recorded")
+        self._skip_counts.clear()
+        self._last_skip_log_at = now
+
     def _persist_state(self) -> None:
         self.state_store.state.open_tickets = dict(self.open_tickets)
         self.state_store.state.processed_signals = sorted(self.signal_deduper.processed_keys)
@@ -301,6 +320,15 @@ class TradingBot:
             and not circuit_tripped
             and not daily_limit_hit
         )
+        if not allow_new_entries:
+            if not self.connector.is_connected:
+                self._note_skip("data_disconnect")
+            if kill_active:
+                self._note_skip("kill_switch")
+            if circuit_tripped:
+                self._note_skip("circuit_breaker")
+            if daily_limit_hit:
+                self._note_skip("daily_loss_limit")
 
         for symbol in self.settings.symbols:
             try:
@@ -311,24 +339,30 @@ class TradingBot:
                 if not allow_new_entries:
                     continue
                 if symbol in self.open_tickets:
+                    self._note_skip(f"{symbol}:already_open")
                     continue
 
                 if len(self.open_tickets) >= self.max_concurrent:
+                    self._note_skip("max_concurrent")
                     continue
 
                 if not self.session_filter.is_within_session(now, symbol=symbol):
+                    self._note_skip(f"{symbol}:outside_session")
                     continue
                 if self.news_filter.is_blackout(now, currency=self._news_currency(symbol)):
+                    self._note_skip(f"{symbol}:news_blackout")
                     continue
 
                 data_by_tf = self._fetch_and_enrich(symbol)
                 trigger_df = data_by_tf.get(self.trigger_timeframe)
                 if trigger_df is None or trigger_df.empty:
+                    self._note_skip(f"{symbol}:no_trigger_data")
                     continue
 
                 completed_bar = last_completed_bar_time(trigger_df)
                 if self.trade_on_bar_close:
                     if completed_bar is None:
+                        self._note_skip(f"{symbol}:no_completed_bar")
                         continue
                     if not self.bar_gate.is_new_bar(symbol, completed_bar):
                         continue
@@ -344,6 +378,7 @@ class TradingBot:
                     self.bar_gate.mark_evaluated(symbol, completed_bar)
 
                 if signal.signal_type == SignalType.NONE:
+                    self._note_skip(f"{symbol}:no_signal")
                     continue
 
                 if completed_bar is None:
@@ -353,14 +388,17 @@ class TradingBot:
                     symbol, self.trigger_timeframe, completed_bar, signal.signal_type
                 )
                 if self.signal_deduper.already_processed(dedup_key):
+                    self._note_skip(f"{symbol}:dedup")
                     continue
 
                 if not self.risk_manager.validate_signal(signal, spread_pips):
+                    self._note_skip(f"{symbol}:risk_reject")
                     continue
 
                 equity = self.broker.get_balance()
                 volume = self.risk_manager.position_size_for(signal, equity)
                 if volume <= 0:
+                    self._note_skip(f"{symbol}:zero_volume")
                     continue
 
                 position = self.broker.place_order(signal, volume)
@@ -382,12 +420,15 @@ class TradingBot:
             except Exception:  # noqa: BLE001 - one symbol's failure must not kill the loop
                 tick_had_failure = True
                 failure_context = f"symbol={symbol}"
+                self._note_skip(f"{symbol}:exception")
                 self.alerts.notify(
                     "Processing error",
                     f"symbol={symbol} — see logs for traceback",
                     AlertLevel.ERROR,
                 )
                 logger.exception("Error processing {}", symbol)
+
+        self._maybe_log_skip_heartbeat(now)
 
         if tick_had_failure:
             if self.circuit_breaker.record_failure(failure_context or "tick"):
