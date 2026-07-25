@@ -33,6 +33,22 @@ def bot_is_running(pid_file: Path = PID_FILE) -> bool:
         pid = int(pid_file.read_text(encoding="utf-8").strip())
     except ValueError:
         return False
+    if sys.platform == "win32":
+        # os.kill(pid, 0) can raise SystemError on some Windows/Python builds.
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+        except Exception:  # noqa: BLE001
+            return False
+        pid_file.unlink(missing_ok=True)
+        return False
     try:
         os.kill(pid, 0)
     except OSError:

@@ -22,6 +22,14 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8510)
     args = parser.parse_args()
 
+    # Load .env so CHRONOSCALP_API_TOKEN is available without manual export.
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(ROOT / ".env")
+    except ImportError:
+        pass
+
     import uvicorn
 
     uvicorn.run(

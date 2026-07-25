@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -22,6 +23,7 @@ from chronoscalp.saas.user_config import UserConfigStore
 
 ROOT = Path(__file__).resolve().parents[3]
 PID_FILE = Path("data/user/bot.pid")
+load_dotenv(ROOT / ".env")
 
 
 def _require_token(authorization: str | None = Header(default=None)) -> None:
