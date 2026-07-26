@@ -2,11 +2,13 @@
 # Safe to version-control — no secrets here (secrets live only in .env).
 
 symbols:
-  # LiteFinance demo: BTCUSD/ETHUSD are tradeable under these names.
-  # Spot FX/gold on this account use broker suffixes (e.g. XAUUSD_o) — keep
-  # only crypto here until aliases are mapped explicitly.
+  # LiteFinance demo tradeable names (spot FX/gold use "_o" suffix).
   - "BTCUSD"
   - "ETHUSD"
+  - "XAUUSD_o"
+  - "EURUSD_o"
+  - "USDJPY_o"
+  - "EURJPY_o"
 
 timeframes:
   # v3 trend filter uses M15 + M5 institutional bias (Session VWAP).
@@ -116,9 +118,13 @@ spread_filter:
   spread_history_dir: "data/spread_history"
   max_spread_pips:
     XAUUSD: 35
+    XAUUSD_o: 35
     EURUSD: 2.0
+    EURUSD_o: 2.0
     EURJPY: 3.0
+    EURJPY_o: 3.0
     USDJPY: 2.0
+    USDJPY_o: 2.0
     BTCUSD: 50
     ETHUSD: 50
 
@@ -140,9 +146,13 @@ backtest:
   commission_per_lot: 7.0
   default_spread_pips:
     XAUUSD: 20
+    XAUUSD_o: 20
     EURUSD: 1.0
+    EURUSD_o: 1.0
     EURJPY: 1.5
+    EURJPY_o: 1.5
     USDJPY: 1.2
+    USDJPY_o: 1.2
     BTCUSD: 25
     ETHUSD: 25
 
