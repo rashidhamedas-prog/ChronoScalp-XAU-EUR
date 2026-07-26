@@ -61,6 +61,8 @@ class PaperBroker:
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
+            initial_volume=volume,
+            initial_stop_loss=signal.stop_loss,
         )
         self._positions[position.ticket] = position
         self._next_ticket += 1
@@ -132,3 +134,51 @@ class PaperBroker:
             reason,
         )
         return result
+
+    def close_partial(
+        self,
+        ticket: int,
+        volume: float,
+        exit_price: float | None = None,
+        at: datetime | None = None,
+    ) -> TradeResult:
+        position = self._positions.get(ticket)
+        if position is None:
+            raise RuntimeError(f"No open paper position for ticket {ticket}")
+        close_vol = min(float(volume), position.volume)
+        if close_vol <= 0:
+            raise ValueError("partial volume must be positive")
+
+        spec = self.symbols_cfg[position.symbol]
+        close_price = exit_price if exit_price is not None else position.entry_price
+        pip_size = spec["pip_size"]
+        pip_value_per_lot = spec["pip_value_per_lot"]
+        price_diff = (
+            close_price - position.entry_price
+            if position.direction == SignalType.BUY
+            else position.entry_price - close_price
+        )
+        pnl = (price_diff / pip_size) * pip_value_per_lot * close_vol
+        self.balance += pnl
+        risk = abs(position.entry_price - (position.initial_stop_loss or position.stop_loss))
+        r_multiple = round(price_diff / risk, 3) if risk else 0.0
+
+        remaining = round(position.volume - close_vol, 8)
+        if remaining <= 0:
+            self._positions.pop(ticket, None)
+        else:
+            position.volume = remaining
+            position.partial_taken = True
+
+        return TradeResult(
+            symbol=position.symbol,
+            direction=position.direction,
+            entry_price=position.entry_price,
+            exit_price=close_price,
+            volume=close_vol,
+            open_time=position.open_time,
+            close_time=at or datetime.now(tz=UTC),
+            pnl=pnl,
+            r_multiple=r_multiple,
+            exit_reason="partial_tp",
+        )

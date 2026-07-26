@@ -231,6 +231,46 @@ class OANDABroker:
             exit_reason="manual",
         )
 
+    def close_partial(self, ticket: int, volume: float) -> TradeResult:
+        """Partial close via OANDA trade close with units."""
+        trade_url = f"{self._base_url}/v3/accounts/{self._account_id}/trades/{ticket}"
+        trade_resp = requests.get(trade_url, headers=self._headers(), timeout=self._timeout)
+        if trade_resp.status_code >= 400:
+            raise RuntimeError(f"OANDA trade {ticket} not found: HTTP {trade_resp.status_code}")
+        trade = trade_resp.json().get("trade") or {}
+        instrument = trade.get("instrument", "")
+        sym = to_chronoscalp_symbol(instrument)
+        units = float(trade.get("currentUnits", 0))
+        contract = float(self._symbols_cfg.get(sym, {}).get("contract_size", 1) or 1)
+        close_units = min(abs(units), abs(volume) * contract)
+        if units < 0:
+            close_units = -close_units
+        url = f"{self._base_url}/v3/accounts/{self._account_id}/trades/{ticket}/close"
+        response = requests.put(
+            url,
+            headers=self._headers(),
+            json={"units": str(int(abs(close_units)))},
+            timeout=self._timeout,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"OANDA close_partial failed: HTTP {response.status_code}")
+        body = response.json()
+        order_fill = body.get("orderFillTransaction") or {}
+        trades_closed = order_fill.get("tradesClosed") or [{}]
+        pnl = float(trades_closed[0].get("realizedPL", 0)) if trades_closed else 0.0
+        direction = SignalType.BUY if units > 0 else SignalType.SELL
+        return TradeResult(
+            symbol=sym,
+            direction=direction,
+            entry_price=float(trade.get("price", 0)),
+            exit_price=float(order_fill.get("price", 0)),
+            volume=abs(close_units) / contract,
+            open_time=datetime.now(tz=UTC),
+            close_time=datetime.now(tz=UTC),
+            pnl=pnl,
+            exit_reason="partial_tp",
+        )
+
     def fetch_closed_pnl(self, ticket: int) -> float | None:
         """Best-effort realized P&L for a recently closed trade."""
         url = f"{self._base_url}/v3/accounts/{self._account_id}/trades/{ticket}"
