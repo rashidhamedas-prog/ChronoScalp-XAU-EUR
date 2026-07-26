@@ -10,6 +10,14 @@ symbols:
   - "USDJPY_o"
   - "EURJPY_o"
 
+# Map canonical / panel names → broker Market Watch names (LiteFinance).
+broker_symbol_aliases:
+  XAUUSD: XAUUSD_o
+  EURUSD: EURUSD_o
+  USDJPY: USDJPY_o
+  EURJPY: EURJPY_o
+  XAUEUR: XAUEUR_o
+
 timeframes:
   # v3 trend filter uses M15 + M5 institutional bias (Session VWAP).
   higher_trend: ["M15", "M5"]
