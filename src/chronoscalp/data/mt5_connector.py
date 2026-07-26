@@ -120,7 +120,6 @@ class MT5Connector:
         """
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
-        import time
 
         # MetaTrader5 docs: timeout is milliseconds. Some builds still print
         # "60 sec" in the error string even when a larger timeout is used.
