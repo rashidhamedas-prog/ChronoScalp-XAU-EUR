@@ -2,10 +2,9 @@
 # Safe to version-control — no secrets here (secrets live only in .env).
 
 symbols:
-  - "XAUUSD"
-  - "EURUSD"
-  - "EURJPY"
-  - "USDJPY"
+  # LiteFinance demo: BTCUSD/ETHUSD are tradeable under these names.
+  # Spot FX/gold on this account use broker suffixes (e.g. XAUUSD_o) — keep
+  # only crypto here until aliases are mapped explicitly.
   - "BTCUSD"
   - "ETHUSD"
 
