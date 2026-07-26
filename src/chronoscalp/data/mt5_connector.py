@@ -111,40 +111,94 @@ class MT5Connector:
         return self._connected
 
     def connect(self) -> bool:
+        """Attach to (or launch) the MT5 terminal and log in.
+
+        On a Windows VPS the named-pipe handshake often needs well over the
+        package default of 60s, and a hung already-running ``terminal64`` can
+        return ``-10003`` forever. We retry with credentials embedded in
+        ``initialize`` so the package can spawn a fresh terminal in-process.
+        """
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
+        import time
 
-        # Slow VPS / cold terminal often needs >60s; default MetaTrader5 timeout
-        # is 60_000 ms and surfaces as IPC -10003 ("Pipe server didn't answer").
-        kwargs: dict[str, object] = {"timeout": 180_000}
+        # MetaTrader5 docs: timeout is milliseconds. Some builds still print
+        # "60 sec" in the error string even when a larger timeout is used.
+        timeout_ms = 180_000
+        attempts: list[dict[str, object]] = []
+        base: dict[str, object] = {
+            "timeout": timeout_ms,
+            "login": int(self._login),
+            "password": self._password,
+            "server": self._server,
+        }
         if self._terminal_path:
-            kwargs["path"] = self._terminal_path
+            with_path = dict(base)
+            with_path["path"] = self._terminal_path
+            attempts.append(with_path)
+        attempts.append(dict(base))  # auto-discover / launch
+        if self._terminal_path:
+            # Last resort: path only, then separate login() (older package path).
+            attempts.append({"timeout": timeout_ms, "path": self._terminal_path})
 
-        # Clean re-init if a previous session went stale.
-        with contextlib.suppress(Exception):
-            mt5.shutdown()
+        last_err: object = None
+        for i, kwargs in enumerate(attempts, start=1):
+            with contextlib.suppress(Exception):
+                mt5.shutdown()
+            if i > 1:
+                time.sleep(3)
 
-        logger.info(
-            "Connecting to MT5 path={} timeout_ms={} ...",
-            self._terminal_path or "(auto)",
-            kwargs["timeout"],
-        )
-        if not mt5.initialize(**kwargs):
-            logger.error("MT5 initialize() failed: {}", mt5.last_error())
-            self._connected = False
-            return False
+            logger.info(
+                "Connecting to MT5 attempt={}/{} path={} timeout_ms={} ...",
+                i,
+                len(attempts),
+                kwargs.get("path") or "(auto)",
+                timeout_ms,
+            )
+            t0 = time.monotonic()
+            ok = bool(mt5.initialize(**kwargs))
+            elapsed = time.monotonic() - t0
+            if not ok:
+                last_err = mt5.last_error()
+                logger.error(
+                    "MT5 initialize() failed attempt={} elapsed={:.1f}s err={}",
+                    i,
+                    elapsed,
+                    last_err,
+                )
+                continue
 
-        authorized = mt5.login(self._login, password=self._password, server=self._server)
-        if not authorized:
-            logger.error("MT5 login() failed: {}", mt5.last_error())
-            mt5.shutdown()
-            self._connected = False
-            return False
+            # If credentials were not passed into initialize, login explicitly.
+            if "login" not in kwargs:
+                authorized = mt5.login(
+                    self._login, password=self._password, server=self._server
+                )
+                if not authorized:
+                    last_err = mt5.last_error()
+                    logger.error("MT5 login() failed: {}", last_err)
+                    mt5.shutdown()
+                    continue
 
-        self._connected = True
-        self._consecutive_empty = 0
-        logger.info("Connected to MT5 server={} login={}", self._server, self._login)
-        return True
+            info = mt5.account_info()
+            if info is None:
+                last_err = mt5.last_error()
+                logger.error("MT5 account_info() is None after initialize: {}", last_err)
+                mt5.shutdown()
+                continue
+
+            self._connected = True
+            self._consecutive_empty = 0
+            logger.info(
+                "Connected to MT5 server={} login={} elapsed={:.1f}s",
+                self._server,
+                self._login,
+                elapsed,
+            )
+            return True
+
+        logger.error("MT5 connect exhausted retries; last_error={}", last_err)
+        self._connected = False
+        return False
 
     def shutdown(self) -> None:
         if not self._connected:
