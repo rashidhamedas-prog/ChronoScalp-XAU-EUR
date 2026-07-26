@@ -239,7 +239,7 @@ class MT5Connector:
             if not mt5.symbol_select(symbol, True):
                 self._warn_rate_limited(
                     f"sym_missing:{symbol}",
-                    "MT5 symbol_info missing for {} — last_error={}",
+                    "MT5 symbol unavailable for {} (not in Market Watch / wrong name) — last_error={}",
                     symbol,
                     mt5.last_error(),
                 )
