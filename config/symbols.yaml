@@ -12,9 +12,30 @@ XAUUSD:
   pip_value_per_lot: 1.0  # USD value of 1 pip move for 1.0 lot (broker-dependent, verify)
   news_currency: USD      # for news blackout filter (XAUUSD → USD events)
 
+# LiteFinance / similar brokers expose gold as XAUUSD_o
+XAUUSD_o:
+  pip_size: 0.01
+  contract_size: 100
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 50
+  typical_spread_pips: 20
+  pip_value_per_lot: 1.0
+  news_currency: USD
+
 EURUSD:
   pip_size: 0.0001
   contract_size: 100000   # 1 standard lot = 100,000 units
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 1.0
+  pip_value_per_lot: 10.0
+  news_currency: EUR
+
+EURUSD_o:
+  pip_size: 0.0001
+  contract_size: 100000
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
@@ -33,7 +54,27 @@ EURJPY:
   pip_value_per_lot: 6.5
   news_currency: EUR      # primary; JPY high-impact also matters — extend filter later if needed
 
+EURJPY_o:
+  pip_size: 0.01
+  contract_size: 100000
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 2.0
+  pip_value_per_lot: 6.5
+  news_currency: EUR
+
 USDJPY:
+  pip_size: 0.01
+  contract_size: 100000
+  min_lot: 0.01
+  lot_step: 0.01
+  max_lot: 100
+  typical_spread_pips: 1.5
+  pip_value_per_lot: 6.5
+  news_currency: USD
+
+USDJPY_o:
   pip_size: 0.01
   contract_size: 100000
   min_lot: 0.01
