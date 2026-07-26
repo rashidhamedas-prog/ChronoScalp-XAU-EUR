@@ -39,6 +39,7 @@ _TIMEFRAME_MAP_NAMES = {
     Timeframe.M3: "TIMEFRAME_M3",
     Timeframe.M5: "TIMEFRAME_M5",
     Timeframe.M10: "TIMEFRAME_M10",
+    Timeframe.M15: "TIMEFRAME_M15",
 }
 
 

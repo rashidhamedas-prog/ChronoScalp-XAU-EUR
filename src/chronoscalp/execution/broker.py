@@ -43,3 +43,7 @@ class Broker(Protocol):
     def close_position(self, ticket: int) -> TradeResult:
         """Close an open position at market and return the realized result."""
         ...
+
+    def close_partial(self, ticket: int, volume: float) -> TradeResult:
+        """Close part of an open position at market; leave remainder open."""
+        ...

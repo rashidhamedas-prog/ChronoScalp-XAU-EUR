@@ -19,6 +19,7 @@ import pandas as pd
 from chronoscalp.logging_setup import logger
 from chronoscalp.ml.features import extract_setup_features
 from chronoscalp.ml.scorer import is_configured, predict_setup_probability
+from chronoscalp.strategy.confluence import confluence_ok, liquidity_volume_confirms, smc_confirms
 from chronoscalp.utils.types import Signal, SignalType, Timeframe, TrendDirection
 
 
@@ -80,31 +81,11 @@ def ultra_scalp_trend(
 
 
 def _smc_confirms(row: pd.Series, direction: TrendDirection) -> bool:
-    """Require SMC confluence: an order block, FVG, or liquidity sweep in the
-    signal's direction on the trigger timeframe. Only checked when
-    strategy.use_smc_confluence is true in config."""
-    if direction == TrendDirection.BULLISH:
-        return bool(
-            row.get("bullish_ob") or row.get("fvg_bullish") or row.get("liquidity_sweep_low")
-        )
-    if direction == TrendDirection.BEARISH:
-        return bool(
-            row.get("bearish_ob") or row.get("fvg_bearish") or row.get("liquidity_sweep_high")
-        )
-    return False
+    return smc_confirms(row, direction)
 
 
 def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> bool:
-    """Volume-confirmed liquidity grab (preferred institutional filter).
-
-    Requires a sweep of stop liquidity with elevated relative volume
-    (``liquidity_sweep_*_vol`` from SMC enrichment).
-    """
-    if direction == TrendDirection.BULLISH:
-        return bool(row.get("liquidity_sweep_low_vol"))
-    if direction == TrendDirection.BEARISH:
-        return bool(row.get("liquidity_sweep_high_vol"))
-    return False
+    return liquidity_volume_confirms(row, direction)
 
 
 def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool]:
@@ -135,17 +116,12 @@ def _confluence_ok(
     use_smc_confluence: bool,
     use_liquidity_volume: bool,
 ) -> tuple[bool, list[str]]:
-    """OR across enabled strategy modes — any confirming mode is enough."""
-    if not use_smc_confluence and not use_liquidity_volume:
-        return True, []
-
-    tags: list[str] = []
-    if use_smc_confluence and _smc_confirms(row, direction):
-        tags.append("smc_confirmed")
-    if use_liquidity_volume and _liquidity_volume_confirms(row, direction):
-        tags.append("liquidity_volume")
-    return bool(tags), tags
-
+    return confluence_ok(
+        row,
+        direction,
+        use_smc_confluence=use_smc_confluence,
+        use_liquidity_volume=use_liquidity_volume,
+    )
 
 def generate_ultra_scalp_signal(
     symbol: str,
@@ -393,47 +369,88 @@ class MultiTimeframeStrategy:
         *,
         ignore_confidence_gate: bool = False,
     ) -> Signal:
-        ema_period = self.indicators_cfg.get("ema_period_trend", 50)
-        higher_trends = [
-            determine_trend(data_by_timeframe[tf], ema_col=f"ema_{ema_period}")
-            for tf in higher_timeframes
-            if tf in data_by_timeframe
-        ]
-
         use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
+        trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
 
-        if use_scalp:
-            trend = ultra_scalp_trend(
-                higher_trends, mode=str(scalp_cfg.get("trend_mode", "primary"))
+        higher_frames = [
+            data_by_timeframe[tf] for tf in higher_timeframes if tf in data_by_timeframe
+        ]
+        if trend_engine == "session_vwap":
+            from chronoscalp.strategy.trend_filter import (
+                aligned_institutional_bias,
+                institutional_bias,
             )
-        elif self.strategy_cfg.get("require_trend_alignment", True):
-            trend = trends_aligned(higher_trends)
+
+            if use_scalp and str(scalp_cfg.get("trend_mode", "strict")) == "primary":
+                # Primary = first higher TF (usually M15); reject if later TF opposes.
+                if not higher_frames:
+                    trend = TrendDirection.NEUTRAL
+                else:
+                    primary = institutional_bias(higher_frames[0])
+                    trend = primary
+                    if primary != TrendDirection.NEUTRAL:
+                        for frame in higher_frames[1:]:
+                            other = institutional_bias(frame)
+                            if other != TrendDirection.NEUTRAL and other != primary:
+                                trend = TrendDirection.NEUTRAL
+                                break
+            else:
+                trend = aligned_institutional_bias(higher_frames)
         else:
-            trend = higher_trends[-1] if higher_trends else TrendDirection.NEUTRAL
+            ema_period = self.indicators_cfg.get("ema_period_trend", 50)
+            higher_trends = [
+                determine_trend(data_by_timeframe[tf], ema_col=f"ema_{ema_period}")
+                for tf in higher_timeframes
+                if tf in data_by_timeframe
+            ]
+            if use_scalp:
+                trend = ultra_scalp_trend(
+                    higher_trends, mode=str(scalp_cfg.get("trend_mode", "primary"))
+                )
+            elif self.strategy_cfg.get("require_trend_alignment", True):
+                trend = trends_aligned(higher_trends)
+            else:
+                trend = higher_trends[-1] if higher_trends else TrendDirection.NEUTRAL
 
         trigger_df = data_by_timeframe.get(trigger_timeframe)
         if trigger_df is None:
             return _no_signal(symbol, trigger_timeframe, reason="no_trigger_data")
 
+        entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
         if use_scalp:
-            # SMC/liquidity on S15 almost never confirms; only apply when
-            # explicitly requested via ultra_scalp.require_confluence.
-            require_conf = bool(scalp_cfg.get("require_confluence", False))
-            signal = generate_ultra_scalp_signal(
+            from chronoscalp.strategy.entry_trigger import generate_ultra_scalp_v3
+
+            signal = generate_ultra_scalp_v3(
                 symbol=symbol,
                 trigger_df=trigger_df,
                 trend=trend,
                 timeframe=trigger_timeframe,
-                use_smc_confluence=use_smc and require_conf,
-                use_liquidity_volume=use_liq and require_conf,
                 min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
                 atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
                 atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.0)),
-                rvol_min=float(scalp_cfg.get("rvol_min", 1.05)),
+                rvol_min=float(scalp_cfg.get("rvol_min", 1.3)),
                 impulse_body_atr_multiple=float(
-                    scalp_cfg.get("impulse_body_atr_multiple", 0.35)
+                    scalp_cfg.get("impulse_body_atr_multiple", 0.4)
                 ),
+                vwap_df=trigger_df,
+            )
+        elif entry_engine == "institutional":
+            from chronoscalp.strategy.entry_trigger import generate_institutional_entry
+
+            signal = generate_institutional_entry(
+                symbol=symbol,
+                trigger_df=trigger_df,
+                trend=trend,
+                timeframe=trigger_timeframe,
+                use_smc_confluence=use_smc,
+                use_liquidity_volume=use_liq,
+                min_reward_risk_ratio=float(
+                    self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
+                ),
+                atr_stop_multiple=float(self.strategy_cfg.get("atr_stop_multiple", 1.5)),
+                atr_target_multiple=float(self.strategy_cfg.get("atr_target_multiple", 2.25)),
+                rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
             )
         else:
             signal = generate_entry_signal(

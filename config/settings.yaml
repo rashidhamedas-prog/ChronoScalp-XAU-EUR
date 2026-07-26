@@ -1,7 +1,6 @@
-# ChronoScalp strategy/risk configuration.
+# ChronoScalp strategy/risk configuration — Institutional Scalper Edition v3.
 # Safe to version-control — no secrets here (secrets live only in .env).
 
-# Active symbols (panel can narrow via runtime_overrides; default = all below).
 symbols:
   - "XAUUSD"
   - "EURUSD"
@@ -9,14 +8,13 @@ symbols:
   - "USDJPY"
   - "BTCUSD"
   - "ETHUSD"
-  # Add "XAUEUR" here too if your broker offers the direct cross instrument.
 
 timeframes:
-  higher_trend: ["M10", "M5"]   # must agree before any trade is permitted
-  entry_trigger: ["M3", "M1"]   # entry timing / trigger confirmation
-  # Ultra-scalp (sub-minute): S15 bars built from MT5 ticks; M5+M1 micro-trend
+  # v3 trend filter uses M15 + M5 institutional bias (Session VWAP).
+  higher_trend: ["M15", "M5"]
+  entry_trigger: ["M1"]
   ultra_scalp:
-    higher_trend: ["M5", "M1"]
+    higher_trend: ["M15", "M5"]
     entry_trigger: ["S15"]
     poll_interval_seconds: 2
 
@@ -31,35 +29,34 @@ indicators:
   macd_slow: 26
   macd_signal: 9
   atr_period: 14
-  rvol_period: 20                    # relative volume lookback (tick_volume ÷ avg)
+  rvol_period: 20
 
 strategy:
-  require_trend_alignment: true      # M10 and M5 must agree (or M5/M1 in ultra-scalp)
-  # Multi-select modes (panel + overrides). When several are on, any one may confirm (OR).
+  # session_vwap = institutional bias; ema_rsi = legacy EMA50+RSI
+  trend_engine: session_vwap
+  # institutional = sweep+MSS+RVOL+SMC; legacy_macd = old MACD path
+  entry_engine: institutional
+  require_trend_alignment: true
   enabled_strategies:
     - smc_confluence
     - liquidity_volume
     - ultra_scalp
-  use_smc_confluence: true           # kept in sync with enabled_strategies
-  use_liquidity_volume: true         # volume-confirmed liquidity sweep (RVOL gate)
-  use_ultra_scalp: true              # high-frequency S15 impulse scalp
+  use_smc_confluence: true
+  use_liquidity_volume: true
+  use_ultra_scalp: true
   liquidity_rvol_min: 1.5
+  entry_rvol_min: 1.5
+  atr_stop_multiple: 1.5
+  atr_target_multiple: 2.25
   min_signal_confidence: 0.55
   ultra_scalp:
-    # Deliberate scalp exception: 1:1 R:R allowed ONLY for ultra_scalp.
-    # All other strategies still use risk.min_reward_risk_ratio (1.5).
     atr_stop_multiple: 1.0
     atr_target_multiple: 1.0
     min_reward_risk_ratio: 1.0
-    # Crypto S15: slightly softer than FX defaults (was 1.2 / 0.45 hardcoded).
-    rvol_min: 1.05
-    impulse_body_atr_multiple: 0.35
-    # primary = M5 bias; M1 may be neutral. Use "strict" for M5+M1 both aligned.
-    trend_mode: primary
-    # Do NOT require SMC/liquidity on S15 (almost never fires). Set true only if
-    # you intentionally want OB/FVG/sweep confirmation on the trigger bar.
+    rvol_min: 1.3
+    impulse_body_atr_multiple: 0.4
+    trend_mode: strict
     require_confluence: false
-
 
 sessions:
   timezone: "GMT"
@@ -67,7 +64,6 @@ sessions:
     london: { start: "08:00", end: "11:00" }
     new_york: { start: "13:30", end: "16:30" }
   trade_outside_sessions: false
-  # Crypto trades 24/7 — skip London/NY gate for these symbols only
   always_on_symbols:
     - "BTCUSD"
     - "ETHUSD"
@@ -79,24 +75,45 @@ news_filter:
   high_impact_only: true
 
 risk:
-  # Hard constraints — see CLAUDE.md / .cursor/rules/project.mdc.
-  # Do not raise these without deliberately re-reading docs/ARCHITECTURE.md
-  # "Win-rate expectations" section first.
-  max_risk_per_trade_pct: 1.0       # absolute ceiling (never exceeded in code)
-  # User-selectable presets in the control panel (default 1.0).
-  # Selecting 1.5 is allowed in the UI but is hard-capped to max_risk_per_trade_pct.
+  max_risk_per_trade_pct: 1.0
   risk_presets_pct: [0.5, 1.0, 1.5]
   active_risk_per_trade_pct: 1.0
   min_reward_risk_ratio: 1.5
   max_daily_loss_pct: 3.0
   max_concurrent_positions: 3
-  use_kelly_sizing: false          # if true, Kelly fraction is still hard-capped at max_risk_per_trade_pct
+  use_kelly_sizing: false
   breakeven_at_r_multiple: 1.0
   trailing_stop_atr_multiple: 1.5
+  # v3 institutional guards
+  three_strikes:
+    enabled: true
+    max_losses: 3
+    pause_hours: 12
+  correlation:
+    enabled: true
+    period: 20
+    max_abs_corr: 0.80
+  volatility_guard:
+    enabled: true
+    min_atr_close_ratio: 0.0005
+    max_atr_close_ratio: 0.02
+  spread_ma_guard:
+    enabled: true
+    window: 100
+    multiplier: 1.2
+  daily_drawdown_close_all: true
+  partial_tp:
+    enabled: true
+    r_multiple: 1.2
+    close_fraction: 0.5
+  chandelier:
+    enabled: true
+    lookback: 22
+    atr_multiple: 2.5
 
 spread_filter:
   enabled: true
-  sample_live_spread: true        # append spread observations to data/spread_history/
+  sample_live_spread: true
   spread_history_dir: "data/spread_history"
   max_spread_pips:
     XAUUSD: 35
@@ -107,48 +124,32 @@ spread_filter:
     ETHUSD: 50
 
 ml:
-  enabled: false                  # set true after training + OOS validation
+  enabled: false
   model_path: "data/models/setup_classifier.joblib"
 
 execution:
-  broker: "paper"    # "paper" | "mt5" | "oanda"
-  data_source: "auto"             # "auto" | "mt5" | "oanda" — auto picks oanda when broker=oanda
+  broker: "paper"
+  data_source: "auto"
   slippage_pips: 0.5
   poll_interval_seconds: 5
-  trade_on_bar_close_only: true   # evaluate entries once per completed trigger bar
-  state_dir: "data/state"         # persistent open tickets + dedup keys
-  magic_number: 20260711          # MT5 magic — must match live positions
-
-oanda:
-  environment: "practice"         # "practice" | "live" — use practice until validated
-  timeout_seconds: 15
-
-alerting:
-  enabled: false                  # set true once TELEGRAM_* or DISCORD_* are in .env
-  telegram_enabled: true
-  discord_enabled: true
-  timeout_seconds: 5
-  prefix: "ChronoScalp"
-
-resilience:
-  max_consecutive_errors: 5       # circuit breaker trips after this many loop failures
-  reconcile_interval_seconds: 60  # periodic broker ↔ state sync (0 = startup only)
-  alert_on_daily_loss_limit: true
-  alert_on_connection_loss: true
-  # If market data stays empty this long, reconnect + alert (avoids silent 24h stalls).
-  data_starvation_alert_seconds: 300
-  skip_heartbeat_seconds: 300
-
-
-licensing:
-  require_license: true           # set false only for local open-source / self use without keys
-  # Seller sets LICENSE_ADMIN_SECRET in .env, then issues keys via scripts/app.py (Admin) or manage_licenses.py
-
-saas:
-  ib_referral_url: ""             # your OANDA/partner Introducing Broker signup link
-  product_name: "ChronoScalp"
+  trade_on_bar_close_only: true
+  state_dir: "data/state"
+  magic_number: 20260711
 
 backtest:
   initial_balance: 10000
   commission_per_lot: 7.0
-  data_dir: "data/history"
+  default_spread_pips:
+    XAUUSD: 20
+    EURUSD: 1.0
+    EURJPY: 1.5
+    USDJPY: 1.2
+    BTCUSD: 25
+    ETHUSD: 25
+
+resilience:
+  max_consecutive_errors: 5
+  reconcile_interval_seconds: 60
+  skip_heartbeat_seconds: 300
+  alert_on_daily_loss_limit: true
+  stale_data_seconds: 120

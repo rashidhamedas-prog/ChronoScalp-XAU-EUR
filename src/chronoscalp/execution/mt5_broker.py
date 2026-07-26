@@ -160,6 +160,8 @@ class MT5Broker:
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             open_time=datetime.now(tz=UTC),
+            initial_volume=volume,
+            initial_stop_loss=signal.stop_loss,
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:
@@ -228,6 +230,53 @@ class MT5Broker:
             open_time=datetime.fromtimestamp(position.time, tz=UTC),
             close_time=datetime.now(tz=UTC),
             pnl=pnl,
+        )
+
+    def close_partial(self, ticket: int, volume: float) -> TradeResult:
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            raise RuntimeError(f"No open position for ticket {ticket}")
+        position = positions[0]
+        close_vol = min(float(volume), float(position.volume))
+        if close_vol <= 0:
+            raise ValueError("partial volume must be positive")
+
+        tick = mt5.symbol_info_tick(position.symbol)
+        close_price = tick.bid if position.type == mt5.POSITION_TYPE_BUY else tick.ask
+        order_type = (
+            mt5.ORDER_TYPE_SELL if position.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        )
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": close_vol,
+            "type": order_type,
+            "position": ticket,
+            "price": close_price,
+            "deviation": 10,
+            "magic": self._magic,
+            "comment": "chronoscalp:partial",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": resolve_order_filling_mode(position.symbol),
+        }
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            raise RuntimeError(f"MT5 partial close failed: {result}")
+
+        direction = SignalType.BUY if position.type == mt5.POSITION_TYPE_BUY else SignalType.SELL
+        return TradeResult(
+            symbol=position.symbol,
+            direction=direction,
+            entry_price=position.price_open,
+            exit_price=close_price,
+            volume=close_vol,
+            open_time=datetime.fromtimestamp(position.time, tz=UTC),
+            close_time=datetime.now(tz=UTC),
+            pnl=float(getattr(result, "profit", 0.0) or 0.0),
+            exit_reason="partial_tp",
         )
 
     def fetch_closed_pnl(self, ticket: int) -> float | None:

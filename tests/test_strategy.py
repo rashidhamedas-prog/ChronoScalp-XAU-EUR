@@ -283,6 +283,7 @@ def test_ultra_scalp_skips_smc_when_confluence_not_required():
     )
     strategy = MultiTimeframeStrategy(
         {
+            "trend_engine": "ema_rsi",
             "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
             "ultra_scalp": {
                 "require_confluence": False,

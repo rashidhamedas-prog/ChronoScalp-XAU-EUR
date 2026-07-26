@@ -26,6 +26,7 @@ from chronoscalp.execution.position_logic import (
     check_sl_tp_hit,
     exit_price_for_hit,
 )
+from chronoscalp.execution.trade_manager import manage_open_position
 from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
@@ -48,12 +49,19 @@ from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.state_store import TradingStateStore
 from chronoscalp.orchestration.trade_journal import TradeJournal, journal_path_for
+from chronoscalp.risk.institutional_guards import (
+    DailyDrawdownGuard,
+    SpreadMovingAverageGuard,
+    ThreeStrikesGuard,
+    correlation_blocks,
+    volatility_allows,
+)
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, resolve_enabled_strategies
 from chronoscalp.utils.types import SignalType, Timeframe
 
-STANDARD_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10]
+STANDARD_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10, Timeframe.M15]
 
 
 class TradingBot:
@@ -73,7 +81,7 @@ class TradingBot:
         self.use_ultra_scalp = use_ultra_scalp
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
         if use_ultra_scalp:
-            higher_raw = scalp_tf.get("higher_trend") or ["M5", "M1"]
+            higher_raw = scalp_tf.get("higher_trend") or ["M15", "M5"]
             trigger_raw = scalp_tf.get("entry_trigger") or ["S15"]
             self.higher_timeframes = [Timeframe(tf) for tf in higher_raw]
             self.trigger_timeframe = Timeframe(trigger_raw[-1])
@@ -121,6 +129,30 @@ class TradingBot:
             symbols_cfg=settings.symbols_raw,
             starting_equity=float(settings.backtest.get("initial_balance", 10_000)),
         )
+
+        risk_cfg = settings.risk
+        strikes_cfg = risk_cfg.get("three_strikes") or {}
+        self.three_strikes = ThreeStrikesGuard(
+            max_losses=int(strikes_cfg.get("max_losses", 3)),
+            pause_hours=int(strikes_cfg.get("pause_hours", 12)),
+        )
+        self.three_strikes_enabled = bool(strikes_cfg.get("enabled", True))
+        spread_ma_cfg = risk_cfg.get("spread_ma_guard") or {}
+        self.spread_ma_guard = SpreadMovingAverageGuard(
+            window=int(spread_ma_cfg.get("window", 100)),
+            multiplier=float(spread_ma_cfg.get("multiplier", 1.2)),
+        )
+        self.spread_ma_enabled = bool(spread_ma_cfg.get("enabled", True))
+        self.corr_cfg = risk_cfg.get("correlation") or {}
+        self.vol_cfg = risk_cfg.get("volatility_guard") or {}
+        self.partial_cfg = risk_cfg.get("partial_tp") or {}
+        self.chandelier_cfg = risk_cfg.get("chandelier") or {}
+        self.daily_dd_guard = DailyDrawdownGuard(
+            max_daily_loss_pct=float(risk_cfg.get("max_daily_loss_pct", 3.0)),
+            starting_equity=float(settings.backtest.get("initial_balance", 10_000)),
+        )
+        self.daily_dd_close_all = bool(risk_cfg.get("daily_drawdown_close_all", True))
+        self._position_meta: dict[int, dict] = {}
 
         state_path = self.state_dir / f"trading_state_{mode}.json"
         self.state_store = TradingStateStore(state_path)
@@ -348,7 +380,17 @@ class TradingBot:
 
         kill_active = self.kill_switch.is_active()
         circuit_tripped = self.circuit_breaker.is_tripped
-        daily_limit_hit = self.risk_manager.daily_tracker.daily_loss_limit_hit(at=now)
+        equity_now = self.broker.get_balance()
+        unrealized = self._estimate_unrealized_pnl()
+        realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
+        daily_dd_hit = self.daily_dd_guard.check(
+            equity_now, realized, unrealized, at=now
+        )
+        daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
+            at=now
+        )
+        if daily_dd_hit and self.daily_dd_close_all:
+            self._close_all_positions(now, reason="daily_drawdown")
         if daily_limit_hit and self._alert_on_daily_loss and not self._daily_loss_alerted:
             self.alerts.notify(
                 "Daily loss limit hit",
@@ -364,6 +406,7 @@ class TradingBot:
             and not kill_active
             and not circuit_tripped
             and not daily_limit_hit
+            and not self.daily_dd_guard.blocked
         )
         if not allow_new_entries:
             if not self.connector.is_connected:
@@ -379,12 +422,17 @@ class TradingBot:
             try:
                 spread_pips = self.broker.get_current_spread_pips(symbol)
                 self.spread_sampler.record(symbol, spread_pips, at=now)
+                self.spread_ma_guard.observe(symbol, spread_pips)
 
                 self._manage_open_position(symbol, now)
                 if not allow_new_entries:
                     continue
                 if symbol in self.open_tickets:
                     self._note_skip(f"{symbol}:already_open")
+                    continue
+
+                if self.three_strikes_enabled and self.three_strikes.is_paused(symbol, at=now):
+                    self._note_skip(f"{symbol}:three_strikes")
                     continue
 
                 if len(self.open_tickets) >= self.max_concurrent:
@@ -398,11 +446,50 @@ class TradingBot:
                     self._note_skip(f"{symbol}:news_blackout")
                     continue
 
+                if self.spread_ma_enabled and not self.spread_ma_guard.allows(symbol, spread_pips):
+                    self._note_skip(f"{symbol}:spread_ma")
+                    continue
+
                 data_by_tf = self._fetch_and_enrich(symbol)
                 trigger_df = data_by_tf.get(self.trigger_timeframe)
                 if trigger_df is None or trigger_df.empty:
                     self._note_skip(f"{symbol}:no_trigger_data")
                     continue
+
+                if bool(self.vol_cfg.get("enabled", True)):
+                    last = trigger_df.iloc[-1]
+                    atr_v = float(last.get("atr", 0) or 0)
+                    close_v = float(last.get("close", 0) or 0)
+                    if not volatility_allows(
+                        atr_v,
+                        close_v,
+                        min_ratio=float(self.vol_cfg.get("min_atr_close_ratio", 0.0005)),
+                        max_ratio=float(self.vol_cfg.get("max_atr_close_ratio", 0.02)),
+                    ):
+                        self._note_skip(f"{symbol}:volatility_guard")
+                        continue
+
+                if bool(self.corr_cfg.get("enabled", True)) and self.open_tickets:
+                    m5 = data_by_tf.get(Timeframe.M5)
+                    if m5 is not None and not m5.empty:
+                        closes_map = {symbol: m5["close"]}
+                        for other_sym in list(self.open_tickets):
+                            if other_sym == symbol:
+                                continue
+                            other_m5 = self.connector.fetch_ohlcv(other_sym, Timeframe.M5, count=40)
+                            if not other_m5.empty:
+                                closes_map[other_sym] = other_m5["close"]
+                        open_pos = self.broker.get_open_positions()
+                        if correlation_blocks(
+                            symbol,
+                            m5["close"],
+                            open_pos,
+                            closes_map,
+                            period=int(self.corr_cfg.get("period", 20)),
+                            max_abs_corr=float(self.corr_cfg.get("max_abs_corr", 0.80)),
+                        ):
+                            self._note_skip(f"{symbol}:correlation")
+                            continue
 
                 completed_bar = last_completed_bar_time(trigger_df)
                 if self.trade_on_bar_close:
@@ -453,6 +540,12 @@ class TradingBot:
 
                 position = self.broker.place_order(signal, volume)
                 self.open_tickets[symbol] = position.ticket
+                self._position_meta[position.ticket] = {
+                    "initial_volume": position.volume,
+                    "initial_stop_loss": position.stop_loss,
+                    "partial_taken": False,
+                    "breakeven_moved": False,
+                }
                 self.trade_journal.record_open(position)
                 self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
@@ -515,6 +608,55 @@ class TradingBot:
             result[tf] = df
         return result
 
+    def _apply_position_meta(self, position) -> None:
+        meta = self._position_meta.get(position.ticket) or {}
+        if meta.get("initial_volume") is not None:
+            position.initial_volume = float(meta["initial_volume"])
+        if meta.get("initial_stop_loss") is not None:
+            position.initial_stop_loss = float(meta["initial_stop_loss"])
+        position.partial_taken = bool(meta.get("partial_taken", False))
+        position.breakeven_moved = bool(meta.get("breakeven_moved", False))
+
+    def _estimate_unrealized_pnl(self) -> float:
+        total = 0.0
+        for symbol, ticket in list(self.open_tickets.items()):
+            positions = self.broker.get_open_positions(symbol)
+            position = next((p for p in positions if p.ticket == ticket), None)
+            if position is None:
+                continue
+            try:
+                m1 = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=2)
+                if m1.empty:
+                    continue
+                price = float(m1.iloc[-1]["close"])
+                spec = self.settings.symbols_raw[symbol]
+                pip_size = float(spec["pip_size"])
+                pip_value = float(spec["pip_value_per_lot"])
+                diff = (
+                    price - position.entry_price
+                    if position.direction == SignalType.BUY
+                    else position.entry_price - price
+                )
+                total += (diff / pip_size) * pip_value * position.volume
+            except Exception:  # noqa: BLE001
+                continue
+        return total
+
+    def _close_all_positions(self, now: datetime, *, reason: str) -> None:
+        for symbol, ticket in list(self.open_tickets.items()):
+            try:
+                trade = self.broker.close_position(ticket)
+                self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
+                if self.three_strikes_enabled:
+                    self.three_strikes.record_result(symbol, trade.pnl, at=now)
+                self.trade_journal.record_close(trade, ticket=ticket)
+                self._position_meta.pop(ticket, None)
+                self.open_tickets.pop(symbol, None)
+                logger.warning("Force-closed {} ticket={} reason={}", symbol, ticket, reason)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed force-close {} ticket={}", symbol, ticket)
+        self._persist_state()
+
     def _manage_open_position(self, symbol: str, now: datetime) -> None:
         ticket = self.open_tickets.get(symbol)
         if ticket is None:
@@ -525,12 +667,14 @@ class TradingBot:
         if position is None:
             self._on_position_closed_externally(symbol, ticket, now)
             return
+        self._apply_position_meta(position)
 
-        m1_df = self.connector.fetch_ohlcv(
-            symbol, Timeframe.M1, count=self.settings.indicators.get("atr_period", 14) + 5
-        )
+        m1_df = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
         if m1_df.empty:
             return
+        m1_df = enrich_with_indicators(
+            m1_df, atr_period=self.settings.indicators.get("atr_period", 14)
+        )
 
         bar = m1_df.iloc[-1]
         bar_high = float(bar["high"])
@@ -548,8 +692,11 @@ class TradingBot:
                     reason=hit.exit_reason(),
                 )
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
+                if self.three_strikes_enabled:
+                    self.three_strikes.record_result(symbol, trade.pnl, at=now)
                 self.trade_journal.record_close(trade, ticket=ticket)
                 self.open_tickets.pop(symbol, None)
+                self._position_meta.pop(ticket, None)
                 self._persist_state()
                 logger.info(
                     "Paper {} closed via {} pnl={:.2f}",
@@ -564,16 +711,58 @@ class TradingBot:
                 )
                 return
 
-        atr_value = float(
-            enrich_with_indicators(
-                m1_df, atr_period=self.settings.indicators.get("atr_period", 14)
-            ).iloc[-1]["atr"]
+        pip_size = float(self.settings.symbols_raw[symbol]["pip_size"])
+        spread_pips = self.broker.get_current_spread_pips(symbol)
+        spread_price = spread_pips * pip_size
+        action = manage_open_position(
+            position,
+            current_price,
+            m1_df,
+            spread_price=spread_price,
+            partial_r=float(self.partial_cfg.get("r_multiple", 1.2)),
+            chandelier_lookback=int(self.chandelier_cfg.get("lookback", 22)),
+            chandelier_atr_multiple=float(self.chandelier_cfg.get("atr_multiple", 2.5)),
         )
 
-        new_sl = apply_breakeven_or_trailing(self.risk_manager, position, current_price, atr_value)
-        if new_sl is not None and self.broker.modify_sl_tp(ticket, new_sl, position.take_profit):
-            if new_sl == position.entry_price:
+        if bool(self.partial_cfg.get("enabled", True)) and action.partial is not None:
+            try:
+                trade = self.broker.close_partial(ticket, action.partial.close_volume)
+                self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
+                self.trade_journal.record_close(trade, ticket=ticket)
+                meta = self._position_meta.setdefault(ticket, {})
+                meta["partial_taken"] = True
+                meta["breakeven_moved"] = True
+                position.partial_taken = True
                 position.breakeven_moved = True
+                if (
+                    action.partial.new_stop_loss is not None
+                    and self.broker.modify_sl_tp(
+                        ticket, action.partial.new_stop_loss, position.take_profit
+                    )
+                ):
+                    position.stop_loss = action.partial.new_stop_loss
+                logger.info(
+                    "Partial TP {} ticket={} vol={} pnl={:.2f}",
+                    symbol,
+                    ticket,
+                    action.partial.close_volume,
+                    trade.pnl,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Partial TP failed for {} ticket={}", symbol, ticket)
+
+        new_sl = action.new_stop_loss
+        if new_sl is None and not (
+            bool(self.chandelier_cfg.get("enabled", True)) and position.partial_taken
+        ):
+            atr_value = float(m1_df.iloc[-1]["atr"])
+            new_sl = apply_breakeven_or_trailing(
+                self.risk_manager, position, current_price, atr_value
+            )
+        if new_sl is not None and self.broker.modify_sl_tp(ticket, new_sl, position.take_profit):
+            if abs(new_sl - position.entry_price) < pip_size * 2:
+                position.breakeven_moved = True
+                self._position_meta.setdefault(ticket, {})["breakeven_moved"] = True
             position.stop_loss = new_sl
 
     def _on_position_closed_externally(self, symbol: str, ticket: int, now: datetime) -> None:
@@ -585,6 +774,8 @@ class TradingBot:
 
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)
+            if self.three_strikes_enabled:
+                self.three_strikes.record_result(symbol, pnl, at=now)
             logger.info("Position {} ticket={} closed externally, pnl={:.2f}", symbol, ticket, pnl)
             self.alerts.notify(
                 "Trade closed",
@@ -600,6 +791,7 @@ class TradingBot:
             )
 
         self.open_tickets.pop(symbol, None)
+        self._position_meta.pop(ticket, None)
         self._persist_state()
 
 

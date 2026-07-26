@@ -268,7 +268,7 @@ class TradeJournal:
             self.open_trades = {}
             self.closed_trades = []
             return
-        with self.path.open(encoding="utf-8") as f:
+        with self.path.open(encoding="utf-8-sig") as f:
             raw = json.load(f)
         self.mode = str(raw.get("mode") or self.mode)
         self.open_trades = {
@@ -374,8 +374,14 @@ class TradeJournal:
         return record
 
     def sync_open_from_broker(self, positions: list[Position]) -> None:
-        """Adopt broker open positions missing from the journal (after reconcile)."""
+        """Reconcile journal opens with broker: adopt missing, drop ghosts."""
         changed = False
+        broker_tickets = {position.ticket for position in positions}
+        for ticket in list(self.open_trades):
+            if ticket not in broker_tickets:
+                self.open_trades.pop(ticket, None)
+                changed = True
+                logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
         for position in positions:
             if position.ticket not in self.open_trades:
                 self.open_trades[position.ticket] = OpenTradeRecord.from_position(

@@ -26,6 +26,7 @@ class Timeframe(StrEnum):
     M3 = "M3"
     M5 = "M5"
     M10 = "M10"
+    M15 = "M15"
 
     @property
     def seconds(self) -> int:
@@ -36,6 +37,7 @@ class Timeframe(StrEnum):
             "M3": 180,
             "M5": 300,
             "M10": 600,
+            "M15": 900,
         }[self.value]
 
     @property
@@ -103,6 +105,9 @@ class Position:
     take_profit: float
     open_time: datetime
     breakeven_moved: bool = False
+    partial_taken: bool = False
+    initial_volume: float | None = None
+    initial_stop_loss: float | None = None
 
 
 @dataclass
