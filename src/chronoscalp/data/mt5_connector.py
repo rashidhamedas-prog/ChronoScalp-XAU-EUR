@@ -114,7 +114,9 @@ class MT5Connector:
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
 
-        kwargs = {}
+        # Slow VPS / cold terminal often needs >60s; default MetaTrader5 timeout
+        # is 60_000 ms and surfaces as IPC -10003 ("Pipe server didn't answer").
+        kwargs: dict[str, object] = {"timeout": 180_000}
         if self._terminal_path:
             kwargs["path"] = self._terminal_path
 
@@ -122,6 +124,11 @@ class MT5Connector:
         with contextlib.suppress(Exception):
             mt5.shutdown()
 
+        logger.info(
+            "Connecting to MT5 path={} timeout_ms={} ...",
+            self._terminal_path or "(auto)",
+            kwargs["timeout"],
+        )
         if not mt5.initialize(**kwargs):
             logger.error("MT5 initialize() failed: {}", mt5.last_error())
             self._connected = False
