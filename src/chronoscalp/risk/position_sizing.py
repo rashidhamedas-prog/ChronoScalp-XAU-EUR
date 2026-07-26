@@ -137,11 +137,16 @@ class DailyRiskTracker:
         loss_limit = -abs(self.starting_equity * (self.max_daily_loss_pct / 100.0))
         hit = self._realized_pnl_today <= loss_limit
         if hit:
-            logger.warning(
-                "Daily loss limit hit: realized_pnl_today={:.2f} <= limit={:.2f}",
-                self._realized_pnl_today,
-                loss_limit,
-            )
+            # Avoid flooding logs every poll tick while the limit remains active.
+            now_ts = (at or datetime.utcnow()).timestamp()
+            last = getattr(self, "_last_limit_log_at", 0.0)
+            if now_ts - last >= 300.0:
+                self._last_limit_log_at = now_ts
+                logger.warning(
+                    "Daily loss limit hit: realized_pnl_today={:.2f} <= limit={:.2f}",
+                    self._realized_pnl_today,
+                    loss_limit,
+                )
         return hit
 
 
