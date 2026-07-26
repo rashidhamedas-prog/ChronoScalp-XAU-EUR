@@ -1,12 +1,46 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from chronoscalp.execution.mt5_utils import spread_points_to_pips
+from chronoscalp.execution.mt5_utils import resolve_order_filling_mode, spread_points_to_pips
 from chronoscalp.execution.position_logic import check_sl_tp_hit, exit_price_for_hit
 from chronoscalp.utils.types import Position, SignalType
+
+
+def test_resolve_order_filling_mode_without_symbol_filling_attrs():
+    """Older MetaTrader5 builds expose ORDER_FILLING_* but not SYMBOL_FILLING_*."""
+    mt5_mod = SimpleNamespace(
+        ORDER_FILLING_FOK=0,
+        ORDER_FILLING_IOC=1,
+        ORDER_FILLING_RETURN=2,
+        symbol_info=lambda _s: SimpleNamespace(filling_mode=2),  # IOC bit
+    )
+    with (
+        patch("chronoscalp.execution.mt5_utils._require_windows"),
+        patch.dict("sys.modules", {"MetaTrader5": mt5_mod}),
+    ):
+        assert resolve_order_filling_mode("BTCUSD") == 1
+
+
+def test_resolve_order_filling_mode_fok_bit():
+    mt5_mod = SimpleNamespace(
+        ORDER_FILLING_FOK=0,
+        ORDER_FILLING_IOC=1,
+        ORDER_FILLING_RETURN=2,
+        SYMBOL_FILLING_FOK=1,
+        SYMBOL_FILLING_IOC=2,
+        SYMBOL_FILLING_RETURN=4,
+        symbol_info=lambda _s: SimpleNamespace(filling_mode=1),
+    )
+    with (
+        patch("chronoscalp.execution.mt5_utils._require_windows"),
+        patch.dict("sys.modules", {"MetaTrader5": mt5_mod}),
+    ):
+        assert resolve_order_filling_mode("XAUUSD") == 0
 
 
 def test_spread_points_to_pips_eurusd_five_digit():

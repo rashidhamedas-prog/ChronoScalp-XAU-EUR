@@ -19,30 +19,48 @@ def spread_points_to_pips(spread_points: float, point: float, pip_size: float) -
     return spread_points * point / pip_size
 
 
+# MQL5 symbol_info.filling_mode bit flags (not always exported by MetaTrader5 pip).
+_SYMBOL_FILLING_FOK = 1
+_SYMBOL_FILLING_IOC = 2
+_SYMBOL_FILLING_RETURN = 4
+
+
 def resolve_order_filling_mode(symbol: str) -> int:
-    """Pick an ``ORDER_FILLING_*`` mode supported by the broker symbol."""
+    """Pick an ``ORDER_FILLING_*`` mode supported by the broker symbol.
+
+    ``symbol_info.filling_mode`` is a bitmask of ``SYMBOL_FILLING_*`` (1/2/4).
+    Some MetaTrader5 builds omit those names and only expose ``ORDER_FILLING_*``
+    (0/1/2) used in ``order_send`` — never bitwise-AND those against filling_mode.
+    """
     _require_windows()
     import MetaTrader5 as mt5
+
+    order_ioc = int(getattr(mt5, "ORDER_FILLING_IOC", 1))
+    order_fok = int(getattr(mt5, "ORDER_FILLING_FOK", 0))
+    order_return = int(getattr(mt5, "ORDER_FILLING_RETURN", 2))
+    sym_ioc = int(getattr(mt5, "SYMBOL_FILLING_IOC", _SYMBOL_FILLING_IOC))
+    sym_fok = int(getattr(mt5, "SYMBOL_FILLING_FOK", _SYMBOL_FILLING_FOK))
+    sym_return = int(getattr(mt5, "SYMBOL_FILLING_RETURN", _SYMBOL_FILLING_RETURN))
 
     info = mt5.symbol_info(symbol)
     if info is None:
         logger.warning("resolve_order_filling_mode: no symbol_info for {}, defaulting IOC", symbol)
-        return mt5.ORDER_FILLING_IOC
+        return order_ioc
 
     filling = int(info.filling_mode)
-    if filling & mt5.SYMBOL_FILLING_IOC:
-        return mt5.ORDER_FILLING_IOC
-    if filling & mt5.SYMBOL_FILLING_FOK:
-        return mt5.ORDER_FILLING_FOK
-    if filling & mt5.SYMBOL_FILLING_RETURN:
-        return mt5.ORDER_FILLING_RETURN
+    if filling & sym_ioc:
+        return order_ioc
+    if filling & sym_fok:
+        return order_fok
+    if filling & sym_return:
+        return order_return
 
     logger.warning(
         "resolve_order_filling_mode: no known filling flag for {} (mode={}), defaulting IOC",
         symbol,
         filling,
     )
-    return mt5.ORDER_FILLING_IOC
+    return order_ioc
 
 
 def find_managed_position_ticket(symbol: str, magic: int = CHRONOSCALP_MAGIC) -> int | None:
