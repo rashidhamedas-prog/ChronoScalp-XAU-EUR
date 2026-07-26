@@ -88,7 +88,19 @@ class Settings:
     # --- convenience accessors -------------------------------------------------
     @property
     def symbols(self) -> list[str]:
-        return list(self.raw.get("symbols", []))
+        """Active symbols, with optional broker-name aliases applied."""
+        raw = [str(s) for s in self.raw.get("symbols", [])]
+        aliases = self.raw.get("broker_symbol_aliases") or {}
+        if not isinstance(aliases, dict) or not aliases:
+            return raw
+        mapped: list[str] = []
+        seen: set[str] = set()
+        for symbol in raw:
+            resolved = str(aliases.get(symbol, aliases.get(symbol.upper(), symbol)))
+            if resolved not in seen:
+                seen.add(resolved)
+                mapped.append(resolved)
+        return mapped
 
     @property
     def available_symbols(self) -> list[str]:
