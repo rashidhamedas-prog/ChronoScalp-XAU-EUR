@@ -77,6 +77,7 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
     script = ROOT / "scripts" / "run_live.py"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src")
+    env["PYTHONUNBUFFERED"] = "1"
     # Ensure child sees the same live-gate value the panel just validated (not a stale OS env).
     if mode == "live":
         env["CHRONOSCALP_CONFIRM_LIVE"] = "yes"
