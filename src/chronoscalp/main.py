@@ -50,7 +50,11 @@ from chronoscalp.orchestration.bootstrap import (
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.state_store import TradingStateStore
-from chronoscalp.orchestration.trade_journal import TradeJournal, journal_path_for
+from chronoscalp.orchestration.trade_journal import (
+    TradeJournal,
+    journal_path_for,
+    sum_closed_pnl_today,
+)
 from chronoscalp.risk.institutional_guards import (
     DailyDrawdownGuard,
     SpreadMovingAverageGuard,
@@ -162,6 +166,15 @@ class TradingBot:
 
         self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
         self.trade_journal.load()
+
+        # Re-seed today's realized P&L so restarts can't bypass the daily stop.
+        today_pnl = sum_closed_pnl_today(self.trade_journal.closed_trades)
+        if today_pnl:
+            self.risk_manager.daily_tracker.record_trade_pnl(today_pnl)
+            logger.info(
+                "Daily tracker seeded from journal: realized_today={:+.2f}",
+                today_pnl,
+            )
 
         resilience_cfg = settings.resilience
         self.kill_switch = KillSwitch(

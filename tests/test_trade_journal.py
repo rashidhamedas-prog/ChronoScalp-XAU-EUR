@@ -10,6 +10,7 @@ from chronoscalp.orchestration.trade_journal import (
     TradeJournal,
     compute_trading_stats,
     load_journal_snapshot,
+    sum_closed_pnl_today,
 )
 from chronoscalp.utils.types import Position, SignalType, TradeResult
 
@@ -54,6 +55,39 @@ def test_compute_trading_stats_basic() -> None:
     assert stats.avg_r_multiple == 0.5
     assert stats.today_trades == 2
     assert stats.today_pnl == 30.0
+
+
+def test_sum_closed_pnl_today_seeds_daily_tracker() -> None:
+    """Restarting the bot must not forget today's realized losses (3% stop)."""
+    closed = [
+        ClosedTradeRecord(
+            ticket=1,
+            symbol="BTCUSD",
+            direction="sell",
+            volume=3.76,
+            entry_price=64660.0,
+            exit_price=64698.0,
+            open_time="2026-07-27T15:03:50+00:00",
+            close_time="2026-07-27T15:04:49+00:00",
+            pnl=-434.59,
+            r_multiple=-11.8,
+        ),
+        ClosedTradeRecord(
+            ticket=2,
+            symbol="ETHUSD",
+            direction="buy",
+            volume=1.98,
+            entry_price=1968.99,
+            exit_price=1968.18,
+            open_time="2026-07-25T10:50:02+00:00",
+            close_time="2026-07-25T10:50:18+00:00",  # older day — excluded
+            pnl=-1.6,
+            r_multiple=-1.0,
+        ),
+    ]
+    now = datetime(2026, 7, 27, 16, 0, tzinfo=UTC)
+    assert sum_closed_pnl_today(closed, now=now) == -434.59
+    assert sum_closed_pnl_today(closed, now=datetime(2026, 7, 28, 1, 0, tzinfo=UTC)) == 0.0
 
 
 def test_today_stats_ignore_older_closes() -> None:

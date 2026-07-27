@@ -441,6 +441,19 @@ def _parse_iso(value: str) -> datetime | None:
     return parsed
 
 
+def sum_closed_pnl_today(
+    closed_trades: list[ClosedTradeRecord], now: datetime | None = None
+) -> float:
+    """Realized P&L of trades closed on the current UTC date.
+
+    Used to re-seed the daily loss tracker after a restart so the 3% daily
+    stop cannot be bypassed by bouncing the process.
+    """
+    ref = (now or datetime.now(tz=UTC)).astimezone(UTC)
+    today = ref.date().isoformat()
+    return float(sum(t.pnl for t in closed_trades if (t.close_time or "")[:10] == today))
+
+
 def journal_path_for(state_dir: str | Path, mode: str) -> Path:
     """Canonical path: ``data/state/trade_journal_{mode}.json``."""
     return Path(state_dir) / f"trade_journal_{mode}.json"
