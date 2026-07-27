@@ -1,4 +1,6 @@
-# Keep ChronoScalp live bot running (single venv instance).
+# Keep ChronoScalp live bot running (single process tree).
+# On Windows, .venv\Scripts\python.exe often spawns the base Python312.exe as
+# a child with the same script args — do NOT treat that as a duplicate.
 $ErrorActionPreference = 'Continue'
 $Root = 'C:\ChronoScalp\ChronoScalp-XAU-EUR'
 $Py = Join-Path $Root '.venv\Scripts\python.exe'
@@ -30,25 +32,33 @@ if (Test-Path (Join-Path $Root '.env')) {
 $env:CHRONOSCALP_CONFIRM_LIVE = 'yes'
 $env:PYTHONPATH = Join-Path $Root 'src'
 
-# Kill non-venv duplicates
-Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and ($_.CommandLine -match 'run_live\.py') -and ($_.CommandLine -match 'Python312\\python\.exe')
-} | ForEach-Object {
-  Write-Watch "kill sys-python duplicate pid=$($_.ProcessId)"
-  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+function Get-LiveRoots {
+  $all = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and ($_.CommandLine -match 'run_live\.py')
+  })
+  $ids = @{}
+  foreach ($p in $all) { $ids[$p.ProcessId] = $p }
+  $roots = @()
+  foreach ($p in $all) {
+    if ($ids.ContainsKey($p.ParentProcessId)) {
+      continue  # child of another run_live process (venv launcher pattern)
+    }
+    $roots += $p
+  }
+  return $roots
 }
 
-$venvLive = @(Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and ($_.CommandLine -match 'run_live\.py') -and ($_.CommandLine -match '\\.venv\\Scripts\\python\.exe')
-})
-if ($venvLive.Count -gt 0) {
-  $pidLive = $venvLive[0].ProcessId
-  foreach ($p in $venvLive | Select-Object -Skip 1) {
-    Write-Watch "kill extra venv pid=$($p.ProcessId)"
+$roots = @(Get-LiveRoots)
+if ($roots.Count -gt 1) {
+  foreach ($p in $roots | Select-Object -Skip 1) {
+    Write-Watch "kill extra live root pid=$($p.ProcessId)"
     Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
   }
-  Set-Content -Path $PidFile -Value $pidLive -Encoding ascii
-  Write-Watch "already running pid=$pidLive"
+  $roots = @($roots[0])
+}
+if ($roots.Count -eq 1) {
+  Set-Content -Path $PidFile -Value $roots[0].ProcessId -Encoding ascii
+  Write-Watch "already running pid=$($roots[0].ProcessId)"
   exit 0
 }
 

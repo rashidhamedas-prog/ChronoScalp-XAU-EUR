@@ -1,4 +1,4 @@
-# ChronoScalp API launcher — intended to run as SYSTEM via Scheduled Task.
+# ChronoScalp API launcher — single process tree (venv may spawn base python).
 $ErrorActionPreference = 'Continue'
 $Root = 'C:\ChronoScalp\ChronoScalp-XAU-EUR'
 Set-Location $Root
@@ -9,7 +9,6 @@ if (-not (Test-Path $Py)) {
 }
 $env:PYTHONPATH = Join-Path $Root 'src'
 
-# Load token from .env if present
 $envFile = Join-Path $Root '.env'
 if (Test-Path $envFile) {
   Get-Content $envFile | ForEach-Object {
@@ -29,19 +28,29 @@ function Test-ApiUp {
   } catch { return $false }
 }
 
-# Prefer a single venv API process; drop system-python duplicates.
-Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and ($_.CommandLine -match 'run_api\.py') -and ($_.CommandLine -match 'Python312\\python\.exe')
-} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+function Get-ApiRoots {
+  $all = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and ($_.CommandLine -match 'run_api\.py')
+  })
+  $ids = @{}
+  foreach ($p in $all) { $ids[$p.ProcessId] = $p }
+  $roots = @()
+  foreach ($p in $all) {
+    if ($ids.ContainsKey($p.ParentProcessId)) { continue }
+    $roots += $p
+  }
+  return $roots
+}
 
 if (Test-ApiUp) {
   Write-Output 'API_ALREADY_UP'
   exit 0
 }
 
-Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -and ($_.CommandLine -match 'run_api\.py') } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+$roots = @(Get-ApiRoots)
+foreach ($p in $roots) {
+  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 1
 
 New-Item -ItemType Directory -Path 'logs' -Force | Out-Null
