@@ -129,7 +129,7 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": sanitize_mt5_comment(f"CS_{signal.reason}"),
+            "comment": sanitize_mt5_comment("ChronoScalp"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
@@ -216,7 +216,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:close",
+            "comment": "CS_close",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }
@@ -263,7 +263,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:partial",
+            "comment": "CS_partial",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }
