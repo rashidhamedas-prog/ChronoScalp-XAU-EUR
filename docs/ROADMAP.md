@@ -62,5 +62,6 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Telegram control bot:** start/stop paper+live, status, P&L, open positions, kill switch, logs + Persian reply keyboard (`src/chronoscalp/telegram/control_bot.py`, `docs/TELEGRAM_BOT_FA.md`)
 - [x] **Telegram watchdog:** `scripts/watch_telegram.ps1` Scheduled Task keeps control bot alive on Windows VPS
 - [x] **Institutional Scalper v3:** Session VWAP + Asian mid trend (M15/M5), sweep+MSS+RVOL entry, ultra S15 VWAP/RVOL 1.3, 3-strikes, correlation/vol/spread-MA guards, daily DD close-all, partial TP@1.2R + Chandelier trail
+- [x] **Volatility guard fix:** regime uses M5 ATR/close (not S15 trigger); thresholds + skip reasons (`volatility_low`/`high`/`invalid`) so ultra-scalp no longer blocks every symbol
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

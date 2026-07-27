@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -83,12 +84,45 @@ class SpreadMovingAverageGuard:
         return ok
 
 
-def volatility_allows(atr: float, close: float, *, min_ratio: float = 0.0005, max_ratio: float = 0.02) -> bool:
+def volatility_decision(
+    atr: float,
+    close: float,
+    *,
+    min_ratio: float = 0.00005,
+    max_ratio: float = 0.05,
+) -> tuple[bool, str, float | None]:
+    """Classify ATR/close regime for the volatility guard.
+
+    Returns ``(allowed, reason, ratio)`` where ``reason`` is one of
+    ``ok``, ``low``, ``high``, or ``invalid`` (non-positive / NaN inputs).
+    """
+    try:
+        atr_v = float(atr)
+        close_v = float(close)
+    except (TypeError, ValueError):
+        return False, "invalid", None
+    if close_v <= 0 or atr_v <= 0 or math.isnan(atr_v) or math.isnan(close_v):
+        return False, "invalid", None
+    ratio = atr_v / close_v
+    if ratio < min_ratio:
+        return False, "low", ratio
+    if ratio > max_ratio:
+        return False, "high", ratio
+    return True, "ok", ratio
+
+
+def volatility_allows(
+    atr: float,
+    close: float,
+    *,
+    min_ratio: float = 0.00005,
+    max_ratio: float = 0.05,
+) -> bool:
     """Block dead markets and extreme ATR/close regimes."""
-    if close <= 0 or atr <= 0:
-        return False
-    ratio = atr / close
-    return min_ratio <= ratio <= max_ratio
+    allowed, _reason, _ratio = volatility_decision(
+        atr, close, min_ratio=min_ratio, max_ratio=max_ratio
+    )
+    return allowed
 
 
 def m5_correlation(a: pd.Series, b: pd.Series, period: int = 20) -> float | None:

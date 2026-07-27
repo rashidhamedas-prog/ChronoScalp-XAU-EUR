@@ -54,7 +54,7 @@ from chronoscalp.risk.institutional_guards import (
     SpreadMovingAverageGuard,
     ThreeStrikesGuard,
     correlation_blocks,
-    volatility_allows,
+    volatility_decision,
 )
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
@@ -457,16 +457,47 @@ class TradingBot:
                     continue
 
                 if bool(self.vol_cfg.get("enabled", True)):
-                    last = trigger_df.iloc[-1]
-                    atr_v = float(last.get("atr", 0) or 0)
-                    close_v = float(last.get("close", 0) or 0)
-                    if not volatility_allows(
+                    # Regime check on M5 (configurable), not S15/M1 trigger ATR —
+                    # ultra-scalp trigger bars have tiny ATR/close and would
+                    # permanently fail a min ratio calibrated for higher TFs.
+                    vol_tf_name = str(self.vol_cfg.get("timeframe", "M5"))
+                    try:
+                        vol_tf = Timeframe(vol_tf_name)
+                    except ValueError:
+                        vol_tf = Timeframe.M5
+                    vol_df = data_by_tf.get(vol_tf)
+                    if vol_df is None or vol_df.empty:
+                        vol_df = data_by_tf.get(Timeframe.M5)
+                    if vol_df is None or vol_df.empty:
+                        vol_df = trigger_df
+                    last = vol_df.iloc[-1]
+                    atr_raw = last.get("atr", 0)
+                    close_raw = last.get("close", 0)
+                    try:
+                        atr_v = float(atr_raw) if atr_raw is not None else 0.0
+                    except (TypeError, ValueError):
+                        atr_v = 0.0
+                    try:
+                        close_v = float(close_raw) if close_raw is not None else 0.0
+                    except (TypeError, ValueError):
+                        close_v = 0.0
+                    allowed, vol_reason, ratio = volatility_decision(
                         atr_v,
                         close_v,
-                        min_ratio=float(self.vol_cfg.get("min_atr_close_ratio", 0.0005)),
-                        max_ratio=float(self.vol_cfg.get("max_atr_close_ratio", 0.02)),
-                    ):
-                        self._note_skip(f"{symbol}:volatility_guard")
+                        min_ratio=float(self.vol_cfg.get("min_atr_close_ratio", 0.00005)),
+                        max_ratio=float(self.vol_cfg.get("max_atr_close_ratio", 0.05)),
+                    )
+                    if not allowed:
+                        self._note_skip(f"{symbol}:volatility_{vol_reason}")
+                        logger.debug(
+                            "{} volatility_guard {}: atr={:.6g} close={:.6g} ratio={} tf={}",
+                            symbol,
+                            vol_reason,
+                            atr_v,
+                            close_v,
+                            f"{ratio:.6g}" if ratio is not None else "n/a",
+                            vol_tf.value,
+                        )
                         continue
 
                 if bool(self.corr_cfg.get("enabled", True)) and self.open_tickets:
