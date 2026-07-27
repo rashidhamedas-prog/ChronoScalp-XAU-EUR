@@ -134,7 +134,11 @@ class MT5Broker:
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            raise RuntimeError(f"MT5 order_send failed: {result}")
+            last_err = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send failed: result={result} last_error={last_err} "
+                f"symbol={signal.symbol} volume={volume} type_filling={request.get('type_filling')}"
+            )
 
         ticket = find_managed_position_ticket(signal.symbol, magic=self._magic)
         if ticket is None:
