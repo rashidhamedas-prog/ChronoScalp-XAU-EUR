@@ -9,10 +9,12 @@ from datetime import UTC, datetime
 from chronoscalp.data.mt5_connector import MT5Connector, _require_windows
 from chronoscalp.execution.mt5_utils import (
     CHRONOSCALP_MAGIC,
+    StaleStopsError,
     fetch_closed_position_pnl,
     find_managed_position_ticket,
     resolve_order_filling_mode,
     sanitize_mt5_comment,
+    scale_volume_to_free_margin,
     spread_points_to_pips,
     validate_fill_vs_signal_entry,
     validate_min_stop_distance,
@@ -197,6 +199,35 @@ class MT5Broker:
                 take_profit=float(signal.take_profit),
                 min_distance=stops_points * point,
             )
+
+        # Fit volume inside free margin instead of letting MT5 bounce "No money".
+        account = mt5.account_info()
+        required = None
+        try:
+            required = mt5.order_calc_margin(order_type, signal.symbol, float(volume), float(price))
+        except Exception:  # noqa: BLE001 - older builds may lack order_calc_margin
+            required = None
+        if account is not None and required is not None and required > 0:
+            adjusted = scale_volume_to_free_margin(
+                volume=float(volume),
+                required_margin=float(required),
+                free_margin=float(getattr(account, "margin_free", 0.0) or 0.0),
+                volume_step=float(getattr(info, "volume_step", 0.01) or 0.01) if info else 0.01,
+                volume_min=float(getattr(info, "volume_min", 0.01) or 0.01) if info else 0.01,
+            )
+            if adjusted <= 0:
+                raise StaleStopsError(
+                    f"{signal.symbol}: even minimum volume does not fit free margin "
+                    f"(required={required:.2f} free={getattr(account, 'margin_free', 0.0):.2f})"
+                )
+            if adjusted < float(volume):
+                logger.warning(
+                    "Volume reduced to fit margin: {} {:.2f} -> {:.2f} lots",
+                    signal.symbol,
+                    float(volume),
+                    adjusted,
+                )
+                volume = adjusted
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,

@@ -234,6 +234,31 @@ def test_validate_signal_rejects_spread_burning_scalp():
     )
     assert not rm.validate_signal(micro, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
 
+    # Sub-spread stop distance is floored out even when live spread is ~0.
+    floored_spec = dict(eurjpy_spec, typical_spread_pips=1.5)
+    rm_floor = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"USDJPY_o": floored_spec},
+        starting_equity=10_000,
+    )
+    sub_pip = Signal(
+        symbol="USDJPY_o",
+        signal_type=SignalType.BUY,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=163.706,
+        stop_loss=163.70212,  # 0.39 pips — the real "No money" 35-lot trade
+        take_profit=163.70988,
+        timeframe=Timeframe.S15,
+    )
+    assert not rm_floor.validate_signal(
+        sub_pip, current_spread_pips=0.01, min_reward_risk_ratio=1.0
+    )
+
     # A 5-pip stop / 8-pip target clears the 0.3-pip spread comfortably.
     healthy = Signal(
         symbol="EURJPY_o",

@@ -58,6 +58,46 @@ def test_validate_stops_vs_fill_price_sell_ok():
     )
 
 
+def test_scale_volume_to_free_margin():
+    """35 lots USDJPY on a $9k account must shrink (or skip), not bounce No money."""
+    from chronoscalp.execution.mt5_utils import scale_volume_to_free_margin
+
+    # Requires 10x the free margin → shrink to ~9% of requested, floored to step.
+    scaled = scale_volume_to_free_margin(
+        volume=35.63,
+        required_margin=89_075.0,
+        free_margin=9_000.0,
+        volume_step=0.01,
+        volume_min=0.01,
+    )
+    assert 0 < scaled < 35.63
+    assert scaled == pytest.approx(3.23, abs=0.02)
+
+    # Fits already → unchanged.
+    assert (
+        scale_volume_to_free_margin(
+            volume=0.5,
+            required_margin=500.0,
+            free_margin=9_000.0,
+            volume_step=0.01,
+            volume_min=0.01,
+        )
+        == 0.5
+    )
+
+    # Even min volume does not fit → 0 (skip).
+    assert (
+        scale_volume_to_free_margin(
+            volume=0.02,
+            required_margin=50_000.0,
+            free_margin=100.0,
+            volume_step=0.01,
+            volume_min=0.01,
+        )
+        == 0.0
+    )
+
+
 def test_validate_min_stop_distance_rejects_sub_pip_stops():
     """EURJPY 0.8-pip SL vs broker stops_level — MT5 would return Invalid stops."""
     from chronoscalp.execution.mt5_utils import validate_min_stop_distance

@@ -27,6 +27,37 @@ def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     return cleaned[:max_len]
 
 
+def scale_volume_to_free_margin(
+    *,
+    volume: float,
+    required_margin: float,
+    free_margin: float,
+    volume_step: float,
+    volume_min: float,
+    utilization: float = 0.9,
+) -> float:
+    """Shrink ``volume`` so required margin fits inside ``utilization`` of free margin.
+
+    Returns 0.0 when even the minimum volume does not fit (caller should skip
+    the trade instead of letting the broker bounce it with ``No money``).
+    Never increases volume.
+    """
+    if volume <= 0:
+        return 0.0
+    if required_margin <= 0 or free_margin <= 0:
+        return volume
+    budget = utilization * free_margin
+    if required_margin <= budget:
+        return volume
+    scaled = volume * budget / required_margin
+    if volume_step > 0:
+        scaled = int(scaled / volume_step) * volume_step
+    scaled = round(scaled, 8)
+    if scaled < max(volume_min, 0.0) or scaled <= 0:
+        return 0.0
+    return min(scaled, volume)
+
+
 def validate_min_stop_distance(
     *,
     fill_price: float,

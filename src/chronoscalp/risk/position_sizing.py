@@ -215,15 +215,30 @@ class RiskManager:
         # rate, so refuse it instead of burning the account on costs.
         spec = self.symbols_cfg.get(signal.symbol)
         if spec:
-            comm = commission_per_lot(spec, signal.entry_price)
+            pip_size = float(spec["pip_size"])
             pip_value = float(spec["pip_value_per_lot"])
+            sl_pips = abs(signal.entry_price - signal.stop_loss) / pip_size
+
+            # Hard floor: sub-spread stops (e.g. 0.39-pip USDJPY) are noise
+            # trades that also force absurd volumes; 2x typical spread minimum.
+            min_stop_pips = 2.0 * float(spec.get("typical_spread_pips", 0) or 0)
+            if min_stop_pips > 0 and sl_pips < min_stop_pips:
+                logger.info(
+                    "Signal rejected ({}): SL distance {:.2f} pips < floor {:.2f} "
+                    "(2x typical spread)",
+                    signal.symbol,
+                    sl_pips,
+                    min_stop_pips,
+                )
+                return False
+
+            comm = commission_per_lot(spec, signal.entry_price)
             spread_cost = 0.0
             if math.isfinite(current_spread_pips) and current_spread_pips > 0:
                 spread_cost = current_spread_pips * pip_value
             cost = comm + spread_cost
             if cost > 0:
-                pip_size = float(spec["pip_size"])
-                risk_value = abs(signal.entry_price - signal.stop_loss) / pip_size * pip_value
+                risk_value = sl_pips * pip_value
                 reward_value = abs(signal.take_profit - signal.entry_price) / pip_size * pip_value
                 if risk_value + cost <= 0:
                     return False
