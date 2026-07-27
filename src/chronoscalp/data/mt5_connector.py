@@ -330,6 +330,27 @@ class MT5Connector:
             ]
         ]
 
+    def _broker_time_now(self, symbol: str) -> datetime:
+        """Latest tick timestamp for ``symbol`` (server-stamped pseudo-UTC).
+
+        MT5 stamps ticks/bars in *broker server time* exposed as raw epoch
+        seconds. Using real UTC wall clock for ``copy_ticks_range`` on a
+        UTC+N broker silently drops the newest N hours of ticks, so signals
+        get built from stale prices. Anchor range queries to the broker's own
+        clock instead.
+        """
+        import MetaTrader5 as mt5
+
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is not None:
+            msc = int(getattr(tick, "time_msc", 0) or 0)
+            if msc > 0:
+                return datetime.fromtimestamp(msc / 1000.0, tz=UTC)
+            sec = int(getattr(tick, "time", 0) or 0)
+            if sec > 0:
+                return datetime.fromtimestamp(sec, tz=UTC)
+        return datetime.now(tz=UTC)
+
     def _fetch_ohlcv_from_ticks(
         self, symbol: str, timeframe: Timeframe, count: int
     ) -> pd.DataFrame:
@@ -339,7 +360,7 @@ class MT5Connector:
         seconds = timeframe.seconds
         # Extra headroom: thin markets / gaps need more wall-clock than count*seconds
         window = timedelta(seconds=max(seconds * count * 3, 900))
-        end = datetime.now(tz=UTC)
+        end = self._broker_time_now(symbol) + timedelta(seconds=2)
         start = end - window
         ticks = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
         if ticks is None or len(ticks) == 0:
