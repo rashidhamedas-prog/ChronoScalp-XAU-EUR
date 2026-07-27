@@ -53,6 +53,7 @@ from chronoscalp.orchestration.state_store import TradingStateStore
 from chronoscalp.orchestration.trade_journal import (
     TradeJournal,
     journal_path_for,
+    load_daily_reset_marker,
     sum_closed_pnl_today,
 )
 from chronoscalp.risk.institutional_guards import (
@@ -168,12 +169,16 @@ class TradingBot:
         self.trade_journal.load()
 
         # Re-seed today's realized P&L so restarts can't bypass the daily stop.
-        today_pnl = sum_closed_pnl_today(self.trade_journal.closed_trades)
+        # An explicit operator marker (scripts/reset_daily_tracker.py) excludes
+        # trades closed before the reset.
+        reset_marker = load_daily_reset_marker(self.state_dir, mode)
+        today_pnl = sum_closed_pnl_today(self.trade_journal.closed_trades, since=reset_marker)
         if today_pnl:
             self.risk_manager.daily_tracker.record_trade_pnl(today_pnl)
             logger.info(
-                "Daily tracker seeded from journal: realized_today={:+.2f}",
+                "Daily tracker seeded from journal: realized_today={:+.2f} (reset_marker={})",
                 today_pnl,
+                reset_marker.isoformat() if reset_marker else "none",
             )
 
         resilience_cfg = settings.resilience

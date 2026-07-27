@@ -442,16 +442,42 @@ def _parse_iso(value: str) -> datetime | None:
 
 
 def sum_closed_pnl_today(
-    closed_trades: list[ClosedTradeRecord], now: datetime | None = None
+    closed_trades: list[ClosedTradeRecord],
+    now: datetime | None = None,
+    since: datetime | None = None,
 ) -> float:
     """Realized P&L of trades closed on the current UTC date.
 
     Used to re-seed the daily loss tracker after a restart so the 3% daily
-    stop cannot be bypassed by bouncing the process.
+    stop cannot be bypassed by bouncing the process. ``since`` (an explicit
+    operator reset marker) excludes trades closed at or before that moment —
+    a conscious demo-account reset, not an accidental loophole.
     """
     ref = (now or datetime.now(tz=UTC)).astimezone(UTC)
     today = ref.date().isoformat()
-    return float(sum(t.pnl for t in closed_trades if (t.close_time or "")[:10] == today))
+    total = 0.0
+    for t in closed_trades:
+        close_time = t.close_time or ""
+        if close_time[:10] != today:
+            continue
+        if since is not None:
+            closed_at = _parse_iso(close_time)
+            if closed_at is not None and closed_at <= since:
+                continue
+        total += t.pnl
+    return float(total)
+
+
+def load_daily_reset_marker(state_dir: str | Path, mode: str) -> datetime | None:
+    """Operator's explicit daily-tracker reset timestamp (or None)."""
+    path = Path(state_dir) / f"daily_reset_{mode}.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        return _parse_iso(str(payload.get("reset_at") or ""))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def journal_path_for(state_dir: str | Path, mode: str) -> Path:

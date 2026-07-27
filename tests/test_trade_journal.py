@@ -88,6 +88,9 @@ def test_sum_closed_pnl_today_seeds_daily_tracker() -> None:
     now = datetime(2026, 7, 27, 16, 0, tzinfo=UTC)
     assert sum_closed_pnl_today(closed, now=now) == -434.59
     assert sum_closed_pnl_today(closed, now=datetime(2026, 7, 28, 1, 0, tzinfo=UTC)) == 0.0
+    # Explicit operator reset marker excludes earlier closes.
+    reset_at = datetime(2026, 7, 27, 15, 30, tzinfo=UTC)
+    assert sum_closed_pnl_today(closed, now=now, since=reset_at) == 0.0
 
 
 def test_today_stats_ignore_older_closes() -> None:
