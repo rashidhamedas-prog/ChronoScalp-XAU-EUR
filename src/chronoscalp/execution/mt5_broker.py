@@ -12,6 +12,7 @@ from chronoscalp.execution.mt5_utils import (
     fetch_closed_position_pnl,
     find_managed_position_ticket,
     resolve_order_filling_mode,
+    sanitize_mt5_comment,
     spread_points_to_pips,
 )
 from chronoscalp.logging_setup import logger
@@ -128,7 +129,7 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": f"chronoscalp:{signal.reason[:40]}",
+            "comment": sanitize_mt5_comment(f"CS_{signal.reason}"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
