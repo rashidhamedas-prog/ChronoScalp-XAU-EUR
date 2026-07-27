@@ -7,9 +7,11 @@ from unittest.mock import patch
 import pytest
 
 from chronoscalp.execution.mt5_utils import (
+    StaleStopsError,
     resolve_order_filling_mode,
     sanitize_mt5_comment,
     spread_points_to_pips,
+    validate_stops_vs_fill_price,
 )
 from chronoscalp.execution.position_logic import check_sl_tp_hit, exit_price_for_hit
 from chronoscalp.utils.types import Position, SignalType
@@ -35,6 +37,25 @@ def test_sanitize_mt5_comment_ascii_and_length():
     assert len(sanitize_mt5_comment("x" * 100)) == 31
     assert sanitize_mt5_comment("سیگنال تست") == "ChronoScalp"
     assert sanitize_mt5_comment("") == "ChronoScalp"
+
+
+def test_validate_stops_vs_fill_price_buy_ok():
+    validate_stops_vs_fill_price(
+        is_buy=True, fill_price=1965.0, stop_loss=1960.0, take_profit=1972.0
+    )
+
+
+def test_validate_stops_vs_fill_price_buy_stale_sl_above():
+    with pytest.raises(StaleStopsError):
+        validate_stops_vs_fill_price(
+            is_buy=True, fill_price=1964.57, stop_loss=1967.06, take_profit=1968.34
+        )
+
+
+def test_validate_stops_vs_fill_price_sell_ok():
+    validate_stops_vs_fill_price(
+        is_buy=False, fill_price=1965.0, stop_loss=1970.0, take_profit=1958.0
+    )
 
 
 def test_resolve_order_filling_mode_fok_bit():

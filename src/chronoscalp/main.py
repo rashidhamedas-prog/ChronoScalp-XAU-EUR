@@ -21,6 +21,7 @@ import pandas as pd
 from chronoscalp.config import Settings, get_settings
 from chronoscalp.data.spread_sampler import SpreadSampler
 from chronoscalp.execution.mt5_broker import MT5Broker
+from chronoscalp.execution.mt5_utils import StaleStopsError
 from chronoscalp.execution.oanda_broker import OANDABroker
 from chronoscalp.execution.position_logic import (
     apply_breakeven_or_trailing,
@@ -652,6 +653,11 @@ class TradingBot:
                     ),
                     AlertLevel.INFO,
                 )
+
+            except StaleStopsError as exc:
+                # Price moved through SL/TP before fill — skip, do not trip circuit breaker.
+                self._note_skip(f"{symbol}:stale_stops")
+                logger.warning("Skipping {} — {}", symbol, exc)
 
             except Exception:  # noqa: BLE001 - one symbol's failure must not kill the loop
                 tick_had_failure = True

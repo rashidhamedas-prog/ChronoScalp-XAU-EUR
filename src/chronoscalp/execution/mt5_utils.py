@@ -15,12 +15,45 @@ CHRONOSCALP_MAGIC = 20260711
 _MT5_COMMENT_MAX = 31
 
 
+class StaleStopsError(ValueError):
+    """Live fill price moved through signal SL/TP — refuse order_send (Invalid stops)."""
+
+
 def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     """Return a broker-safe MT5 order comment (ASCII, no spaces, ≤ ``max_len``)."""
     raw = (text or "").strip()
     cleaned = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in "._-")) else "_" for ch in raw)
     cleaned = cleaned.strip("._-") or "ChronoScalp"
     return cleaned[:max_len]
+
+
+def validate_stops_vs_fill_price(
+    *,
+    is_buy: bool,
+    fill_price: float,
+    stop_loss: float,
+    take_profit: float,
+) -> None:
+    """Require SL/TP on the correct side of the live fill price.
+
+    Strategy builds stops from bar close; ``order_send`` uses ask/bid. If price
+    gaps through the stop before send, MT5 returns ``Invalid stops``. Reject
+    here instead of tightening risk or flipping geometry.
+    """
+    if fill_price <= 0 or stop_loss <= 0 or take_profit <= 0:
+        raise StaleStopsError(
+            f"non-positive stop levels fill={fill_price} sl={stop_loss} tp={take_profit}"
+        )
+    if is_buy:
+        if not (stop_loss < fill_price < take_profit):
+            raise StaleStopsError(
+                f"BUY requires sl < price < tp; got sl={stop_loss} price={fill_price} tp={take_profit}"
+            )
+    else:
+        if not (take_profit < fill_price < stop_loss):
+            raise StaleStopsError(
+                f"SELL requires tp < price < sl; got tp={take_profit} price={fill_price} sl={stop_loss}"
+            )
 
 
 def spread_points_to_pips(spread_points: float, point: float, pip_size: float) -> float:

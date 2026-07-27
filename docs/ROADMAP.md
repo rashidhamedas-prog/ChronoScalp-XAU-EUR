@@ -64,5 +64,6 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Institutional Scalper v3:** Session VWAP + Asian mid trend (M15/M5), sweep+MSS+RVOL entry, ultra S15 VWAP/RVOL 1.3, 3-strikes, correlation/vol/spread-MA guards, daily DD close-all, partial TP@1.2R + Chandelier trail
 - [x] **Volatility guard fix:** regime uses M5 ATR/close (not S15 trigger); thresholds + skip reasons (`volatility_low`/`high`/`invalid`) so ultra-scalp no longer blocks every symbol
 - [x] **Telegram live positions:** «پوزیشن‌ها» live-first MT5/OANDA query (fallback: fresh `broker_positions_*.json`); empty-state shows login/equity/margin; journal ghost-drop has 90s grace; reconcile records external SL/TP closes with PnL
+- [x] **MT5 stale-stops gate:** refuse `order_send` when live ask/bid has moved through signal SL/TP (prevents `Invalid stops`); skip as `stale_stops` without tripping circuit breaker
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

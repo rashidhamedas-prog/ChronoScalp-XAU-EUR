@@ -14,6 +14,7 @@ from chronoscalp.execution.mt5_utils import (
     resolve_order_filling_mode,
     sanitize_mt5_comment,
     spread_points_to_pips,
+    validate_stops_vs_fill_price,
 )
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
@@ -173,6 +174,12 @@ class MT5Broker:
         if tick is None:
             raise RuntimeError(f"No tick data for {signal.symbol}: {mt5.last_error()}")
         price = tick.ask if signal.signal_type == SignalType.BUY else tick.bid
+        validate_stops_vs_fill_price(
+            is_buy=signal.signal_type == SignalType.BUY,
+            fill_price=float(price),
+            stop_loss=float(signal.stop_loss),
+            take_profit=float(signal.take_profit),
+        )
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
