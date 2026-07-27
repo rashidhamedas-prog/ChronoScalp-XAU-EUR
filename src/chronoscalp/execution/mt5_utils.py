@@ -23,7 +23,6 @@ def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     return cleaned[:max_len]
 
 
-
 def spread_points_to_pips(spread_points: float, point: float, pip_size: float) -> float:
     """Convert MT5 ``symbol_info.spread`` (points) to pips using broker point size."""
     if pip_size <= 0 or point <= 0:
