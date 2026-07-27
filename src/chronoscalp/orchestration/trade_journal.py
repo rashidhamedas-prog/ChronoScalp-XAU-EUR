@@ -373,15 +373,40 @@ class TradeJournal:
         self.save()
         return record
 
-    def sync_open_from_broker(self, positions: list[Position]) -> None:
-        """Reconcile journal opens with broker: adopt missing, drop ghosts."""
+    def sync_open_from_broker(
+        self,
+        positions: list[Position],
+        *,
+        ghost_grace_seconds: float = 90.0,
+        now: datetime | None = None,
+    ) -> None:
+        """Reconcile journal opens with broker: adopt missing, drop stale ghosts.
+
+        Fresh opens are kept for ``ghost_grace_seconds`` even if a transient
+        ``positions_get`` miss would otherwise wipe them (common right after
+        ``order_send`` or during MT5 reconnect hiccups).
+        """
         changed = False
         broker_tickets = {position.ticket for position in positions}
+        as_of = now or datetime.now(tz=UTC)
         for ticket in list(self.open_trades):
-            if ticket not in broker_tickets:
-                self.open_trades.pop(ticket, None)
-                changed = True
-                logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
+            if ticket in broker_tickets:
+                continue
+            open_rec = self.open_trades.get(ticket)
+            opened_at = _parse_iso(open_rec.open_time if open_rec else "")
+            if opened_at is not None and ghost_grace_seconds > 0:
+                age = (as_of - opened_at).total_seconds()
+                if age < ghost_grace_seconds:
+                    logger.debug(
+                        "Journal: keeping recent open ticket={} age={:.1f}s < grace={:.0f}s",
+                        ticket,
+                        age,
+                        ghost_grace_seconds,
+                    )
+                    continue
+            self.open_trades.pop(ticket, None)
+            changed = True
+            logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
         for position in positions:
             if position.ticket not in self.open_trades:
                 self.open_trades[position.ticket] = OpenTradeRecord.from_position(
@@ -402,6 +427,18 @@ class TradeJournal:
             closed_trades=list(self.closed_trades),
             stats=stats,
         )
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def journal_path_for(state_dir: str | Path, mode: str) -> Path:

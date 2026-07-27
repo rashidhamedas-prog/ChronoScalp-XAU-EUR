@@ -58,8 +58,17 @@ class MT5Broker:
     def get_open_positions(self, symbol: str | None = None) -> list[Position]:
         return self.get_managed_positions(symbol=symbol)
 
+    def get_account_positions(self, symbol: str | None = None) -> list[Position]:
+        """All open account positions (no magic filter) — for operator display."""
+        return self._positions_from_mt5(symbol=symbol, magic=None)
+
     def get_managed_positions(self, symbol: str | None = None) -> list[Position]:
         """Open positions placed by this bot (filtered by magic number)."""
+        return self._positions_from_mt5(symbol=symbol, magic=self._magic)
+
+    def _positions_from_mt5(
+        self, *, symbol: str | None = None, magic: int | None
+    ) -> list[Position]:
         _require_windows()
         import MetaTrader5 as mt5
 
@@ -67,9 +76,9 @@ class MT5Broker:
         if raw_positions is None:
             return []
 
-        positions = []
+        positions: list[Position] = []
         for p in raw_positions:
-            if p.magic != self._magic:
+            if magic is not None and int(getattr(p, "magic", 0) or 0) != magic:
                 continue
             positions.append(
                 Position(
@@ -86,6 +95,35 @@ class MT5Broker:
                 )
             )
         return positions
+
+    def snapshot_account_positions(self, symbol: str | None = None) -> list[dict]:
+        """Rich open-position rows for Telegram/dashboard (includes profit/magic)."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        raw_positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        if raw_positions is None:
+            return []
+
+        rows: list[dict] = []
+        for p in raw_positions:
+            direction = "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell"
+            rows.append(
+                {
+                    "ticket": int(p.ticket),
+                    "symbol": str(p.symbol),
+                    "direction": direction,
+                    "volume": float(p.volume),
+                    "entry_price": float(p.price_open),
+                    "stop_loss": float(p.sl or 0.0),
+                    "take_profit": float(p.tp or 0.0),
+                    "profit": float(getattr(p, "profit", 0.0) or 0.0),
+                    "magic": int(getattr(p, "magic", 0) or 0),
+                    "comment": str(getattr(p, "comment", "") or ""),
+                    "open_time": datetime.fromtimestamp(p.time, tz=UTC).isoformat(),
+                }
+            )
+        return rows
 
     def get_current_spread_pips(self, symbol: str) -> float:
         spread_points = self._connector.current_spread_points(symbol)
@@ -129,7 +167,7 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": sanitize_mt5_comment(f"CS_{signal.reason}"),
+            "comment": sanitize_mt5_comment("ChronoScalp"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
@@ -216,7 +254,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:close",
+            "comment": sanitize_mt5_comment("CS_close"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }
@@ -263,7 +301,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:partial",
+            "comment": sanitize_mt5_comment("CS_partial"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }

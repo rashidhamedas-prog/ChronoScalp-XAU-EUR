@@ -197,9 +197,41 @@ def test_sync_open_from_broker_drops_ghosts(tmp_path: Path) -> None:
         take_profit=1900.0,
         open_time=datetime(2026, 7, 25, 10, 0, tzinfo=UTC),
     )
-    journal.sync_open_from_broker([still_open])
+    now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+    journal.sync_open_from_broker([still_open], ghost_grace_seconds=90.0, now=now)
     assert 100 not in journal.open_trades
     assert 200 in journal.open_trades
-    # Empty broker clears all ghosts
-    journal.sync_open_from_broker([])
+    # Empty broker clears all ghosts (past grace)
+    journal.sync_open_from_broker([], ghost_grace_seconds=90.0, now=now)
     assert journal.open_trades == {}
+
+
+def test_sync_open_from_broker_keeps_recent_within_grace(tmp_path: Path) -> None:
+    journal = TradeJournal(tmp_path / "j.json", mode="live")
+    opened = datetime(2026, 7, 27, 13, 50, 2, tzinfo=UTC)
+    journal.record_open(
+        Position(
+            ticket=306425496,
+            symbol="ETHUSD",
+            direction=SignalType.BUY,
+            volume=1.98,
+            entry_price=1968.99,
+            stop_loss=1968.34,
+            take_profit=1970.0,
+            open_time=opened,
+        )
+    )
+    # 26s later broker briefly reports empty — keep within 90s grace
+    journal.sync_open_from_broker(
+        [],
+        ghost_grace_seconds=90.0,
+        now=datetime(2026, 7, 27, 13, 50, 28, tzinfo=UTC),
+    )
+    assert 306425496 in journal.open_trades
+    # After grace, drop
+    journal.sync_open_from_broker(
+        [],
+        ghost_grace_seconds=90.0,
+        now=datetime(2026, 7, 27, 13, 52, 0, tzinfo=UTC),
+    )
+    assert 306425496 not in journal.open_trades

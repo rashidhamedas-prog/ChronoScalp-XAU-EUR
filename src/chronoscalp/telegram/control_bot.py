@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -265,15 +266,96 @@ class TelegramControlBot:
         )
 
     def _cmd_open(self, chat_id: int, _text: str = "") -> None:
+        rows = self._load_live_open_positions()
+        if rows is not None:
+            if not rows:
+                self.send(chat_id, "پوزیشن بازی روی بروکر نیست.")
+                return
+            lines = [
+                (
+                    f"#{r.get('ticket')} {r.get('symbol')} {r.get('direction')} "
+                    f"vol={r.get('volume')} @{r.get('entry_price')} "
+                    f"pnl={float(r.get('profit') or 0):+.2f}"
+                )
+                for r in rows
+            ]
+            self.send(chat_id, "پوزیشن‌های باز (زنده از بروکر):\n" + "\n".join(lines))
+            return
+
         mode = self._detect_mode()
         snap = load_journal_snapshot(self.state_dir, mode)
         if not snap.open_trades:
-            self.send(chat_id, "پوزیشن بازی نیست.")
+            self.send(
+                chat_id,
+                "پوزیشن بازی در ژورنال نیست.\n"
+                "(خواندن زنده از بروکر ممکن نشد — لاگ/اتصال MT5 را چک کنید)",
+            )
             return
         lines = [
-            f"{t.symbol} {t.direction} vol={t.volume} @{t.entry_price}" for t in snap.open_trades
+            f"#{t.ticket} {t.symbol} {t.direction} vol={t.volume} @{t.entry_price}"
+            for t in snap.open_trades
         ]
-        self.send(chat_id, "پوزیشن‌های باز:\n" + "\n".join(lines))
+        self.send(chat_id, "پوزیشن‌های باز (ژورنال):\n" + "\n".join(lines))
+
+    def _load_live_open_positions(self) -> list[dict] | None:
+        """Prefer broker snapshot / live MT5-OANDA query; ``None`` = fall back to journal."""
+        mode = self._detect_mode()
+        snapshot_path = self.state_dir / f"broker_positions_{mode}.json"
+        rows = self._read_positions_snapshot(snapshot_path, max_age_seconds=120.0)
+        if rows is not None:
+            return rows
+
+        self._reload_settings()
+        broker = str(self.settings.execution.get("broker") or "").lower()
+        secrets = self.settings.secrets
+        if broker == "mt5":
+            from chronoscalp.saas.broker_wizard import fetch_mt5_open_positions
+
+            ok, msg, live_rows = fetch_mt5_open_positions(
+                int(secrets.mt5_login or 0),
+                str(secrets.mt5_password or ""),
+                str(secrets.mt5_server or ""),
+                str(secrets.mt5_terminal_path or ""),
+            )
+            if ok:
+                return live_rows
+            logger.warning("Telegram live positions (MT5) failed: {}", msg)
+            return None
+        if broker == "oanda":
+            from chronoscalp.saas.broker_wizard import fetch_oanda_open_positions
+
+            user = UserConfigStore().config
+            ok, msg, live_rows = fetch_oanda_open_positions(
+                str(secrets.oanda_api_token or ""),
+                str(secrets.oanda_account_id or ""),
+                str(user.broker.oanda_environment or "practice"),
+            )
+            if ok:
+                return live_rows
+            logger.warning("Telegram live positions (OANDA) failed: {}", msg)
+            return None
+        return None
+
+    @staticmethod
+    def _read_positions_snapshot(path: Path, *, max_age_seconds: float) -> list[dict] | None:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            updated = str(payload.get("updated_at") or "")
+            if updated:
+                ts = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                age = (datetime.now(tz=UTC) - ts).total_seconds()
+                if age > max_age_seconds:
+                    return None
+            rows = payload.get("positions")
+            if isinstance(rows, list):
+                return rows
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        return None
 
     def _ensure_license(self) -> str | None:
         checker = self._license_check

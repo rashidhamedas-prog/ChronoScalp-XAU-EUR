@@ -11,6 +11,7 @@ Deployment targets:
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -273,10 +274,18 @@ class TradingBot:
         else:
             managed = self.broker.get_open_positions()
 
+        managed_tickets = {p.ticket for p in managed}
+        now = datetime.now(tz=UTC)
+        for symbol, ticket in list(previous.items()):
+            if ticket not in managed_tickets:
+                # SL/TP/manual close — record PnL before state/journal ghost-drop.
+                self._on_position_closed_externally(symbol, ticket, now)
+
         broker_map = {p.symbol: p.ticket for p in managed}
         self.state_store.reconcile_open_tickets(broker_map)
         self.open_tickets = dict(self.state_store.state.open_tickets)
-        self.trade_journal.sync_open_from_broker(managed)
+        self.trade_journal.sync_open_from_broker(managed, now=now)
+        self._write_broker_positions_snapshot()
 
         if alert_on_change and previous != self.open_tickets:
             self.alerts.notify(
@@ -284,6 +293,43 @@ class TradingBot:
                 f"before={previous} after={self.open_tickets}",
                 AlertLevel.WARNING,
             )
+
+    def _write_broker_positions_snapshot(self) -> None:
+        """Persist live account positions for Telegram/dashboard (all magics)."""
+        path = self.state_dir / f"broker_positions_{self.mode}.json"
+        rows: list[dict] = []
+        try:
+            if isinstance(self.broker, MT5Broker):
+                rows = self.broker.snapshot_account_positions()
+            else:
+                for p in self.broker.get_open_positions():
+                    direction = (
+                        p.direction.value if hasattr(p.direction, "value") else str(p.direction)
+                    )
+                    rows.append(
+                        {
+                            "ticket": int(p.ticket),
+                            "symbol": str(p.symbol),
+                            "direction": direction,
+                            "volume": float(p.volume),
+                            "entry_price": float(p.entry_price),
+                            "stop_loss": float(p.stop_loss),
+                            "take_profit": float(p.take_profit),
+                            "profit": 0.0,
+                            "magic": 0,
+                            "comment": "",
+                            "open_time": p.open_time.isoformat() if p.open_time else "",
+                        }
+                    )
+            payload = {
+                "mode": self.mode,
+                "updated_at": datetime.now(tz=UTC).isoformat(),
+                "positions": rows,
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed writing broker positions snapshot to {}", path)
 
     def _maybe_reconcile(self, now: datetime) -> None:
         if self._reconcile_interval <= 0:
