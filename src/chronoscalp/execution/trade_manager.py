@@ -23,7 +23,9 @@ class ManageAction:
 
 
 def initial_risk(position: Position) -> float:
-    sl0 = position.initial_stop_loss if position.initial_stop_loss is not None else position.stop_loss
+    sl0 = (
+        position.initial_stop_loss if position.initial_stop_loss is not None else position.stop_loss
+    )
     return abs(position.entry_price - sl0)
 
 

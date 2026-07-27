@@ -57,9 +57,7 @@ def trends_aligned(higher_trends: list[TrendDirection]) -> TrendDirection:
     return TrendDirection.NEUTRAL
 
 
-def ultra_scalp_trend(
-    higher_trends: list[TrendDirection], mode: str = "primary"
-) -> TrendDirection:
+def ultra_scalp_trend(higher_trends: list[TrendDirection], mode: str = "primary") -> TrendDirection:
     """Trend gate for ultra-scalp.
 
     - ``strict``: same as ``trends_aligned`` (every TF must agree, none neutral).
@@ -122,6 +120,7 @@ def _confluence_ok(
         use_smc_confluence=use_smc_confluence,
         use_liquidity_volume=use_liquidity_volume,
     )
+
 
 def generate_ultra_scalp_signal(
     symbol: str,
@@ -430,9 +429,7 @@ class MultiTimeframeStrategy:
                 atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
                 atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.0)),
                 rvol_min=float(scalp_cfg.get("rvol_min", 1.3)),
-                impulse_body_atr_multiple=float(
-                    scalp_cfg.get("impulse_body_atr_multiple", 0.4)
-                ),
+                impulse_body_atr_multiple=float(scalp_cfg.get("impulse_body_atr_multiple", 0.4)),
                 vwap_df=trigger_df,
             )
         elif entry_engine == "institutional":
@@ -445,9 +442,7 @@ class MultiTimeframeStrategy:
                 timeframe=trigger_timeframe,
                 use_smc_confluence=use_smc,
                 use_liquidity_volume=use_liq,
-                min_reward_risk_ratio=float(
-                    self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
-                ),
+                min_reward_risk_ratio=float(self.strategy_cfg.get("min_reward_risk_ratio", 1.5)),
                 atr_stop_multiple=float(self.strategy_cfg.get("atr_stop_multiple", 1.5)),
                 atr_target_multiple=float(self.strategy_cfg.get("atr_target_multiple", 2.25)),
                 rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),

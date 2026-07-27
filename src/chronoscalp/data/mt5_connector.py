@@ -169,9 +169,7 @@ class MT5Connector:
 
             # If credentials were not passed into initialize, login explicitly.
             if "login" not in kwargs:
-                authorized = mt5.login(
-                    self._login, password=self._password, server=self._server
-                )
+                authorized = mt5.login(self._login, password=self._password, server=self._server)
                 if not authorized:
                     last_err = mt5.last_error()
                     logger.error("MT5 login() failed: {}", last_err)
@@ -300,9 +298,7 @@ class MT5Connector:
         self._mark_empty()
         return self._empty_frame()
 
-    def _fetch_ohlcv_once(
-        self, symbol: str, timeframe: Timeframe, count: int
-    ) -> pd.DataFrame:
+    def _fetch_ohlcv_once(self, symbol: str, timeframe: Timeframe, count: int) -> pd.DataFrame:
         import MetaTrader5 as mt5
 
         if not self._ensure_symbol(symbol):

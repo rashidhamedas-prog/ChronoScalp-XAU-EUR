@@ -310,7 +310,9 @@ class TradingBot:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(self._skip_counts.items()))
             logger.info("Entry skip heartbeat ({}s): {}", self._skip_heartbeat_seconds, summary)
         else:
-            logger.info("Entry skip heartbeat ({}s): no skips recorded", self._skip_heartbeat_seconds)
+            logger.info(
+                "Entry skip heartbeat ({}s): no skips recorded", self._skip_heartbeat_seconds
+            )
         self._skip_counts.clear()
         self._last_skip_log_at = now
 
@@ -383,9 +385,7 @@ class TradingBot:
         equity_now = self.broker.get_balance()
         unrealized = self._estimate_unrealized_pnl()
         realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
-        daily_dd_hit = self.daily_dd_guard.check(
-            equity_now, realized, unrealized, at=now
-        )
+        daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
         daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
             at=now
         )
@@ -765,11 +765,8 @@ class TradingBot:
                 meta["breakeven_moved"] = True
                 position.partial_taken = True
                 position.breakeven_moved = True
-                if (
-                    action.partial.new_stop_loss is not None
-                    and self.broker.modify_sl_tp(
-                        ticket, action.partial.new_stop_loss, position.take_profit
-                    )
+                if action.partial.new_stop_loss is not None and self.broker.modify_sl_tp(
+                    ticket, action.partial.new_stop_loss, position.take_profit
                 ):
                     position.stop_loss = action.partial.new_stop_loss
                 logger.info(

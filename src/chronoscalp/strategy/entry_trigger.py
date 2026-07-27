@@ -30,9 +30,8 @@ def _no_signal(symbol: str, timeframe: Timeframe, reason: str = "") -> Signal:
         reason=reason,
     )
 
-def _last_confirmed_swing(
-    df: pd.DataFrame, kind: str, lookback: int = 40
-) -> float | None:
+
+def _last_confirmed_swing(df: pd.DataFrame, kind: str, lookback: int = 40) -> float | None:
     """Most recent confirmed swing high/low price (needs swing_* columns)."""
     if df.empty or kind not in df.columns:
         return None
