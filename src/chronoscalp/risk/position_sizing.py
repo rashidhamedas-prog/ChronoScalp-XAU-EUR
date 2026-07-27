@@ -243,15 +243,18 @@ class RiskManager:
                 if risk_value + cost <= 0:
                     return False
                 net_rr = (reward_value - cost) / (risk_value + cost)
-                # Negligible costs (≤5% of reward) never veto a gross-RR-passing
-                # signal; material costs must keep the net ratio above min.
-                if cost > 0.05 * reward_value and net_rr < min_rr:
+                # Gross geometry already passed min_rr above. After costs the
+                # trade must still offer at least 1:1 — otherwise expectancy is
+                # negative at any realistic win rate. Negligible costs (≤5% of
+                # reward) never veto.
+                net_floor = 1.0
+                if cost > 0.05 * reward_value and net_rr < net_floor:
                     logger.info(
-                        "Signal rejected ({}): net R:R {:.2f} < min {:.2f} after costs "
+                        "Signal rejected ({}): net R:R {:.2f} < floor {:.2f} after costs "
                         "(commission={:.2f} spread={:.2f} per lot; reward={:.2f} risk={:.2f})",
                         signal.symbol,
                         net_rr,
-                        min_rr,
+                        net_floor,
                         comm,
                         spread_cost,
                         reward_value,
