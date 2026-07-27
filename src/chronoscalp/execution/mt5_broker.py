@@ -96,6 +96,23 @@ class MT5Broker:
             )
         return positions
 
+    def snapshot_account_summary(self) -> dict:
+        """Account login/equity/margin for operator display (Telegram empty-state)."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        info = mt5.account_info()
+        if info is None:
+            return {}
+        return {
+            "login": int(info.login),
+            "server": str(getattr(info, "server", "") or ""),
+            "balance": float(info.balance),
+            "equity": float(info.equity),
+            "margin": float(info.margin),
+            "profit": float(getattr(info, "profit", 0.0) or 0.0),
+        }
+
     def snapshot_account_positions(self, symbol: str | None = None) -> list[dict]:
         """Rich open-position rows for Telegram/dashboard (includes profit/magic)."""
         _require_windows()

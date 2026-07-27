@@ -266,10 +266,10 @@ class TelegramControlBot:
         )
 
     def _cmd_open(self, chat_id: int, _text: str = "") -> None:
-        rows = self._load_live_open_positions()
+        rows, account = self._load_live_open_positions()
         if rows is not None:
             if not rows:
-                self.send(chat_id, "پوزیشن بازی روی بروکر نیست.")
+                self.send(chat_id, self._empty_broker_positions_message(account))
                 return
             lines = [
                 (
@@ -279,7 +279,11 @@ class TelegramControlBot:
                 )
                 for r in rows
             ]
-            self.send(chat_id, "پوزیشن‌های باز (زنده از بروکر):\n" + "\n".join(lines))
+            header = "پوزیشن‌های باز (زنده از بروکر):"
+            hint = self._format_account_hint(account)
+            if hint:
+                header = f"{header}\n{hint}"
+            self.send(chat_id, header + "\n" + "\n".join(lines))
             return
 
         mode = self._detect_mode()
@@ -297,31 +301,60 @@ class TelegramControlBot:
         ]
         self.send(chat_id, "پوزیشن‌های باز (ژورنال):\n" + "\n".join(lines))
 
-    def _load_live_open_positions(self) -> list[dict] | None:
-        """Prefer broker snapshot / live MT5-OANDA query; ``None`` = fall back to journal."""
-        mode = self._detect_mode()
-        snapshot_path = self.state_dir / f"broker_positions_{mode}.json"
-        rows = self._read_positions_snapshot(snapshot_path, max_age_seconds=120.0)
-        if rows is not None:
-            return rows
+    def _empty_broker_positions_message(self, account: dict | None = None) -> str:
+        """Persian empty-state with account identity so operators can cross-check MT5."""
+        lines = ["پوزیشن بازی روی بروکر نیست."]
+        hint = self._format_account_hint(account)
+        if hint:
+            lines.append(hint)
+        lines.append(
+            "اگر در ترمینال پوزیشن می‌بینید، همان login/server دمو را با ربات مقایسه کنید "
+            "(Trade → Positions، نه History)."
+        )
+        return "\n".join(lines)
 
+    @staticmethod
+    def _format_account_hint(account: dict | None) -> str:
+        if not account:
+            return ""
+        login = account.get("login") or ""
+        server = account.get("server") or ""
+        parts: list[str] = []
+        if login:
+            parts.append(f"login={login}")
+        if server:
+            parts.append(f"server={server}")
+        for key in ("equity", "margin"):
+            raw = account.get(key)
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            parts.append(f"{key}={value:.2f}")
+        return "حساب: " + " | ".join(parts) if parts else ""
+
+    def _load_live_open_positions(self) -> tuple[list[dict] | None, dict]:
+        """Live MT5/OANDA first, then fresh snapshot; ``(None, {})`` = fall back to journal."""
         self._reload_settings()
         broker = str(self.settings.execution.get("broker") or "").lower()
         secrets = self.settings.secrets
+        account: dict = {}
+
         if broker == "mt5":
             from chronoscalp.saas.broker_wizard import fetch_mt5_open_positions
 
-            ok, msg, live_rows = fetch_mt5_open_positions(
+            ok, msg, live_rows, account = fetch_mt5_open_positions(
                 int(secrets.mt5_login or 0),
                 str(secrets.mt5_password or ""),
                 str(secrets.mt5_server or ""),
                 str(secrets.mt5_terminal_path or ""),
             )
             if ok:
-                return live_rows
+                return live_rows, account
             logger.warning("Telegram live positions (MT5) failed: {}", msg)
-            return None
-        if broker == "oanda":
+        elif broker == "oanda":
             from chronoscalp.saas.broker_wizard import fetch_oanda_open_positions
 
             user = UserConfigStore().config
@@ -331,15 +364,25 @@ class TelegramControlBot:
                 str(user.broker.oanda_environment or "practice"),
             )
             if ok:
-                return live_rows
+                return live_rows, {
+                    "login": secrets.oanda_account_id or "",
+                    "server": str(user.broker.oanda_environment or "practice"),
+                }
             logger.warning("Telegram live positions (OANDA) failed: {}", msg)
-            return None
-        return None
+
+        mode = self._detect_mode()
+        snapshot_path = self.state_dir / f"broker_positions_{mode}.json"
+        rows, snap_account = self._read_positions_snapshot(snapshot_path, max_age_seconds=120.0)
+        if rows is not None:
+            return rows, snap_account or account
+        return None, account
 
     @staticmethod
-    def _read_positions_snapshot(path: Path, *, max_age_seconds: float) -> list[dict] | None:
+    def _read_positions_snapshot(
+        path: Path, *, max_age_seconds: float
+    ) -> tuple[list[dict] | None, dict]:
         if not path.exists():
-            return None
+            return None, {}
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             updated = str(payload.get("updated_at") or "")
@@ -349,13 +392,14 @@ class TelegramControlBot:
                     ts = ts.replace(tzinfo=UTC)
                 age = (datetime.now(tz=UTC) - ts).total_seconds()
                 if age > max_age_seconds:
-                    return None
+                    return None, {}
             rows = payload.get("positions")
+            account = payload.get("account") if isinstance(payload.get("account"), dict) else {}
             if isinstance(rows, list):
-                return rows
+                return rows, account
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return None
-        return None
+            return None, {}
+        return None, {}
 
     def _ensure_license(self) -> str | None:
         checker = self._license_check

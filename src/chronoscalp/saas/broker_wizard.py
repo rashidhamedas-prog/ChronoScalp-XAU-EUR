@@ -374,14 +374,15 @@ def fetch_mt5_open_positions(
     password: str,
     server: str,
     terminal_path: str = "",
-) -> tuple[bool, str, list[dict]]:
+) -> tuple[bool, str, list[dict], dict]:
     """Fetch all open MT5 account positions for operator display (no magic filter).
 
-    Returns ``(ok, message, rows)``. On failure ``rows`` is empty and message
-    explains why (caller may fall back to the trade journal).
+    Returns ``(ok, message, rows, account)``. On failure ``rows`` is empty and
+    message explains why (caller may fall back to the trade journal).
+    ``account`` may still include login/equity when the connection succeeded.
     """
     if not login or not password or not server:
-        return False, "اعتبارنامه MT5 ناقص است", []
+        return False, "اعتبارنامه MT5 ناقص است", [], {}
     try:
         from chronoscalp.execution.mt5_broker import MT5Broker
 
@@ -392,13 +393,14 @@ def fetch_mt5_open_positions(
             terminal_path=terminal_path or "",
         )
         if not broker.connect():
-            return False, "اتصال MT5 برای خواندن پوزیشن ناموفق بود", []
+            return False, "اتصال MT5 برای خواندن پوزیشن ناموفق بود", [], {}
+        account = broker.snapshot_account_summary()
         rows = broker.snapshot_account_positions()
-        return True, "ok", rows
+        return True, "ok", rows, account
     except RuntimeError as exc:
-        return False, str(exc), []
+        return False, str(exc), [], {}
     except Exception as exc:  # noqa: BLE001
-        return False, f"خطا: {exc}", []
+        return False, f"خطا: {exc}", [], {}
 
 
 def fetch_oanda_open_positions(

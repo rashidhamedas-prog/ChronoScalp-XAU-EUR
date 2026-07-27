@@ -280,8 +280,17 @@ def test_open_positions_empty_live_snapshot(bot: TelegramControlBot, tmp_path: P
     payload = {
         "mode": "live",
         "updated_at": datetime.now(tz=UTC).isoformat(),
+        "account": {
+            "login": 91323064,
+            "server": "LiteFinance-MT5-Demo",
+            "equity": 9426.47,
+            "margin": 0.0,
+        },
         "positions": [],
     }
     (state / "broker_positions_live.json").write_text(json.dumps(payload), encoding="utf-8")
     bot.handle(42, "پوزیشن‌ها")
-    assert "پوزیشن بازی روی بروکر نیست" in bot.send.call_args.args[1]
+    text = bot.send.call_args.args[1]
+    assert "پوزیشن بازی روی بروکر نیست" in text
+    assert "91323064" in text
+    assert "equity=9426.47" in text

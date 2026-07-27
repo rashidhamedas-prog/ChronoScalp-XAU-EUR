@@ -298,9 +298,11 @@ class TradingBot:
         """Persist live account positions for Telegram/dashboard (all magics)."""
         path = self.state_dir / f"broker_positions_{self.mode}.json"
         rows: list[dict] = []
+        account: dict = {}
         try:
             if isinstance(self.broker, MT5Broker):
                 rows = self.broker.snapshot_account_positions()
+                account = self.broker.snapshot_account_summary()
             else:
                 for p in self.broker.get_open_positions():
                     direction = (
@@ -321,9 +323,22 @@ class TradingBot:
                             "open_time": p.open_time.isoformat() if p.open_time else "",
                         }
                     )
+                try:
+                    bal = float(self.broker.get_balance())
+                    account = {
+                        "equity": bal,
+                        "balance": bal,
+                        "margin": 0.0,
+                        "profit": 0.0,
+                        "login": 0,
+                        "server": "",
+                    }
+                except Exception:  # noqa: BLE001
+                    account = {}
             payload = {
                 "mode": self.mode,
                 "updated_at": datetime.now(tz=UTC).isoformat(),
+                "account": account,
                 "positions": rows,
             }
             path.parent.mkdir(parents=True, exist_ok=True)
