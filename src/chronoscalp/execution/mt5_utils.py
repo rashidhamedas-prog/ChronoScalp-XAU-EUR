@@ -11,6 +11,18 @@ from chronoscalp.logging_setup import logger
 
 CHRONOSCALP_MAGIC = 20260711
 
+# MT5 order comments are broker-limited (commonly ≤31 chars, ASCII-safe).
+_MT5_COMMENT_MAX = 31
+
+
+def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
+    """Return a broker-safe MT5 order comment (ASCII, no spaces, ≤ ``max_len``)."""
+    raw = (text or "").strip()
+    cleaned = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in "._-")) else "_" for ch in raw)
+    cleaned = cleaned.strip("._-") or "ChronoScalp"
+    return cleaned[:max_len]
+
+
 
 def spread_points_to_pips(spread_points: float, point: float, pip_size: float) -> float:
     """Convert MT5 ``symbol_info.spread`` (points) to pips using broker point size."""

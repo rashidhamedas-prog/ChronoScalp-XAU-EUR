@@ -12,6 +12,7 @@ from chronoscalp.execution.mt5_utils import (
     fetch_closed_position_pnl,
     find_managed_position_ticket,
     resolve_order_filling_mode,
+    sanitize_mt5_comment,
     spread_points_to_pips,
 )
 from chronoscalp.logging_setup import logger
@@ -128,13 +129,17 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": f"chronoscalp:{signal.reason[:40]}",
+            "comment": sanitize_mt5_comment(f"CS_{signal.reason}"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            raise RuntimeError(f"MT5 order_send failed: {result}")
+            last_err = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send failed: result={result} last_error={last_err} "
+                f"symbol={signal.symbol} volume={volume} type_filling={request.get('type_filling')}"
+            )
 
         ticket = find_managed_position_ticket(signal.symbol, magic=self._magic)
         if ticket is None:

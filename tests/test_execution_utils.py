@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from chronoscalp.execution.mt5_utils import resolve_order_filling_mode, spread_points_to_pips
+from chronoscalp.execution.mt5_utils import (
+    resolve_order_filling_mode,
+    sanitize_mt5_comment,
+    spread_points_to_pips,
+)
 from chronoscalp.execution.position_logic import check_sl_tp_hit, exit_price_for_hit
 from chronoscalp.utils.types import Position, SignalType
 
@@ -24,6 +28,13 @@ def test_resolve_order_filling_mode_without_symbol_filling_attrs():
         patch.dict("sys.modules", {"MetaTrader5": mt5_mod}),
     ):
         assert resolve_order_filling_mode("BTCUSD") == 1
+
+
+def test_sanitize_mt5_comment_ascii_and_length():
+    assert sanitize_mt5_comment("chronoscalp:sweep+MSS/rvol") == "chronoscalp_sweep_MSS_rvol"[:31]
+    assert len(sanitize_mt5_comment("x" * 100)) == 31
+    assert sanitize_mt5_comment("سیگنال تست") == "ChronoScalp"
+    assert sanitize_mt5_comment("") == "ChronoScalp"
 
 
 def test_resolve_order_filling_mode_fok_bit():
