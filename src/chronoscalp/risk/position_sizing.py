@@ -9,6 +9,7 @@ here, not tuning knobs.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -208,28 +209,36 @@ class RiskManager:
             )
             return False
 
-        # Net R:R must survive round-turn commission — a 25-point BTC scalp with
-        # a $78/lot commission is guaranteed negative expectancy regardless of
-        # win rate, so refuse it instead of burning the account on costs.
+        # Net R:R must survive round-turn commission AND spread — a 25-point BTC
+        # scalp against a $78/lot commission, or a 0.8-pip EURJPY scalp against
+        # a 0.3-pip spread, is guaranteed negative expectancy regardless of win
+        # rate, so refuse it instead of burning the account on costs.
         spec = self.symbols_cfg.get(signal.symbol)
         if spec:
             comm = commission_per_lot(spec, signal.entry_price)
-            if comm > 0:
+            pip_value = float(spec["pip_value_per_lot"])
+            spread_cost = 0.0
+            if math.isfinite(current_spread_pips) and current_spread_pips > 0:
+                spread_cost = current_spread_pips * pip_value
+            cost = comm + spread_cost
+            if cost > 0:
                 pip_size = float(spec["pip_size"])
-                pip_value = float(spec["pip_value_per_lot"])
                 risk_value = abs(signal.entry_price - signal.stop_loss) / pip_size * pip_value
                 reward_value = abs(signal.take_profit - signal.entry_price) / pip_size * pip_value
-                if risk_value + comm <= 0:
+                if risk_value + cost <= 0:
                     return False
-                net_rr = (reward_value - comm) / (risk_value + comm)
-                if net_rr < min_rr:
+                net_rr = (reward_value - cost) / (risk_value + cost)
+                # Negligible costs (≤5% of reward) never veto a gross-RR-passing
+                # signal; material costs must keep the net ratio above min.
+                if cost > 0.05 * reward_value and net_rr < min_rr:
                     logger.info(
-                        "Signal rejected ({}): net R:R {:.2f} < min {:.2f} after "
-                        "commission {:.2f}/lot (reward={:.2f} risk={:.2f})",
+                        "Signal rejected ({}): net R:R {:.2f} < min {:.2f} after costs "
+                        "(commission={:.2f} spread={:.2f} per lot; reward={:.2f} risk={:.2f})",
                         signal.symbol,
                         net_rr,
                         min_rr,
                         comm,
+                        spread_cost,
                         reward_value,
                         risk_value,
                     )

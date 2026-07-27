@@ -15,6 +15,7 @@ from chronoscalp.execution.mt5_utils import (
     sanitize_mt5_comment,
     spread_points_to_pips,
     validate_fill_vs_signal_entry,
+    validate_min_stop_distance,
     validate_stops_vs_fill_price,
 )
 from chronoscalp.logging_setup import logger
@@ -186,6 +187,16 @@ class MT5Broker:
             stop_loss=float(signal.stop_loss),
             take_profit=float(signal.take_profit),
         )
+        info = mt5.symbol_info(signal.symbol)
+        if info is not None:
+            stops_points = float(getattr(info, "trade_stops_level", 0) or 0)
+            point = float(getattr(info, "point", 0) or 0)
+            validate_min_stop_distance(
+                fill_price=float(price),
+                stop_loss=float(signal.stop_loss),
+                take_profit=float(signal.take_profit),
+                min_distance=stops_points * point,
+            )
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,

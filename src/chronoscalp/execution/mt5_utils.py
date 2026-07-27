@@ -27,6 +27,32 @@ def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     return cleaned[:max_len]
 
 
+def validate_min_stop_distance(
+    *,
+    fill_price: float,
+    stop_loss: float,
+    take_profit: float,
+    min_distance: float,
+) -> None:
+    """Reject orders whose SL/TP sit inside the broker's minimum stop distance.
+
+    MT5 ``symbol_info.trade_stops_level`` (in points) defines how close stops
+    may sit to the current price; violating it returns ``Invalid stops``.
+    """
+    if min_distance <= 0:
+        return
+    if abs(fill_price - stop_loss) < min_distance:
+        raise StaleStopsError(
+            f"SL {stop_loss} is {abs(fill_price - stop_loss):.6g} from price {fill_price} "
+            f"< broker min stop distance {min_distance:.6g}"
+        )
+    if abs(take_profit - fill_price) < min_distance:
+        raise StaleStopsError(
+            f"TP {take_profit} is {abs(take_profit - fill_price):.6g} from price {fill_price} "
+            f"< broker min stop distance {min_distance:.6g}"
+        )
+
+
 def validate_fill_vs_signal_entry(
     *,
     fill_price: float,

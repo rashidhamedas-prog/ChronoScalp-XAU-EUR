@@ -201,3 +201,47 @@ def test_validate_signal_rejects_commission_uneconomic_scalp():
         timeframe=Timeframe.S15,
     )
     assert rm.validate_signal(gold, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+
+
+def test_validate_signal_rejects_spread_burning_scalp():
+    """0.77-pip EURJPY target vs 0.3-pip spread = negative expectancy — reject."""
+    eurjpy_spec = {
+        "pip_size": 0.01,
+        "contract_size": 100000,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 100,
+        "pip_value_per_lot": 6.5,
+    }
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"EURJPY_o": eurjpy_spec},
+        starting_equity=10_000,
+    )
+    micro = Signal(
+        symbol="EURJPY_o",
+        signal_type=SignalType.SELL,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=186.192,
+        stop_loss=186.1997,  # 0.77 pips
+        take_profit=186.1843,
+        timeframe=Timeframe.S15,
+    )
+    assert not rm.validate_signal(micro, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+
+    # A 5-pip stop / 8-pip target clears the 0.3-pip spread comfortably.
+    healthy = Signal(
+        symbol="EURJPY_o",
+        signal_type=SignalType.SELL,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=186.192,
+        stop_loss=186.242,
+        take_profit=186.112,
+        timeframe=Timeframe.S15,
+    )
+    assert rm.validate_signal(healthy, current_spread_pips=0.3, min_reward_risk_ratio=1.0)

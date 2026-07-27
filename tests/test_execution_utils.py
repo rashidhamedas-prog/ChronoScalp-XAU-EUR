@@ -58,6 +58,27 @@ def test_validate_stops_vs_fill_price_sell_ok():
     )
 
 
+def test_validate_min_stop_distance_rejects_sub_pip_stops():
+    """EURJPY 0.8-pip SL vs broker stops_level — MT5 would return Invalid stops."""
+    from chronoscalp.execution.mt5_utils import validate_min_stop_distance
+
+    with pytest.raises(StaleStopsError):
+        validate_min_stop_distance(
+            fill_price=186.19,
+            stop_loss=186.1997,
+            take_profit=186.1843,
+            min_distance=0.03,  # 3 pips × point 0.001... broker-configured
+        )
+    # Wide stops pass.
+    validate_min_stop_distance(
+        fill_price=186.19, stop_loss=186.40, take_profit=185.90, min_distance=0.03
+    )
+    # min_distance 0 (broker reports none) never rejects.
+    validate_min_stop_distance(
+        fill_price=186.19, stop_loss=186.1997, take_profit=186.1843, min_distance=0.0
+    )
+
+
 def test_validate_fill_vs_signal_entry_rejects_large_slippage():
     """BTC fill 12.7 below a 25-point-SL signal = +50% realized risk — reject."""
     from chronoscalp.execution.mt5_utils import validate_fill_vs_signal_entry
