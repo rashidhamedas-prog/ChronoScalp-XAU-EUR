@@ -138,3 +138,66 @@ def test_btcusd_position_size_positive():
     volume = calculate_position_size(10_000, 1.0, 65000.0, 64000.0, spec)
     assert volume >= 0.01
     assert volume <= 10
+
+
+BTC_LITEFINANCE_SPEC = {
+    "pip_size": 1.0,
+    "contract_size": 1,
+    "min_lot": 0.01,
+    "lot_step": 0.01,
+    "max_lot": 10,
+    "pip_value_per_lot": 1.0,
+    "commission_pct_notional": 0.0012,  # ≈$78/lot round-turn at 65k
+}
+
+
+def test_commission_included_in_position_size():
+    """Real BTC trade lost $434 on a $94 (1%) risk budget because the $78/lot
+    commission was ignored — sizing must keep price-risk + commission ≤ 1%."""
+    from chronoscalp.risk.position_sizing import commission_per_lot
+
+    equity, entry, stop = 9_426.47, 64_660.0, 64_685.0  # 25-point SL
+    comm = commission_per_lot(BTC_LITEFINANCE_SPEC, entry)
+    assert comm == pytest.approx(77.6, abs=1.0)
+
+    volume = calculate_position_size(equity, 1.0, entry, stop, BTC_LITEFINANCE_SPEC)
+    worst_case_loss = volume * (abs(entry - stop) + comm / 1.0)
+    assert worst_case_loss <= equity * 0.011  # 1% + lot-step rounding slack
+    # Old behavior gave 3.76 lots → $434 realized loss (4.6%).
+    assert volume < 1.5
+
+
+def test_validate_signal_rejects_commission_uneconomic_scalp():
+    """A 25-point BTC target cannot clear a $78/lot round-turn commission."""
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"BTCUSD": BTC_LITEFINANCE_SPEC, "XAUUSD": XAUUSD_SPEC},
+        starting_equity=10_000,
+    )
+    doomed = Signal(
+        symbol="BTCUSD",
+        signal_type=SignalType.SELL,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=64_685.0,
+        stop_loss=64_710.0,
+        take_profit=64_660.0,  # 1:1, 25 points
+        timeframe=Timeframe.S15,
+    )
+    assert not rm.validate_signal(doomed, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+
+    # Commission-free gold with the same geometry still passes.
+    gold = Signal(
+        symbol="XAUUSD",
+        signal_type=SignalType.BUY,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=2000.0,
+        stop_loss=1990.0,
+        take_profit=2010.0,
+        timeframe=Timeframe.S15,
+    )
+    assert rm.validate_signal(gold, current_spread_pips=1.0, min_reward_risk_ratio=1.0)

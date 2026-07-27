@@ -95,6 +95,8 @@ XAUEUR:
 
 # Crypto CFD — verify pip/contract against your MT5 broker symbol card.
 # Default assumes 1 lot ≈ 1 BTC and $1 price move ≈ $1 PnL per lot.
+# commission_pct_notional measured on LiteFinance demo (≈0.12% round-turn:
+# BTC $291.75 on 3.76 lots @64660; ETH ≈$2.2/lot @~1950).
 BTCUSD:
   pip_size: 1.0
   contract_size: 1
@@ -103,9 +105,12 @@ BTCUSD:
   max_lot: 10
   typical_spread_pips: 20
   pip_value_per_lot: 1.0
+  commission_pct_notional: 0.0012
   news_currency: USD
 
 # Ethereum CFD — verify pip/contract against your MT5 broker symbol card.
+# pip_value_per_lot 0.01 = USD value of one 0.01 move for 1 lot (1 ETH):
+# a $1.00 ETH move on 1 lot = $1 PnL. (Was 1.0 → sized 100× under 1% risk.)
 ETHUSD:
   pip_size: 0.01
   contract_size: 1
@@ -113,5 +118,6 @@ ETHUSD:
   lot_step: 0.01
   max_lot: 50
   typical_spread_pips: 25
-  pip_value_per_lot: 1.0
+  pip_value_per_lot: 0.01
+  commission_pct_notional: 0.0012
   news_currency: USD

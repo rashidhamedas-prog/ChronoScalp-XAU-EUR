@@ -27,6 +27,32 @@ def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     return cleaned[:max_len]
 
 
+def validate_fill_vs_signal_entry(
+    *,
+    fill_price: float,
+    signal_entry: float,
+    stop_loss: float,
+    max_slippage_fraction: float = 0.5,
+) -> None:
+    """Reject fills that slipped too far from the signal's sizing basis.
+
+    Volume is sized on ``signal_entry``→``stop_loss`` distance; a fill that
+    moved a large fraction of that distance silently inflates realized risk
+    beyond the 1% cap, so refuse it (fresh signal will re-price next bar).
+    """
+    if signal_entry <= 0 or fill_price <= 0:
+        return
+    sl_distance = abs(signal_entry - stop_loss)
+    if sl_distance <= 0:
+        return
+    slippage = abs(fill_price - signal_entry)
+    if slippage > max_slippage_fraction * sl_distance:
+        raise StaleStopsError(
+            f"fill {fill_price} slipped {slippage:.6g} from signal entry {signal_entry} "
+            f"(> {max_slippage_fraction:.0%} of SL distance {sl_distance:.6g})"
+        )
+
+
 def validate_stops_vs_fill_price(
     *,
     is_buy: bool,

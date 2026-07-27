@@ -58,6 +58,18 @@ def test_validate_stops_vs_fill_price_sell_ok():
     )
 
 
+def test_validate_fill_vs_signal_entry_rejects_large_slippage():
+    """BTC fill 12.7 below a 25-point-SL signal = +50% realized risk — reject."""
+    from chronoscalp.execution.mt5_utils import validate_fill_vs_signal_entry
+
+    with pytest.raises(StaleStopsError):
+        validate_fill_vs_signal_entry(
+            fill_price=64_660.0, signal_entry=64_672.7, stop_loss=64_697.7
+        )
+    # Small slippage passes.
+    validate_fill_vs_signal_entry(fill_price=64_670.0, signal_entry=64_672.7, stop_loss=64_697.7)
+
+
 def test_resolve_order_filling_mode_fok_bit():
     mt5_mod = SimpleNamespace(
         ORDER_FILLING_FOK=0,

@@ -48,6 +48,19 @@ def round_to_lot_step(volume: float, min_lot: float, max_lot: float, lot_step: f
     return max(min_lot, min(round(rounded, 8), max_lot))
 
 
+def commission_per_lot(symbol_spec: dict, entry_price: float) -> float:
+    """Estimated round-turn commission (account currency) for 1.0 lot.
+
+    Supports a fixed ``commission_per_lot`` and/or ``commission_pct_notional``
+    (fraction of entry notional, round-turn — e.g. LiteFinance crypto ≈0.0012).
+    Symbols without these fields cost 0 (spread-only pricing).
+    """
+    fixed = float(symbol_spec.get("commission_per_lot", 0.0) or 0.0)
+    pct = float(symbol_spec.get("commission_pct_notional", 0.0) or 0.0)
+    contract = float(symbol_spec.get("contract_size", 1.0) or 1.0)
+    return fixed + pct * contract * max(entry_price, 0.0)
+
+
 def calculate_position_size(
     equity: float,
     risk_pct: float,
@@ -55,8 +68,8 @@ def calculate_position_size(
     stop_loss: float,
     symbol_spec: dict,
 ) -> float:
-    """Position size (in lots) such that a stop-loss hit loses exactly
-    `risk_pct`% of `equity` (before slippage/commission)."""
+    """Position size (in lots) such that a stop-loss hit loses at most
+    `risk_pct`% of `equity` **including** estimated round-turn commission."""
     if equity <= 0:
         raise ValueError("equity must be positive")
 
@@ -71,7 +84,8 @@ def calculate_position_size(
     if risk_pips <= 0:
         raise ValueError("computed risk_pips must be positive")
 
-    raw_volume = risk_amount / (risk_pips * pip_value_per_lot)
+    loss_per_lot = risk_pips * pip_value_per_lot + commission_per_lot(symbol_spec, entry_price)
+    raw_volume = risk_amount / loss_per_lot
     return round_to_lot_step(
         raw_volume,
         min_lot=symbol_spec["min_lot"],
@@ -193,6 +207,33 @@ class RiskManager:
                 "Signal rejected: R:R {:.2f} < min {:.2f}", signal.risk_reward_ratio, min_rr
             )
             return False
+
+        # Net R:R must survive round-turn commission — a 25-point BTC scalp with
+        # a $78/lot commission is guaranteed negative expectancy regardless of
+        # win rate, so refuse it instead of burning the account on costs.
+        spec = self.symbols_cfg.get(signal.symbol)
+        if spec:
+            comm = commission_per_lot(spec, signal.entry_price)
+            if comm > 0:
+                pip_size = float(spec["pip_size"])
+                pip_value = float(spec["pip_value_per_lot"])
+                risk_value = abs(signal.entry_price - signal.stop_loss) / pip_size * pip_value
+                reward_value = abs(signal.take_profit - signal.entry_price) / pip_size * pip_value
+                if risk_value + comm <= 0:
+                    return False
+                net_rr = (reward_value - comm) / (risk_value + comm)
+                if net_rr < min_rr:
+                    logger.info(
+                        "Signal rejected ({}): net R:R {:.2f} < min {:.2f} after "
+                        "commission {:.2f}/lot (reward={:.2f} risk={:.2f})",
+                        signal.symbol,
+                        net_rr,
+                        min_rr,
+                        comm,
+                        reward_value,
+                        risk_value,
+                    )
+                    return False
 
         if self.spread_cfg.get("enabled", True):
             max_spread = self.spread_cfg.get("max_spread_pips", {}).get(signal.symbol)
