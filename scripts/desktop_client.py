@@ -72,10 +72,7 @@ class SshApiClient:
         ps_body = ""
         if body is not None:
             raw = json.dumps(body).replace("'", "''")
-            ps_body = (
-                f"$body = '{raw}'; "
-                "$bytes = [Text.Encoding]::UTF8.GetBytes($body); "
-            )
+            ps_body = f"$body = '{raw}'; " "$bytes = [Text.Encoding]::UTF8.GetBytes($body); "
         ps = (
             "$ErrorActionPreference='Stop'; "
             f"$h=@{{ Authorization='Bearer {self.token}'"

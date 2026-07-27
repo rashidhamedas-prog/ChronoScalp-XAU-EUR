@@ -218,7 +218,11 @@ def test_risk_preset_button(bot: TelegramControlBot, monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
     bot.handle(42, "ریسک ۱٫۵٪")
-    assert "1.0%" in bot.send.call_args.args[1] or "۱" in bot.send.call_args.args[1] or "ریسک" in bot.send.call_args.args[1]
+    assert (
+        "1.0%" in bot.send.call_args.args[1]
+        or "۱" in bot.send.call_args.args[1]
+        or "ریسک" in bot.send.call_args.args[1]
+    )
 
 
 def test_symbols_command(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:

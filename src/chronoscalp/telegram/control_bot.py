@@ -208,7 +208,9 @@ class TelegramControlBot:
 
     def _cmd_settings(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
-        self.send(chat_id, "تنظیمات — اتصال یا کنترل را انتخاب کنید.", reply_markup=SETTINGS_KEYBOARD)
+        self.send(
+            chat_id, "تنظیمات — اتصال یا کنترل را انتخاب کنید.", reply_markup=SETTINGS_KEYBOARD
+        )
 
     def _cmd_conn_menu(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
@@ -236,8 +238,7 @@ class TelegramControlBot:
         user = UserConfigStore().config
         lines = [
             "وضعیت ChronoScalp",
-            f"فرآیند: {'در حال اجرا' if running else 'متوقف'}"
-            + (f" (PID {pid})" if pid else ""),
+            f"فرآیند: {'در حال اجرا' if running else 'متوقف'}" + (f" (PID {pid})" if pid else ""),
             f"حالت ژورنال: {mode}",
             f"پروفایل: provider={user.broker.provider} mode={user.broker.mode}",
             f"بروکر اجرا: {broker}",
@@ -250,9 +251,7 @@ class TelegramControlBot:
 
     def _cmd_pnl(self, chat_id: int, _text: str = "") -> None:
         mode = self._detect_mode()
-        snap = load_journal_snapshot(
-            self.state_dir, mode, reference_equity=self.reference_equity
-        )
+        snap = load_journal_snapshot(self.state_dir, mode, reference_equity=self.reference_equity)
         s = snap.stats
         self.send(
             chat_id,
@@ -272,8 +271,7 @@ class TelegramControlBot:
             self.send(chat_id, "پوزیشن بازی نیست.")
             return
         lines = [
-            f"{t.symbol} {t.direction} vol={t.volume} @{t.entry_price}"
-            for t in snap.open_trades
+            f"{t.symbol} {t.direction} vol={t.volume} @{t.entry_price}" for t in snap.open_trades
         ]
         self.send(chat_id, "پوزیشن‌های باز:\n" + "\n".join(lines))
 
@@ -426,12 +424,20 @@ class TelegramControlBot:
 
     def _cmd_mode_paper(self, chat_id: int, _text: str = "") -> None:
         user = UserConfigStore().config
-        self._apply_provider_mode(user.broker.provider or "mt5", "paper", user.broker.oanda_environment)
-        self.send(chat_id, "✅ mode=paper ذخیره شد. برای اعمال، ربات را ری‌استارت کنید.", reply_markup=CONN_KEYBOARD)
+        self._apply_provider_mode(
+            user.broker.provider or "mt5", "paper", user.broker.oanda_environment
+        )
+        self.send(
+            chat_id,
+            "✅ mode=paper ذخیره شد. برای اعمال، ربات را ری‌استارت کنید.",
+            reply_markup=CONN_KEYBOARD,
+        )
 
     def _cmd_mode_live(self, chat_id: int, _text: str = "") -> None:
         user = UserConfigStore().config
-        self._apply_provider_mode(user.broker.provider or "mt5", "live", user.broker.oanda_environment)
+        self._apply_provider_mode(
+            user.broker.provider or "mt5", "live", user.broker.oanda_environment
+        )
         self.send(
             chat_id,
             "✅ mode=live ذخیره شد.\n"
@@ -456,7 +462,9 @@ class TelegramControlBot:
             return
         provider = args[0].lower()
         user = UserConfigStore().config
-        self._apply_provider_mode(provider, user.broker.mode or "paper", user.broker.oanda_environment)
+        self._apply_provider_mode(
+            provider, user.broker.mode or "paper", user.broker.oanda_environment
+        )
         self.send(chat_id, f"✅ provider={provider} ذخیره شد.", reply_markup=CONN_KEYBOARD)
 
     def _cmd_live_on(self, chat_id: int, _text: str = "") -> None:
@@ -539,9 +547,7 @@ class TelegramControlBot:
             env = "practice"
         self._finish_oanda(chat_id, token, account, env)
 
-    def _finish_mt5(
-        self, chat_id: int, login: str, password: str, server: str, path: str
-    ) -> None:
+    def _finish_mt5(self, chat_id: int, login: str, password: str, server: str, path: str) -> None:
         try:
             int(login)
         except ValueError:
@@ -554,8 +560,7 @@ class TelegramControlBot:
         self._pending.pop(chat_id, None)
         self.send(
             chat_id,
-            f"✅ MT5 ذخیره شد (login={login}, server={server}).\n"
-            "برای تست: /test_conn",
+            f"✅ MT5 ذخیره شد (login={login}, server={server}).\n" "برای تست: /test_conn",
             reply_markup=CONN_KEYBOARD,
         )
 
@@ -728,9 +733,7 @@ class TelegramControlBot:
                 return True
             if step == "path":
                 path = DEFAULT_MT5_PATH if raw in ("-", "default", "پیش‌فرض") else raw
-                self._finish_mt5(
-                    chat_id, data["login"], data["password"], data["server"], path
-                )
+                self._finish_mt5(chat_id, data["login"], data["password"], data["server"], path)
                 return True
 
         if flow == "oanda":
@@ -773,7 +776,9 @@ class TelegramControlBot:
 
         cmd = self._resolve_command(text)
         if cmd is None:
-            self.send(chat_id, "دستور ناشناخته. /help یا /settings را بزنید.", reply_markup=MAIN_KEYBOARD)
+            self.send(
+                chat_id, "دستور ناشناخته. /help یا /settings را بزنید.", reply_markup=MAIN_KEYBOARD
+            )
             return
 
         handlers: dict[str, Callable[[int, str], None]] = {

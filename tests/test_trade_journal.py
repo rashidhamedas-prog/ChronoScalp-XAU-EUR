@@ -43,9 +43,7 @@ def test_compute_trading_stats_basic() -> None:
     ]
     # Pin "today" to the fixture close date so the assertion is not flaky.
     as_of = datetime(2026, 7, 17, 23, 0, tzinfo=UTC)
-    stats = compute_trading_stats(
-        closed, [], reference_equity=10_000, as_of=as_of
-    )
+    stats = compute_trading_stats(closed, [], reference_equity=10_000, as_of=as_of)
     assert stats.closed_trades == 2
     assert stats.wins == 1
     assert stats.losses == 1
