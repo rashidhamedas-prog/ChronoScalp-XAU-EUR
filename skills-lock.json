@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "crypto-hft": {
+      "source": "alsk1992/cloddsbot",
+      "sourceType": "github",
+      "skillPath": "src/skills/bundled/crypto-hft/SKILL.md",
+      "computedHash": "ab1fb7ad4d4b18f7b98bfc72ca557605230f740af8d804defce5a2ee61a6af89"
+    },
+    "longbridge-technical": {
+      "source": "longbridge/skills",
+      "sourceType": "github",
+      "skillPath": "skills/longbridge-technical/SKILL.md",
+      "computedHash": "c3af14137baead88fd5dcd356a5134af3806708ddab833200fc9008634531374"
+    },
+    "xauusd-trading": {
+      "source": "huynguyen03dev/xauusd-trading",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "eea2b8d0cdfbc1e6083faa96e817a03e65b3639fbcc3d2ce490a617dc024d38f"
+    }
+  }
+}
