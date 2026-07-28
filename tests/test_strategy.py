@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.strategy.multi_timeframe import (
@@ -431,10 +432,10 @@ def test_ultra_scalp_v3_reports_uneconomic_when_caps_hit():
     assert signal.reason == "uneconomic_costs"
 
 
-def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
-    """Ultra-scalp must not permanently disable SMC/liquidity when both are on."""
+def test_strategies_run_independently_not_as_fallback(monkeypatch):
+    """Scalp and institutional evaluate in parallel; best R:R wins (no chain)."""
     from chronoscalp.strategy import entry_trigger
-    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, pick_best_signal
     from chronoscalp.utils.types import Signal
 
     n = 5
@@ -442,12 +443,12 @@ def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
     close = np.linspace(100.0, 100.4, n)
     scalp_df = pd.DataFrame(
         {
-            "open": close - 0.01,
+            "open": close - 0.2,
             "high": close + 0.05,
             "low": close - 0.05,
             "close": close,
             "atr": np.full(n, 0.5),
-            "rvol": np.full(n, 0.5),  # forces low_rvol on scalp
+            "rvol": np.full(n, 2.0),
         },
         index=index,
     )
@@ -468,13 +469,14 @@ def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
     def _fake_scalp(*_a, **_k):
         return Signal(
             symbol="EURUSD",
-            signal_type=SignalType.NONE,
+            signal_type=SignalType.BUY,
             timestamp=index[-1].to_pydatetime(),
-            entry_price=0.0,
-            stop_loss=0.0,
-            take_profit=0.0,
+            entry_price=101.0,
+            stop_loss=100.5,  # R:R = 1.0
+            take_profit=101.5,
             timeframe=Timeframe.S15,
-            reason="low_rvol",
+            reason="ultra_scalp_v3,trend=bullish",
+            confidence=0.7,
         )
 
     def _fake_inst(*_a, **_k):
@@ -483,11 +485,11 @@ def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
             signal_type=SignalType.BUY,
             timestamp=index[-1].to_pydatetime(),
             entry_price=101.0,
-            stop_loss=100.0,
+            stop_loss=100.0,  # R:R = 1.5 — should win
             take_profit=102.5,
             timeframe=Timeframe.M1,
             reason="institutional_entry,trend=bullish",
-            confidence=0.9,
+            confidence=0.6,
         )
 
     monkeypatch.setattr(entry_trigger, "generate_ultra_scalp_v3", _fake_scalp)
@@ -509,7 +511,126 @@ def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
         higher_timeframes=[Timeframe.M5, Timeframe.M1],
         trigger_timeframe=Timeframe.S15,
         ignore_confidence_gate=True,
+        run_scalp=True,
+        run_institutional=True,
     )
+    assert signal.signal_type == SignalType.BUY
+    assert "institutional_entry" in signal.reason
+    assert signal.risk_reward_ratio == pytest.approx(1.5)
+
+    # Institutional alone still works when only its bar is due.
+    only_inst = strategy.evaluate(
+        "EURUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+        run_scalp=False,
+        run_institutional=True,
+    )
+    assert "institutional_entry" in only_inst.reason
+
+    # Scalp alone still works when only S15 bar is due.
+    only_scalp = strategy.evaluate(
+        "EURUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+        run_scalp=True,
+        run_institutional=False,
+    )
+    assert "ultra_scalp" in only_scalp.reason
+
+    chosen = pick_best_signal([_fake_scalp(), _fake_inst()])
+    assert chosen is not None
+    assert "institutional_entry" in chosen.reason
+
+
+def test_institutional_still_runs_when_scalp_quiet(monkeypatch):
+    """Quiet S15 must not prevent M1 institutional from being evaluated."""
+    from chronoscalp.strategy import entry_trigger
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+    from chronoscalp.utils.types import Signal
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.linspace(100.0, 100.4, n)
+    scalp_df = pd.DataFrame(
+        {
+            "open": close - 0.01,
+            "high": close + 0.05,
+            "low": close - 0.05,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 0.5),
+        },
+        index=index,
+    )
+    m1 = enrich_with_indicators(
+        pd.DataFrame(
+            {
+                "open": np.linspace(100, 101, 80),
+                "high": np.linspace(100.2, 101.2, 80),
+                "low": np.linspace(99.8, 100.8, 80),
+                "close": np.linspace(100, 101, 80),
+            },
+            index=pd.date_range("2026-01-01", periods=80, freq="min", tz="UTC"),
+        ),
+        ema_period=50,
+    )
+    m5 = _trending_df(direction="up")
+    scalp_calls = {"n": 0}
+    inst_calls = {"n": 0}
+
+    def _fake_scalp(*_a, **_k):
+        scalp_calls["n"] += 1
+        return Signal(
+            symbol="EURUSD",
+            signal_type=SignalType.NONE,
+            timestamp=index[-1].to_pydatetime(),
+            entry_price=0.0,
+            stop_loss=0.0,
+            take_profit=0.0,
+            timeframe=Timeframe.S15,
+            reason="low_rvol",
+        )
+
+    def _fake_inst(*_a, **_k):
+        inst_calls["n"] += 1
+        return Signal(
+            symbol="EURUSD",
+            signal_type=SignalType.BUY,
+            timestamp=index[-1].to_pydatetime(),
+            entry_price=101.0,
+            stop_loss=100.0,
+            take_profit=102.5,
+            timeframe=Timeframe.M1,
+            reason="institutional_entry,trend=bullish",
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(entry_trigger, "generate_ultra_scalp_v3", _fake_scalp)
+    monkeypatch.setattr(entry_trigger, "generate_institutional_entry", _fake_inst)
+
+    strategy = MultiTimeframeStrategy(
+        {
+            "trend_engine": "ema_rsi",
+            "entry_engine": "institutional",
+            "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
+            "ultra_scalp": {"trend_mode": "primary"},
+            "min_signal_confidence": 0.0,
+        },
+        {"ema_period_trend": 50},
+    )
+    signal = strategy.evaluate(
+        "EURUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+    )
+    assert scalp_calls["n"] == 1 and inst_calls["n"] == 1
     assert signal.signal_type == SignalType.BUY
     assert "institutional_entry" in signal.reason
 

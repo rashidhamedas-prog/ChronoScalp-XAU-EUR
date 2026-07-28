@@ -650,15 +650,37 @@ class TradingBot:
                     run_scalp = use_scalp
                     run_institutional = want_institutional
 
-                signal = self.strategy.evaluate(
-                    symbol=symbol,
-                    data_by_timeframe=data_by_tf,
-                    higher_timeframes=self.higher_timeframes,
-                    trigger_timeframe=self.trigger_timeframe,
-                    spread_pips=spread_pips,
-                    run_scalp=run_scalp,
-                    run_institutional=run_institutional,
-                )
+                # Independent engines on their own timeframes (not fallback chain).
+                raw_signals = []
+                skip_parts: list[str] = []
+                if run_scalp:
+                    scalp_sig = self.strategy.evaluate(
+                        symbol=symbol,
+                        data_by_timeframe=data_by_tf,
+                        higher_timeframes=self.higher_timeframes,
+                        trigger_timeframe=self.trigger_timeframe,
+                        spread_pips=spread_pips,
+                        run_scalp=True,
+                        run_institutional=False,
+                    )
+                    if scalp_sig.is_actionable:
+                        raw_signals.append(scalp_sig)
+                    else:
+                        skip_parts.append(f"scalp:{(scalp_sig.reason or 'no_signal')}")
+                if run_institutional:
+                    inst_sig = self.strategy.evaluate(
+                        symbol=symbol,
+                        data_by_timeframe=data_by_tf,
+                        higher_timeframes=self.higher_timeframes,
+                        trigger_timeframe=self.trigger_timeframe,
+                        spread_pips=spread_pips,
+                        run_scalp=False,
+                        run_institutional=True,
+                    )
+                    if inst_sig.is_actionable:
+                        raw_signals.append(inst_sig)
+                    else:
+                        skip_parts.append(f"inst:{(inst_sig.reason or 'no_signal')}")
 
                 if self.trade_on_bar_close:
                     if run_scalp and scalp_bar is not None:
@@ -666,41 +688,57 @@ class TradingBot:
                     if run_institutional and inst_bar is not None:
                         self.bar_gate.mark_evaluated(f"{symbol}:inst", inst_bar)
 
-                if signal.signal_type == SignalType.NONE:
-                    detail = (signal.reason or "no_signal").replace(" ", "_")
+                # Risk/dedup each candidate independently, then pick the strongest.
+                viable = []
+                for cand in raw_signals:
+                    cand_tf = cand.timeframe or self.trigger_timeframe
+                    if "ultra_scalp" in (cand.reason or ""):
+                        cand_bar = scalp_bar or last_completed_bar_time(
+                            scalp_df if scalp_df is not None else trigger_df
+                        )
+                    else:
+                        cand_bar = inst_bar or last_completed_bar_time(
+                            inst_df if inst_df is not None else trigger_df
+                        )
+                    if cand_bar is None:
+                        cand_bar = now
+                    dedup_key = signal_dedup_key(
+                        symbol, cand_tf, cand_bar, cand.signal_type
+                    )
+                    if self.signal_deduper.already_processed(dedup_key):
+                        skip_parts.append(f"{cand_tf.value}:dedup")
+                        continue
+                    if not self.risk_manager.validate_signal(
+                        cand,
+                        spread_pips,
+                        min_reward_risk_ratio=self._min_rr_for_signal(cand),
+                    ):
+                        skip_parts.append(f"{cand_tf.value}:risk_reject")
+                        continue
+                    viable.append((cand, cand_tf, cand_bar, dedup_key))
+
+                if not viable:
+                    detail = (
+                        "|".join(skip_parts) if skip_parts else "no_signal"
+                    ).replace(" ", "_")
                     self._note_skip(f"{symbol}:{detail}")
                     continue
 
-                signal_tf = signal.timeframe or self.trigger_timeframe
-                completed_bar = None
-                if signal_tf == Timeframe.M1 or (
-                    want_institutional and "ultra_scalp" not in (signal.reason or "")
-                ):
-                    completed_bar = inst_bar or last_completed_bar_time(
-                        inst_df if inst_df is not None else trigger_df
-                    )
-                else:
-                    completed_bar = scalp_bar or last_completed_bar_time(
-                        scalp_df if scalp_df is not None else trigger_df
-                    )
-                if completed_bar is None:
-                    completed_bar = now
-
-                dedup_key = signal_dedup_key(
-                    symbol, signal_tf, completed_bar, signal.signal_type
+                signal, signal_tf, completed_bar, dedup_key = max(
+                    viable,
+                    key=lambda item: (
+                        float(item[0].risk_reward_ratio),
+                        float(item[0].confidence),
+                    ),
                 )
-                if self.signal_deduper.already_processed(dedup_key):
-                    self._note_skip(f"{symbol}:dedup")
-                    continue
-
-                if not self.risk_manager.validate_signal(
-                    signal,
-                    spread_pips,
-                    min_reward_risk_ratio=self._min_rr_for_signal(signal),
-                ):
-                    self._note_skip(f"{symbol}:risk_reject")
-                    continue
-
+                if len(viable) > 1:
+                    logger.info(
+                        "{} parallel entries viable ({}); taking {} on {}",
+                        symbol,
+                        ",".join(v[0].reason.split(",")[0] for v in viable),
+                        signal.reason.split(",")[0],
+                        signal_tf.value,
+                    )
                 equity = self.broker.get_balance()
                 volume = self.risk_manager.position_size_for(signal, equity)
                 if volume <= 0:

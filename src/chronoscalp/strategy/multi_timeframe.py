@@ -351,6 +351,22 @@ def _no_signal(symbol: str, timeframe: Timeframe, reason: str = "") -> Signal:
     )
 
 
+def pick_best_signal(signals: list[Signal]) -> Signal | None:
+    """Choose the strongest actionable signal among parallel strategy outputs.
+
+    Ranking: higher gross R:R, then higher confidence. Strategies on different
+    timeframes are evaluated independently; this only breaks ties when more
+    than one fires on the same poll tick (one position per symbol).
+    """
+    actionable = [s for s in signals if s is not None and s.is_actionable]
+    if not actionable:
+        return None
+    return max(
+        actionable,
+        key=lambda s: (float(s.risk_reward_ratio), float(s.confidence)),
+    )
+
+
 class MultiTimeframeStrategy:
     """Orchestrates trend detection + entry generation for a single symbol
     given already-fetched, indicator/SMC-enriched DataFrames per timeframe."""
@@ -377,11 +393,12 @@ class MultiTimeframeStrategy:
         run_scalp: bool = True,
         run_institutional: bool = True,
     ) -> Signal:
-        """Evaluate enabled strategies as OR — first actionable signal wins.
+        """Evaluate enabled strategies independently (parallel, not fallback).
 
-        Previously ultra-scalp short-circuited and silently disabled SMC /
-        liquidity-volume. When both are enabled we try S15 scalp first, then
-        institutional entry on M1 (or the configured trigger if M1 missing).
+        Each engine uses its own trigger timeframe (S15 ultra-scalp, M1
+        institutional/SMC/liquidity). When several produce actionable signals
+        in one call, :func:`pick_best_signal` picks the strongest — scalp
+        never blocks institutional just because it ran first.
         """
         use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
@@ -451,6 +468,7 @@ class MultiTimeframeStrategy:
             return signal
 
         skip_reasons: list[str] = []
+        candidates: list[Signal] = []
 
         if want_scalp:
             scalp_tf = trigger_timeframe
@@ -489,8 +507,9 @@ class MultiTimeframeStrategy:
                 )
                 scalp_signal = _apply_confidence(scalp_signal)
                 if scalp_signal.is_actionable:
-                    return scalp_signal
-                skip_reasons.append(f"scalp:{scalp_signal.reason or 'no_signal'}")
+                    candidates.append(scalp_signal)
+                else:
+                    skip_reasons.append(f"scalp:{scalp_signal.reason or 'no_signal'}")
 
         if want_institutional:
             inst_tf = (
@@ -537,8 +556,21 @@ class MultiTimeframeStrategy:
                     )
                 inst_signal = _apply_confidence(inst_signal)
                 if inst_signal.is_actionable:
-                    return inst_signal
-                skip_reasons.append(f"inst:{inst_signal.reason or 'no_signal'}")
+                    candidates.append(inst_signal)
+                else:
+                    skip_reasons.append(f"inst:{inst_signal.reason or 'no_signal'}")
+
+        best = pick_best_signal(candidates)
+        if best is not None:
+            if len(candidates) > 1:
+                logger.info(
+                    "{} parallel strategies fired ({}); selected {} rr={:.2f}",
+                    symbol,
+                    ",".join(s.reason.split(",")[0] for s in candidates),
+                    best.reason.split(",")[0],
+                    best.risk_reward_ratio,
+                )
+            return best
 
         reason = "|".join(skip_reasons) if skip_reasons else "no_signal"
         return _no_signal(symbol, trigger_timeframe, reason=reason)
