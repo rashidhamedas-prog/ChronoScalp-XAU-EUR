@@ -38,6 +38,7 @@ from chronoscalp.saas import (  # noqa: E402
     apply_broker_to_settings_yaml,
     apply_enabled_strategies,
     apply_risk_preset,
+    apply_trading_hours_mode,
     bot_is_running,
     disable_live_confirm,
     enable_live_confirm,
@@ -110,6 +111,11 @@ UI = {
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
         "strategy_scalp": "معامله اسکلپ فوق‌سریع (S15 / Ultra Scalp)",
+        "hours_label": "ساعات معامله",
+        "hours_hint": "لندن+نیویورک = فقط سشن‌های نقدشوندگی | ۲۴ ساعته = همیشه فعال",
+        "hours_london_ny": "فقط سشن لندن و آمریکا",
+        "hours_24h": "۲۴ ساعته (همیشه)",
+        "hours_save": "اعمال ساعات معامله",
         "need_restart": "برای اعمال کامل، ربات را Stop سپس Start کنید.",
         "live_confirm_title": "تأیید معامله Live",
         "live_confirm_hint": "بدون CHRONOSCALP_CONFIRM_LIVE=yes ربات Live فوراً بسته می‌شود. این تأیید عمدی است.",
@@ -190,6 +196,11 @@ UI = {
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "Liquidity + Volume",
         "strategy_scalp": "Ultra Scalp (S15 burst / high frequency)",
+        "hours_label": "Trading hours",
+        "hours_hint": "London+NY = session windows only | 24h = always allow entries",
+        "hours_london_ny": "London & New York sessions only",
+        "hours_24h": "24 hours (always on)",
+        "hours_save": "Apply trading hours",
         "need_restart": "Stop then Start the bot for changes to fully apply.",
         "live_confirm_title": "Confirm live trading",
         "live_confirm_hint": "Without CHRONOSCALP_CONFIRM_LIVE=yes the Live bot exits immediately. This gate is intentional.",
@@ -460,6 +471,45 @@ def page_control(settings) -> None:
         saved = apply_enabled_strategies(selected_strats)
         get_settings.cache_clear()
         st.success(", ".join(saved) if saved else "(MACD/trend only)")
+        st.info(_t("need_restart"))
+        st.rerun()
+
+    from chronoscalp.filters.session_filter import (
+        TRADING_HOURS_ALWAYS_ON_24H,
+        TRADING_HOURS_LONDON_NY,
+        normalize_trading_hours_mode,
+    )
+
+    st.markdown(f"#### {_t('hours_label')}")
+    st.caption(_t("hours_hint"))
+    current_hours = normalize_trading_hours_mode(
+        (settings.sessions or {}).get("trading_hours_mode")
+        or (
+            TRADING_HOURS_ALWAYS_ON_24H
+            if (settings.sessions or {}).get("trade_outside_sessions")
+            else TRADING_HOURS_LONDON_NY
+        )
+    )
+    hours_options = [TRADING_HOURS_LONDON_NY, TRADING_HOURS_ALWAYS_ON_24H]
+    hours_labels = {
+        TRADING_HOURS_LONDON_NY: _t("hours_london_ny"),
+        TRADING_HOURS_ALWAYS_ON_24H: _t("hours_24h"),
+    }
+    selected_hours = st.radio(
+        _t("hours_label"),
+        options=hours_options,
+        index=hours_options.index(current_hours)
+        if current_hours in hours_options
+        else 0,
+        format_func=lambda k: hours_labels.get(k, k),
+        horizontal=True,
+        label_visibility="collapsed",
+        key="trading_hours_radio",
+    )
+    if st.button(_t("hours_save"), key="save_hours_btn"):
+        saved_mode = apply_trading_hours_mode(selected_hours)
+        get_settings.cache_clear()
+        st.success(hours_labels.get(saved_mode, saved_mode))
         st.info(_t("need_restart"))
         st.rerun()
 

@@ -374,123 +374,171 @@ class MultiTimeframeStrategy:
         *,
         ignore_confidence_gate: bool = False,
         spread_pips: float | None = None,
+        run_scalp: bool = True,
+        run_institutional: bool = True,
     ) -> Signal:
+        """Evaluate enabled strategies as OR — first actionable signal wins.
+
+        Previously ultra-scalp short-circuited and silently disabled SMC /
+        liquidity-volume. When both are enabled we try S15 scalp first, then
+        institutional entry on M1 (or the configured trigger if M1 missing).
+        """
         use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
+        entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
+        want_scalp = bool(use_scalp and run_scalp)
+        # Institutional / SMC / liquidity path when those modes are on — even
+        # alongside ultra-scalp — or when scalp is off (legacy single path).
+        want_institutional = bool(run_institutional) and (
+            use_smc or use_liq or (not use_scalp)
+        )
 
         higher_frames = [
             data_by_timeframe[tf] for tf in higher_timeframes if tf in data_by_timeframe
         ]
-        if trend_engine == "session_vwap":
-            from chronoscalp.strategy.trend_filter import (
-                aligned_institutional_bias,
-                institutional_bias,
-            )
 
-            if use_scalp and str(scalp_cfg.get("trend_mode", "strict")) == "primary":
-                # Primary = first higher TF (usually M15); reject if later TF opposes.
-                if not higher_frames:
-                    trend = TrendDirection.NEUTRAL
-                else:
+        def _trend(*, for_scalp: bool) -> TrendDirection:
+            if trend_engine == "session_vwap":
+                from chronoscalp.strategy.trend_filter import (
+                    aligned_institutional_bias,
+                    institutional_bias,
+                )
+
+                if for_scalp and str(scalp_cfg.get("trend_mode", "strict")) == "primary":
+                    if not higher_frames:
+                        return TrendDirection.NEUTRAL
                     primary = institutional_bias(higher_frames[0])
-                    trend = primary
-                    if primary != TrendDirection.NEUTRAL:
-                        for frame in higher_frames[1:]:
-                            other = institutional_bias(frame)
-                            if other != TrendDirection.NEUTRAL and other != primary:
-                                trend = TrendDirection.NEUTRAL
-                                break
-            else:
-                trend = aligned_institutional_bias(higher_frames)
-        else:
+                    if primary == TrendDirection.NEUTRAL:
+                        return TrendDirection.NEUTRAL
+                    for frame in higher_frames[1:]:
+                        other = institutional_bias(frame)
+                        if other != TrendDirection.NEUTRAL and other != primary:
+                            return TrendDirection.NEUTRAL
+                    return primary
+                return aligned_institutional_bias(higher_frames)
+
             ema_period = self.indicators_cfg.get("ema_period_trend", 50)
             higher_trends = [
                 determine_trend(data_by_timeframe[tf], ema_col=f"ema_{ema_period}")
                 for tf in higher_timeframes
                 if tf in data_by_timeframe
             ]
-            if use_scalp:
-                trend = ultra_scalp_trend(
+            if for_scalp and use_scalp:
+                return ultra_scalp_trend(
                     higher_trends, mode=str(scalp_cfg.get("trend_mode", "primary"))
                 )
-            elif self.strategy_cfg.get("require_trend_alignment", True):
-                trend = trends_aligned(higher_trends)
+            if self.strategy_cfg.get("require_trend_alignment", True):
+                return trends_aligned(higher_trends)
+            return higher_trends[-1] if higher_trends else TrendDirection.NEUTRAL
+
+        def _apply_confidence(signal: Signal) -> Signal:
+            min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))
+            if (
+                not ignore_confidence_gate
+                and is_configured()
+                and signal.is_actionable
+                and min_conf > 0
+                and signal.confidence < min_conf
+            ):
+                logger.debug(
+                    "{} signal rejected: confidence {:.2f} < min {:.2f}",
+                    symbol,
+                    signal.confidence,
+                    min_conf,
+                )
+                return _no_signal(symbol, signal.timeframe, reason="low_confidence")
+            return signal
+
+        skip_reasons: list[str] = []
+
+        if want_scalp:
+            scalp_tf = trigger_timeframe
+            scalp_df = data_by_timeframe.get(scalp_tf)
+            if scalp_df is None:
+                skip_reasons.append("scalp:no_trigger_data")
             else:
-                trend = higher_trends[-1] if higher_trends else TrendDirection.NEUTRAL
+                from chronoscalp.strategy.entry_trigger import generate_ultra_scalp_v3
 
-        trigger_df = data_by_timeframe.get(trigger_timeframe)
-        if trigger_df is None:
-            return _no_signal(symbol, trigger_timeframe, reason="no_trigger_data")
+                scalp_signal = generate_ultra_scalp_v3(
+                    symbol=symbol,
+                    trigger_df=scalp_df,
+                    trend=_trend(for_scalp=True),
+                    timeframe=scalp_tf,
+                    min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
+                    atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 2.5)),
+                    atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 4.0)),
+                    rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
+                    impulse_body_atr_multiple=float(
+                        scalp_cfg.get("impulse_body_atr_multiple", 0.35)
+                    ),
+                    vwap_df=scalp_df,
+                    symbol_spec=self.symbols_cfg.get(symbol),
+                    spread_pips=spread_pips,
+                    cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
+                    min_stop_spread_multiple=float(
+                        scalp_cfg.get("min_stop_spread_multiple", 2.0)
+                    ),
+                    net_rr_after_costs=float(scalp_cfg.get("net_rr_after_costs", 1.0)),
+                    max_stop_atr_multiple=float(
+                        scalp_cfg.get("max_stop_atr_multiple", 8.0)
+                    ),
+                    max_target_atr_multiple=float(
+                        scalp_cfg.get("max_target_atr_multiple", 12.0)
+                    ),
+                )
+                scalp_signal = _apply_confidence(scalp_signal)
+                if scalp_signal.is_actionable:
+                    return scalp_signal
+                skip_reasons.append(f"scalp:{scalp_signal.reason or 'no_signal'}")
 
-        entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
-        if use_scalp:
-            from chronoscalp.strategy.entry_trigger import generate_ultra_scalp_v3
-
-            signal = generate_ultra_scalp_v3(
-                symbol=symbol,
-                trigger_df=trigger_df,
-                trend=trend,
-                timeframe=trigger_timeframe,
-                min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
-                atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 2.5)),
-                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 4.0)),
-                rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
-                impulse_body_atr_multiple=float(
-                    scalp_cfg.get("impulse_body_atr_multiple", 0.35)
-                ),
-                vwap_df=trigger_df,
-                symbol_spec=self.symbols_cfg.get(symbol),
-                spread_pips=spread_pips,
-                cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
-                min_stop_spread_multiple=float(
-                    scalp_cfg.get("min_stop_spread_multiple", 2.0)
-                ),
-                net_rr_after_costs=float(scalp_cfg.get("net_rr_after_costs", 1.0)),
-                max_stop_atr_multiple=float(scalp_cfg.get("max_stop_atr_multiple", 8.0)),
-                max_target_atr_multiple=float(
-                    scalp_cfg.get("max_target_atr_multiple", 12.0)
-                ),
+        if want_institutional:
+            inst_tf = (
+                Timeframe.M1
+                if Timeframe.M1 in data_by_timeframe
+                else trigger_timeframe
             )
-        elif entry_engine == "institutional":
-            from chronoscalp.strategy.entry_trigger import generate_institutional_entry
+            inst_df = data_by_timeframe.get(inst_tf)
+            if inst_df is None:
+                skip_reasons.append("inst:no_trigger_data")
+            else:
+                inst_trend = _trend(for_scalp=False)
+                if entry_engine == "institutional" and (use_smc or use_liq or not use_scalp):
+                    from chronoscalp.strategy.entry_trigger import (
+                        generate_institutional_entry,
+                    )
 
-            signal = generate_institutional_entry(
-                symbol=symbol,
-                trigger_df=trigger_df,
-                trend=trend,
-                timeframe=trigger_timeframe,
-                use_smc_confluence=use_smc,
-                use_liquidity_volume=use_liq,
-                min_reward_risk_ratio=float(self.strategy_cfg.get("min_reward_risk_ratio", 1.5)),
-                atr_stop_multiple=float(self.strategy_cfg.get("atr_stop_multiple", 1.5)),
-                atr_target_multiple=float(self.strategy_cfg.get("atr_target_multiple", 2.25)),
-                rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
-            )
-        else:
-            signal = generate_entry_signal(
-                symbol=symbol,
-                trigger_df=trigger_df,
-                trend=trend,
-                timeframe=trigger_timeframe,
-                use_smc_confluence=use_smc,
-                use_liquidity_volume=use_liq,
-            )
+                    inst_signal = generate_institutional_entry(
+                        symbol=symbol,
+                        trigger_df=inst_df,
+                        trend=inst_trend,
+                        timeframe=inst_tf,
+                        use_smc_confluence=use_smc,
+                        use_liquidity_volume=use_liq,
+                        min_reward_risk_ratio=float(
+                            self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
+                        ),
+                        atr_stop_multiple=float(
+                            self.strategy_cfg.get("atr_stop_multiple", 1.5)
+                        ),
+                        atr_target_multiple=float(
+                            self.strategy_cfg.get("atr_target_multiple", 2.25)
+                        ),
+                        rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
+                    )
+                else:
+                    inst_signal = generate_entry_signal(
+                        symbol=symbol,
+                        trigger_df=inst_df,
+                        trend=inst_trend,
+                        timeframe=inst_tf,
+                        use_smc_confluence=use_smc,
+                        use_liquidity_volume=use_liq,
+                    )
+                inst_signal = _apply_confidence(inst_signal)
+                if inst_signal.is_actionable:
+                    return inst_signal
+                skip_reasons.append(f"inst:{inst_signal.reason or 'no_signal'}")
 
-        min_conf = float(self.strategy_cfg.get("min_signal_confidence", 0.0))
-        if (
-            not ignore_confidence_gate
-            and is_configured()
-            and signal.is_actionable
-            and min_conf > 0
-            and signal.confidence < min_conf
-        ):
-            logger.debug(
-                "{} signal rejected: confidence {:.2f} < min {:.2f}",
-                symbol,
-                signal.confidence,
-                min_conf,
-            )
-            return _no_signal(symbol, trigger_timeframe, reason="low_confidence")
-
-        return signal
+        reason = "|".join(skip_reasons) if skip_reasons else "no_signal"
+        return _no_signal(symbol, trigger_timeframe, reason=reason)

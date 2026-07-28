@@ -429,3 +429,87 @@ def test_ultra_scalp_v3_reports_uneconomic_when_caps_hit():
     )
     assert signal.signal_type == SignalType.NONE
     assert signal.reason == "uneconomic_costs"
+
+
+def test_multi_strategy_or_falls_back_to_institutional(monkeypatch):
+    """Ultra-scalp must not permanently disable SMC/liquidity when both are on."""
+    from chronoscalp.strategy import entry_trigger
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+    from chronoscalp.utils.types import Signal
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.linspace(100.0, 100.4, n)
+    scalp_df = pd.DataFrame(
+        {
+            "open": close - 0.01,
+            "high": close + 0.05,
+            "low": close - 0.05,
+            "close": close,
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 0.5),  # forces low_rvol on scalp
+        },
+        index=index,
+    )
+    m1 = enrich_with_indicators(
+        pd.DataFrame(
+            {
+                "open": np.linspace(100, 101, 80),
+                "high": np.linspace(100.2, 101.2, 80),
+                "low": np.linspace(99.8, 100.8, 80),
+                "close": np.linspace(100, 101, 80),
+            },
+            index=pd.date_range("2026-01-01", periods=80, freq="min", tz="UTC"),
+        ),
+        ema_period=50,
+    )
+    m5 = _trending_df(direction="up")
+
+    def _fake_scalp(*_a, **_k):
+        return Signal(
+            symbol="EURUSD",
+            signal_type=SignalType.NONE,
+            timestamp=index[-1].to_pydatetime(),
+            entry_price=0.0,
+            stop_loss=0.0,
+            take_profit=0.0,
+            timeframe=Timeframe.S15,
+            reason="low_rvol",
+        )
+
+    def _fake_inst(*_a, **_k):
+        return Signal(
+            symbol="EURUSD",
+            signal_type=SignalType.BUY,
+            timestamp=index[-1].to_pydatetime(),
+            entry_price=101.0,
+            stop_loss=100.0,
+            take_profit=102.5,
+            timeframe=Timeframe.M1,
+            reason="institutional_entry,trend=bullish",
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(entry_trigger, "generate_ultra_scalp_v3", _fake_scalp)
+    monkeypatch.setattr(entry_trigger, "generate_institutional_entry", _fake_inst)
+
+    strategy = MultiTimeframeStrategy(
+        {
+            "trend_engine": "ema_rsi",
+            "entry_engine": "institutional",
+            "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
+            "ultra_scalp": {"trend_mode": "primary", "rvol_min": 1.2},
+            "min_signal_confidence": 0.0,
+        },
+        {"ema_period_trend": 50},
+    )
+    signal = strategy.evaluate(
+        "EURUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert "institutional_entry" in signal.reason
+

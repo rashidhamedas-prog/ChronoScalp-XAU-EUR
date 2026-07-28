@@ -278,6 +278,38 @@ def apply_enabled_strategies(
     return cleaned
 
 
+def apply_trading_hours_mode(
+    mode: str,
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> str:
+    """Persist ``sessions.trading_hours_mode`` (london_ny | always_on_24h)."""
+    from chronoscalp.filters.session_filter import (
+        TRADING_HOURS_ALWAYS_ON_24H,
+        TRADING_HOURS_LONDON_NY,
+        normalize_trading_hours_mode,
+    )
+
+    normalized = normalize_trading_hours_mode(mode)
+    payload = _load_overrides(overrides_path)
+    sessions = dict(payload.get("sessions") or {})
+    sessions["trading_hours_mode"] = normalized
+    sessions["trade_outside_sessions"] = normalized == TRADING_HOURS_ALWAYS_ON_24H
+    if normalized == TRADING_HOURS_LONDON_NY:
+        # Keep windows; disable outside trading for session-only mode.
+        sessions.setdefault(
+            "windows",
+            {
+                "london": {"start": "08:00", "end": "11:00"},
+                "new_york": {"start": "13:30", "end": "16:30"},
+            },
+        )
+    payload["sessions"] = sessions
+    _write_overrides(overrides_path, payload)
+    logger.info("Trading hours mode saved: {}", normalized)
+    return normalized
+
+
 def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
     import os

@@ -29,6 +29,7 @@ from chronoscalp.saas.broker_wizard import (
     apply_broker_to_settings_yaml,
     apply_enabled_strategies,
     apply_risk_preset,
+    apply_trading_hours_mode,
     disable_live_confirm,
     enable_live_confirm,
     save_mt5_credentials,
@@ -509,11 +510,17 @@ class TelegramControlBot:
             strats.append("ultra_scalp")
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
+        from chronoscalp.filters.session_filter import normalize_trading_hours_mode
+
+        hours = normalize_trading_hours_mode(
+            (self.settings.sessions or {}).get("trading_hours_mode")
+        )
         text = (
             self._connection_summary()
             + "\n\nکنترل / Control\n"
             + f"symbols={symbols}\n"
             + f"strategies={','.join(strats) or '(MACD/trend only)'}\n"
+            + f"trading_hours={hours}\n"
             + f"risk_effective={risk}%"
         )
         self.send(chat_id, text, reply_markup=CONTROL_KEYBOARD)
@@ -787,6 +794,36 @@ class TelegramControlBot:
             reply_markup=CONTROL_KEYBOARD,
         )
 
+    def _set_hours(self, chat_id: int, mode: str) -> None:
+        saved = apply_trading_hours_mode(mode)
+        self._reload_settings()
+        labels = {
+            "london_ny": "فقط سشن لندن و آمریکا",
+            "always_on_24h": "۲۴ ساعته (همیشه)",
+        }
+        self.send(
+            chat_id,
+            f"✅ ساعات معامله: {labels.get(saved, saved)}\nربات را ری‌استارت کنید.",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_hours_london_ny(self, chat_id: int, _text: str = "") -> None:
+        self._set_hours(chat_id, "london_ny")
+
+    def _cmd_hours_24h(self, chat_id: int, _text: str = "") -> None:
+        self._set_hours(chat_id, "always_on_24h")
+
+    def _cmd_hours(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args:
+            self.send(
+                chat_id,
+                "استفاده: /hours london_ny|always_on_24h",
+                reply_markup=CONTROL_KEYBOARD,
+            )
+            return
+        self._set_hours(chat_id, args[0])
+
     def _set_risk(self, chat_id: int, pct: float) -> None:
         effective = apply_risk_preset(pct)
         self._reload_settings()
@@ -944,6 +981,9 @@ class TelegramControlBot:
             "symbols": self._cmd_symbols,
             "strategies_prompt": self._cmd_strategies_prompt,
             "strategies": self._cmd_strategies,
+            "hours_london_ny": self._cmd_hours_london_ny,
+            "hours_24h": self._cmd_hours_24h,
+            "hours": self._cmd_hours,
             "risk_05": self._cmd_risk_05,
             "risk_10": self._cmd_risk_10,
             "risk_15": self._cmd_risk_15,

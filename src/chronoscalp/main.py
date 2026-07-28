@@ -533,7 +533,30 @@ class TradingBot:
                     continue
 
                 data_by_tf = self._fetch_and_enrich(symbol)
-                trigger_df = data_by_tf.get(self.trigger_timeframe)
+                use_smc, use_liq, use_scalp = resolve_enabled_strategies(
+                    self.settings.strategy
+                )
+                want_institutional = use_smc or use_liq or (not use_scalp)
+
+                scalp_df = data_by_tf.get(self.trigger_timeframe) if use_scalp else None
+                inst_tf = Timeframe.M1
+                inst_df = data_by_tf.get(inst_tf) if want_institutional else None
+                if want_institutional and (inst_df is None or inst_df.empty):
+                    # Fallback when M1 missing (paper/tests): use trigger frame.
+                    inst_df = data_by_tf.get(self.trigger_timeframe)
+                    inst_tf = self.trigger_timeframe
+
+                if use_scalp and (scalp_df is None or scalp_df.empty) and (
+                    inst_df is None or inst_df.empty
+                ):
+                    self._note_skip(f"{symbol}:no_trigger_data")
+                    continue
+                if (not use_scalp) and (inst_df is None or inst_df.empty):
+                    self._note_skip(f"{symbol}:no_trigger_data")
+                    continue
+
+                # Volatility / correlation regime still prefer M5.
+                trigger_df = scalp_df if scalp_df is not None and not scalp_df.empty else inst_df
                 if trigger_df is None or trigger_df.empty:
                     self._note_skip(f"{symbol}:no_trigger_data")
                     continue
@@ -604,13 +627,28 @@ class TradingBot:
                             self._note_skip(f"{symbol}:correlation")
                             continue
 
-                completed_bar = last_completed_bar_time(trigger_df)
+                run_scalp = False
+                run_institutional = False
+                scalp_bar = None
+                inst_bar = None
                 if self.trade_on_bar_close:
-                    if completed_bar is None:
-                        self._note_skip(f"{symbol}:no_completed_bar")
+                    if use_scalp and scalp_df is not None and not scalp_df.empty:
+                        scalp_bar = last_completed_bar_time(scalp_df)
+                        if scalp_bar is not None and self.bar_gate.is_new_bar(
+                            f"{symbol}:scalp", scalp_bar
+                        ):
+                            run_scalp = True
+                    if want_institutional and inst_df is not None and not inst_df.empty:
+                        inst_bar = last_completed_bar_time(inst_df)
+                        if inst_bar is not None and self.bar_gate.is_new_bar(
+                            f"{symbol}:inst", inst_bar
+                        ):
+                            run_institutional = True
+                    if not run_scalp and not run_institutional:
                         continue
-                    if not self.bar_gate.is_new_bar(symbol, completed_bar):
-                        continue
+                else:
+                    run_scalp = use_scalp
+                    run_institutional = want_institutional
 
                 signal = self.strategy.evaluate(
                     symbol=symbol,
@@ -618,21 +656,38 @@ class TradingBot:
                     higher_timeframes=self.higher_timeframes,
                     trigger_timeframe=self.trigger_timeframe,
                     spread_pips=spread_pips,
+                    run_scalp=run_scalp,
+                    run_institutional=run_institutional,
                 )
 
-                if self.trade_on_bar_close and completed_bar is not None:
-                    self.bar_gate.mark_evaluated(symbol, completed_bar)
+                if self.trade_on_bar_close:
+                    if run_scalp and scalp_bar is not None:
+                        self.bar_gate.mark_evaluated(f"{symbol}:scalp", scalp_bar)
+                    if run_institutional and inst_bar is not None:
+                        self.bar_gate.mark_evaluated(f"{symbol}:inst", inst_bar)
 
                 if signal.signal_type == SignalType.NONE:
                     detail = (signal.reason or "no_signal").replace(" ", "_")
                     self._note_skip(f"{symbol}:{detail}")
                     continue
 
+                signal_tf = signal.timeframe or self.trigger_timeframe
+                completed_bar = None
+                if signal_tf == Timeframe.M1 or (
+                    want_institutional and "ultra_scalp" not in (signal.reason or "")
+                ):
+                    completed_bar = inst_bar or last_completed_bar_time(
+                        inst_df if inst_df is not None else trigger_df
+                    )
+                else:
+                    completed_bar = scalp_bar or last_completed_bar_time(
+                        scalp_df if scalp_df is not None else trigger_df
+                    )
                 if completed_bar is None:
-                    completed_bar = last_completed_bar_time(trigger_df) or now
+                    completed_bar = now
 
                 dedup_key = signal_dedup_key(
-                    symbol, self.trigger_timeframe, completed_bar, signal.signal_type
+                    symbol, signal_tf, completed_bar, signal.signal_type
                 )
                 if self.signal_deduper.already_processed(dedup_key):
                     self._note_skip(f"{symbol}:dedup")

@@ -54,6 +54,20 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     assert data2["strategy"]["use_ultra_scalp"] is True
     assert data2["symbols"] == ["ETHUSD", "USDJPY"]  # preserved
 
+    from chronoscalp.saas.broker_wizard import apply_trading_hours_mode
+
+    mode = apply_trading_hours_mode("24h", overrides_path=overrides)
+    assert mode == "always_on_24h"
+    data3 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data3["sessions"]["trading_hours_mode"] == "always_on_24h"
+    assert data3["sessions"]["trade_outside_sessions"] is True
+
+    mode2 = apply_trading_hours_mode("london_ny", overrides_path=overrides)
+    assert mode2 == "london_ny"
+    data4 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data4["sessions"]["trading_hours_mode"] == "london_ny"
+    assert data4["sessions"]["trade_outside_sessions"] is False
+
 
 def test_user_config_roundtrip(tmp_path: Path):
     store = UserConfigStore(tmp_path / "user_config.json")

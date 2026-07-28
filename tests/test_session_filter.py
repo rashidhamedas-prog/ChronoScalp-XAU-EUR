@@ -58,3 +58,29 @@ def test_session_filter_always_on_symbol_bypasses_windows():
     assert not session_filter.is_within_session(_dt(20, 0))
     assert session_filter.is_within_session(_dt(20, 0), symbol="BTCUSD")
     assert not session_filter.is_within_session(_dt(20, 0), symbol="EURUSD")
+
+
+def test_trading_hours_mode_london_ny_blocks_outside_all_symbols():
+    cfg = {
+        "trading_hours_mode": "london_ny",
+        "windows": {
+            "london": {"start": "08:00", "end": "11:00"},
+            "new_york": {"start": "13:30", "end": "16:30"},
+        },
+        "always_on_symbols": ["BTCUSD"],
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    assert session_filter.is_within_session(_dt(9, 0), symbol="BTCUSD")
+    assert session_filter.is_within_session(_dt(14, 0), symbol="EURUSD")
+    assert not session_filter.is_within_session(_dt(20, 0), symbol="BTCUSD")
+    assert not session_filter.is_within_session(_dt(20, 0), symbol="EURUSD")
+
+
+def test_trading_hours_mode_always_on_24h():
+    cfg = {
+        "trading_hours_mode": "always_on_24h",
+        "windows": {"london": {"start": "08:00", "end": "11:00"}},
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    assert session_filter.is_within_session(_dt(3, 0), symbol="EURUSD")
+    assert session_filter.active_session_name(_dt(3, 0)) == "always_on_24h"

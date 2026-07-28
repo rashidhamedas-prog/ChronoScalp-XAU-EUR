@@ -39,6 +39,8 @@ BTN_CANCEL = "لغو"
 BTN_CTRL_SHOW = "نمایش کنترل"
 BTN_SYMBOLS = "نمادها"
 BTN_STRATEGIES = "استراتژی‌ها"
+BTN_HOURS_LONDON = "سشن لندن/آمریکا"
+BTN_HOURS_24H = "۲۴ ساعته"
 BTN_RISK_05 = "ریسک ۰٫۵٪"
 BTN_RISK_10 = "ریسک ۱٪"
 BTN_RISK_15 = "ریسک ۱٫۵٪"
@@ -80,6 +82,7 @@ CONTROL_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_CTRL_SHOW}],
         [{"text": BTN_SYMBOLS}, {"text": BTN_STRATEGIES}],
+        [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
         [{"text": BTN_SETTINGS}, {"text": BTN_MENU}],
     ],
@@ -111,7 +114,8 @@ HELP_TEXT = (
     "کنترل:\n"
     "/config — همه تنظیمات\n"
     "/symbols XAUUSD,EURUSD\n"
-    "/strategies smc_confluence,liquidity_volume\n"
+    "/strategies smc_confluence,liquidity_volume,ultra_scalp\n"
+    "/hours london_ny|always_on_24h\n"
     "/risk 0.5|1|1.5\n\n"
     "منو: /settings\n"
     "نکته: Live بدون CHRONOSCALP_CONFIRM_LIVE=yes استارت نمی‌شود."
@@ -192,6 +196,11 @@ ALIASES: dict[str, str] = {
     BTN_STRATEGIES: "strategies_prompt",
     "استراتژی‌ها": "strategies_prompt",
     "/strategies": "strategies",
+    BTN_HOURS_LONDON: "hours_london_ny",
+    "سشن لندن/آمریکا": "hours_london_ny",
+    BTN_HOURS_24H: "hours_24h",
+    "۲۴ ساعته": "hours_24h",
+    "/hours": "hours",
     BTN_RISK_05: "risk_05",
     "ریسک ۰٫۵٪": "risk_05",
     BTN_RISK_10: "risk_10",

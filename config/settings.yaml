@@ -76,10 +76,13 @@ strategy:
 
 sessions:
   timezone: "GMT"
+  # london_ny = only London + New York windows; always_on_24h = trade any time
+  trading_hours_mode: london_ny
   windows:
     london: { start: "08:00", end: "11:00" }
     new_york: { start: "13:30", end: "16:30" }
   trade_outside_sessions: false
+  # Legacy per-symbol bypass — ignored when trading_hours_mode is explicitly london_ny
   always_on_symbols:
     - "BTCUSD"
     - "ETHUSD"
