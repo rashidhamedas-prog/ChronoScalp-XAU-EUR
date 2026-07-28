@@ -62,6 +62,76 @@ def commission_per_lot(symbol_spec: dict, entry_price: float) -> float:
     return fixed + pct * contract * max(entry_price, 0.0)
 
 
+def fit_economic_scalp_geometry(
+    *,
+    entry: float,
+    is_buy: bool,
+    atr: float,
+    atr_stop_multiple: float,
+    atr_target_multiple: float,
+    symbol_spec: dict | None = None,
+    spread_pips: float | None = None,
+    min_reward_risk_ratio: float = 1.0,
+    net_rr_floor: float = 1.0,
+    min_stop_spread_multiple: float = 2.0,
+    max_stop_atr_multiple: float = 8.0,
+    max_target_atr_multiple: float = 12.0,
+) -> tuple[float, float] | None:
+    """Widen ATR-based SL/TP so scalps clear spread floor and round-turn costs.
+
+    Does **not** loosen the 1% equity risk ceiling — wider stops only shrink
+    position size. Returns ``(stop_loss, take_profit)`` or ``None`` when the
+    market is too quiet / costs too high to stay within ATR caps while still
+    clearing ``net_rr_floor`` after estimated costs.
+    """
+    if entry <= 0 or atr <= 0:
+        return None
+
+    min_rr = max(1.0, float(min_reward_risk_ratio))
+    net_floor = max(1.0, float(net_rr_floor))
+    stop_dist = max(float(atr_stop_multiple), 0.0) * atr
+    target_dist = max(float(atr_target_multiple), 0.0) * atr
+
+    pip_size = 1.0
+    pip_value = 0.0
+    cost = 0.0
+    if symbol_spec:
+        pip_size = float(symbol_spec.get("pip_size", 1.0) or 1.0)
+        pip_value = float(symbol_spec.get("pip_value_per_lot", 0.0) or 0.0)
+        typical = float(symbol_spec.get("typical_spread_pips", 0.0) or 0.0)
+        min_stop = max(0.0, float(min_stop_spread_multiple)) * typical * pip_size
+        if min_stop > 0:
+            # Pad by a tiny fraction of a pip so float equality never fails the
+            # risk manager's ``sl_pips < 2x typical`` hard floor.
+            stop_dist = max(stop_dist, min_stop + pip_size * 1e-6)
+
+        spread_for_cost = typical
+        if spread_pips is not None and math.isfinite(spread_pips) and spread_pips > 0:
+            spread_for_cost = max(spread_for_cost, float(spread_pips))
+        cost = commission_per_lot(symbol_spec, entry) + spread_for_cost * pip_value
+
+    max_stop = max(float(max_stop_atr_multiple), float(atr_stop_multiple)) * atr
+    if stop_dist > max_stop + 1e-12:
+        return None
+
+    target_dist = max(target_dist, stop_dist * min_rr)
+    if cost > 0 and pip_size > 0 and pip_value > 0:
+        risk_value = (stop_dist / pip_size) * pip_value
+        # (reward - cost) / (risk + cost) >= net_floor
+        # → reward >= net_floor * (risk + cost) + cost
+        min_reward_value = net_floor * (risk_value + cost) + cost
+        min_target = (min_reward_value / pip_value) * pip_size
+        target_dist = max(target_dist, min_target)
+
+    max_target = max(float(max_target_atr_multiple), float(atr_target_multiple)) * atr
+    if target_dist > max_target + 1e-12:
+        return None
+
+    if is_buy:
+        return entry - stop_dist, entry + target_dist
+    return entry + stop_dist, entry - target_dist
+
+
 def calculate_position_size(
     equity: float,
     risk_pct: float,
@@ -222,7 +292,7 @@ class RiskManager:
             # Hard floor: sub-spread stops (e.g. 0.39-pip USDJPY) are noise
             # trades that also force absurd volumes; 2x typical spread minimum.
             min_stop_pips = 2.0 * float(spec.get("typical_spread_pips", 0) or 0)
-            if min_stop_pips > 0 and sl_pips < min_stop_pips:
+            if min_stop_pips > 0 and sl_pips + 1e-9 < min_stop_pips:
                 logger.info(
                     "Signal rejected ({}): SL distance {:.2f} pips < floor {:.2f} "
                     "(2x typical spread)",

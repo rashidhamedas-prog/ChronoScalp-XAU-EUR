@@ -129,7 +129,9 @@ class TradingBot:
             settings_config_dir() / "news_events.yaml",
             settings.secrets.news_api_key,
         )
-        self.strategy = MultiTimeframeStrategy(settings.strategy, settings.indicators)
+        self.strategy = MultiTimeframeStrategy(
+            settings.strategy, settings.indicators, symbols_cfg=settings.symbols_raw
+        )
         self.risk_manager = RiskManager(
             risk_cfg=settings.risk,
             spread_cfg=settings.spread_filter,
@@ -615,6 +617,7 @@ class TradingBot:
                     data_by_timeframe=data_by_tf,
                     higher_timeframes=self.higher_timeframes,
                     trigger_timeframe=self.trigger_timeframe,
+                    spread_pips=spread_pips,
                 )
 
                 if self.trade_on_bar_close and completed_bar is not None:

@@ -147,6 +147,7 @@ BTC_LITEFINANCE_SPEC = {
     "lot_step": 0.01,
     "max_lot": 10,
     "pip_value_per_lot": 1.0,
+    "typical_spread_pips": 20,
     "commission_pct_notional": 0.0012,  # ≈$78/lot round-turn at 65k
 }
 
@@ -270,3 +271,113 @@ def test_validate_signal_rejects_spread_burning_scalp():
         timeframe=Timeframe.S15,
     )
     assert rm.validate_signal(healthy, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+
+def test_fit_economic_scalp_widens_eurjpy_sub_spread_stop():
+    """S15 ATR stops under 2x typical spread must widen, then clear net R:R."""
+    from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry
+
+    eurjpy = {
+        "pip_size": 0.01,
+        "pip_value_per_lot": 6.5,
+        "typical_spread_pips": 2.0,
+        "contract_size": 100000,
+    }
+    # ATR 0.92 pips with 1.0x stop was the live reject (0.92 < 4.0 floor).
+    geometry = fit_economic_scalp_geometry(
+        entry=186.192,
+        is_buy=False,
+        atr=0.0092,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.0,
+        symbol_spec=eurjpy,
+        spread_pips=0.3,
+        min_reward_risk_ratio=1.0,
+        net_rr_floor=1.0,
+    )
+    assert geometry is not None
+    stop, tp = geometry
+    sl_pips = abs(stop - 186.192) / 0.01
+    assert sl_pips >= 4.0 - 1e-9
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"EURJPY_o": eurjpy},
+        starting_equity=10_000,
+    )
+    signal = Signal(
+        symbol="EURJPY_o",
+        signal_type=SignalType.SELL,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=186.192,
+        stop_loss=stop,
+        take_profit=tp,
+        timeframe=Timeframe.S15,
+        reason="ultra_scalp_v3",
+    )
+    assert rm.validate_signal(signal, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+
+
+def test_fit_economic_scalp_clears_btc_commission():
+    """1:1 micro ATR BTC scalp must expand TP past LiteFinance commission."""
+    from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry
+
+    entry = 65_000.0
+    geometry = fit_economic_scalp_geometry(
+        entry=entry,
+        is_buy=True,
+        atr=20.0,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.0,
+        symbol_spec=BTC_LITEFINANCE_SPEC,
+        spread_pips=20.0,
+        min_reward_risk_ratio=1.0,
+        net_rr_floor=1.0,
+    )
+    assert geometry is not None
+    stop, tp = geometry
+    assert abs(entry - stop) >= 40.0  # 2x typical_spread_pips=20
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"BTCUSD": BTC_LITEFINANCE_SPEC},
+        starting_equity=10_000,
+    )
+    signal = Signal(
+        symbol="BTCUSD",
+        signal_type=SignalType.BUY,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=entry,
+        stop_loss=stop,
+        take_profit=tp,
+        timeframe=Timeframe.S15,
+        reason="ultra_scalp_v3",
+    )
+    assert rm.validate_signal(signal, current_spread_pips=20.0, min_reward_risk_ratio=1.0)
+
+
+def test_fit_economic_scalp_returns_none_when_caps_too_tight():
+    from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry
+
+    # Tiny ATR + huge commission cannot fit inside max_target_atr_multiple=2.
+    assert (
+        fit_economic_scalp_geometry(
+            entry=65_000.0,
+            is_buy=True,
+            atr=5.0,
+            atr_stop_multiple=1.0,
+            atr_target_multiple=1.0,
+            symbol_spec=BTC_LITEFINANCE_SPEC,
+            spread_pips=20.0,
+            max_stop_atr_multiple=2.0,
+            max_target_atr_multiple=2.0,
+        )
+        is None
+    )

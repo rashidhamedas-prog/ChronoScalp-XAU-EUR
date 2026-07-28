@@ -72,7 +72,9 @@ def build_labeled_dataset(
     news_filter = NewsFilter.from_config(
         settings.news_filter, CONFIG_DIR / "news_events.yaml", settings.secrets.news_api_key
     )
-    strategy = MultiTimeframeStrategy(settings.strategy, settings.indicators)
+    strategy = MultiTimeframeStrategy(
+        settings.strategy, settings.indicators, symbols_cfg=settings.symbols_raw
+    )
     risk_manager = RiskManager(
         risk_cfg=settings.risk,
         spread_cfg=settings.spread_filter,

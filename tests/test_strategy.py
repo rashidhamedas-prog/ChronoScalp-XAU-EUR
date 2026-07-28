@@ -330,3 +330,102 @@ def test_ultra_scalp_reports_weak_impulse_reason():
     )
     assert signal.signal_type == SignalType.NONE
     assert signal.reason == "weak_impulse"
+
+
+def test_ultra_scalp_v3_cost_aware_passes_risk_manager():
+    """Regression: live BTC/EURJPY rejects from sub-spread + commission."""
+    from chronoscalp.risk.position_sizing import RiskManager
+    from chronoscalp.strategy.entry_trigger import generate_ultra_scalp_v3
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    # Strong impulse body vs ATR; close rising so candle_dir passes.
+    close = np.array([64900.0, 64920.0, 64940.0, 64960.0, 65000.0])
+    open_ = close - 30.0
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 5.0,
+            "low": open_ - 5.0,
+            "close": close,
+            "atr": np.full(n, 25.0),
+            "rvol": np.full(n, 1.5),
+        },
+        index=index,
+    )
+    btc_spec = {
+        "pip_size": 1.0,
+        "contract_size": 1,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 10,
+        "pip_value_per_lot": 1.0,
+        "typical_spread_pips": 20,
+        "commission_pct_notional": 0.0012,
+    }
+    signal = generate_ultra_scalp_v3(
+        "BTCUSD",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.S15,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.0,
+        rvol_min=1.2,
+        impulse_body_atr_multiple=0.35,
+        symbol_spec=btc_spec,
+        spread_pips=20.0,
+        cost_aware_geometry=True,
+    )
+    assert signal.signal_type == SignalType.BUY
+    assert abs(signal.entry_price - signal.stop_loss) >= 40.0
+    rm = RiskManager(
+        risk_cfg={
+            "min_reward_risk_ratio": 1.5,
+            "max_daily_loss_pct": 99,
+            "active_risk_per_trade_pct": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={"BTCUSD": btc_spec},
+        starting_equity=10_000,
+    )
+    assert rm.validate_signal(signal, current_spread_pips=20.0, min_reward_risk_ratio=1.0)
+
+
+def test_ultra_scalp_v3_reports_uneconomic_when_caps_hit():
+    from chronoscalp.strategy.entry_trigger import generate_ultra_scalp_v3
+
+    n = 5
+    index = pd.date_range("2026-01-01", periods=n, freq="15s", tz="UTC")
+    close = np.array([64900.0, 64920.0, 64940.0, 64960.0, 65000.0])
+    open_ = close - 8.0
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": close + 1.0,
+            "low": open_ - 1.0,
+            "close": close,
+            "atr": np.full(n, 5.0),
+            "rvol": np.full(n, 2.0),
+        },
+        index=index,
+    )
+    signal = generate_ultra_scalp_v3(
+        "BTCUSD",
+        df,
+        TrendDirection.BULLISH,
+        Timeframe.S15,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.0,
+        impulse_body_atr_multiple=0.35,
+        symbol_spec={
+            "pip_size": 1.0,
+            "contract_size": 1,
+            "pip_value_per_lot": 1.0,
+            "typical_spread_pips": 20,
+            "commission_pct_notional": 0.0012,
+        },
+        max_stop_atr_multiple=2.0,
+        max_target_atr_multiple=2.0,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert signal.reason == "uneconomic_costs"

@@ -67,5 +67,6 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **MT5 stale-stops gate:** refuse `order_send` when live ask/bid has moved through signal SL/TP (prevents `Invalid stops`); skip as `stale_stops` without tripping circuit breaker
 - [x] **Broker-clock tick window:** S15 bars from `copy_ticks_range` anchored to the broker's latest tick time (LiteFinance = UTC+3); real-UTC end silently dropped the newest 3h of ticks so all signals priced from stale bars
 - [x] **Commission-aware risk:** `commission_pct_notional`/`commission_per_lot` in `symbols.yaml` (LiteFinance crypto ≈0.12% round-turn); sizing keeps price-risk+commission ≤1%, `validate_signal` requires net R:R after commission (blocks guaranteed-negative crypto micro-scalps), fills slipping >50% of SL distance rejected; ETHUSD `pip_value_per_lot` corrected (was 100× under-risking)
+- [x] **Cost-aware ultra-scalp geometry:** `fit_economic_scalp_geometry` widens S15 SL to 2× typical spread and TP to net ≥1:1 after costs (within ATR caps); config uses wider ATR multiples + `trend_mode: primary` — 1% equity risk ceiling unchanged
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

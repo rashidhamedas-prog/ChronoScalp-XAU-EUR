@@ -355,9 +355,15 @@ class MultiTimeframeStrategy:
     """Orchestrates trend detection + entry generation for a single symbol
     given already-fetched, indicator/SMC-enriched DataFrames per timeframe."""
 
-    def __init__(self, strategy_cfg: dict, indicators_cfg: dict) -> None:
+    def __init__(
+        self,
+        strategy_cfg: dict,
+        indicators_cfg: dict,
+        symbols_cfg: dict | None = None,
+    ) -> None:
         self.strategy_cfg = strategy_cfg
         self.indicators_cfg = indicators_cfg
+        self.symbols_cfg = symbols_cfg or {}
 
     def evaluate(
         self,
@@ -367,6 +373,7 @@ class MultiTimeframeStrategy:
         trigger_timeframe: Timeframe,
         *,
         ignore_confidence_gate: bool = False,
+        spread_pips: float | None = None,
     ) -> Signal:
         use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
@@ -426,11 +433,24 @@ class MultiTimeframeStrategy:
                 trend=trend,
                 timeframe=trigger_timeframe,
                 min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
-                atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 1.0)),
-                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 1.0)),
-                rvol_min=float(scalp_cfg.get("rvol_min", 1.3)),
-                impulse_body_atr_multiple=float(scalp_cfg.get("impulse_body_atr_multiple", 0.4)),
+                atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 2.5)),
+                atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 4.0)),
+                rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
+                impulse_body_atr_multiple=float(
+                    scalp_cfg.get("impulse_body_atr_multiple", 0.35)
+                ),
                 vwap_df=trigger_df,
+                symbol_spec=self.symbols_cfg.get(symbol),
+                spread_pips=spread_pips,
+                cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
+                min_stop_spread_multiple=float(
+                    scalp_cfg.get("min_stop_spread_multiple", 2.0)
+                ),
+                net_rr_after_costs=float(scalp_cfg.get("net_rr_after_costs", 1.0)),
+                max_stop_atr_multiple=float(scalp_cfg.get("max_stop_atr_multiple", 8.0)),
+                max_target_atr_multiple=float(
+                    scalp_cfg.get("max_target_atr_multiple", 12.0)
+                ),
             )
         elif entry_engine == "institutional":
             from chronoscalp.strategy.entry_trigger import generate_institutional_entry

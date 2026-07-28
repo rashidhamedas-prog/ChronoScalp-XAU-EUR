@@ -59,13 +59,20 @@ strategy:
   atr_target_multiple: 2.25
   min_signal_confidence: 0.55
   ultra_scalp:
-    atr_stop_multiple: 1.0
-    atr_target_multiple: 1.0
+    # Wider ATR geometry + cost-aware floors so S15 scalps clear 2x spread /
+    # LiteFinance commission without raising the 1% equity risk ceiling.
+    atr_stop_multiple: 2.5
+    atr_target_multiple: 4.0
     min_reward_risk_ratio: 1.0
-    rvol_min: 1.3
-    impulse_body_atr_multiple: 0.4
-    trend_mode: strict
+    rvol_min: 1.2
+    impulse_body_atr_multiple: 0.35
+    trend_mode: primary
     require_confluence: false
+    cost_aware_geometry: true
+    min_stop_spread_multiple: 2.0
+    net_rr_after_costs: 1.0
+    max_stop_atr_multiple: 8.0
+    max_target_atr_multiple: 12.0
 
 sessions:
   timezone: "GMT"

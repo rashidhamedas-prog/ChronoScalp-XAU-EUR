@@ -180,13 +180,25 @@ def generate_ultra_scalp_v3(
     timeframe: Timeframe,
     *,
     min_reward_risk_ratio: float = 1.0,
-    atr_stop_multiple: float = 1.0,
-    atr_target_multiple: float = 1.0,
-    rvol_min: float = 1.3,
-    impulse_body_atr_multiple: float = 0.4,
+    atr_stop_multiple: float = 2.5,
+    atr_target_multiple: float = 4.0,
+    rvol_min: float = 1.2,
+    impulse_body_atr_multiple: float = 0.35,
     vwap_df: pd.DataFrame | None = None,
+    symbol_spec: dict | None = None,
+    spread_pips: float | None = None,
+    cost_aware_geometry: bool = True,
+    min_stop_spread_multiple: float = 2.0,
+    net_rr_after_costs: float = 1.0,
+    max_stop_atr_multiple: float = 8.0,
+    max_target_atr_multiple: float = 12.0,
 ) -> Signal:
-    """Ultra-scalp S15: impulse + RVOL + VWAP alignment."""
+    """Ultra-scalp S15: impulse + RVOL + VWAP, with cost-aware SL/TP geometry.
+
+    When ``cost_aware_geometry`` is on (default), stops clear the 2× typical
+    spread floor and targets clear net 1:1 after estimated commission/spread —
+    without raising the 1% equity risk ceiling (wider stops shrink size).
+    """
     if trend == TrendDirection.NEUTRAL or trigger_df is None or len(trigger_df) < 2:
         return _no_signal(symbol, timeframe, reason="trend_neutral")
 
@@ -221,18 +233,42 @@ def generate_ultra_scalp_v3(
         and last["close"] >= prev["close"]
     ):
         signal_type = SignalType.BUY
-        stop_loss = close - atr_stop_multiple * atr_value
-        take_profit = close + atr_target_multiple * atr_value
     elif (
         trend == TrendDirection.BEARISH
         and last["close"] < last["open"]
         and last["close"] <= prev["close"]
     ):
         signal_type = SignalType.SELL
-        stop_loss = close + atr_stop_multiple * atr_value
-        take_profit = close - atr_target_multiple * atr_value
     else:
         return _no_signal(symbol, timeframe, reason="candle_dir")
+
+    from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry
+
+    if cost_aware_geometry:
+        geometry = fit_economic_scalp_geometry(
+            entry=close,
+            is_buy=signal_type == SignalType.BUY,
+            atr=atr_value,
+            atr_stop_multiple=atr_stop_multiple,
+            atr_target_multiple=atr_target_multiple,
+            symbol_spec=symbol_spec,
+            spread_pips=spread_pips,
+            min_reward_risk_ratio=min_reward_risk_ratio,
+            net_rr_floor=net_rr_after_costs,
+            min_stop_spread_multiple=min_stop_spread_multiple,
+            max_stop_atr_multiple=max_stop_atr_multiple,
+            max_target_atr_multiple=max_target_atr_multiple,
+        )
+        if geometry is None:
+            return _no_signal(symbol, timeframe, reason="uneconomic_costs")
+        stop_loss, take_profit = geometry
+    else:
+        stop_dist = atr_stop_multiple * atr_value
+        target_dist = atr_target_multiple * atr_value
+        if signal_type == SignalType.BUY:
+            stop_loss, take_profit = close - stop_dist, close + target_dist
+        else:
+            stop_loss, take_profit = close + stop_dist, close - target_dist
 
     signal = Signal(
         symbol=symbol,
