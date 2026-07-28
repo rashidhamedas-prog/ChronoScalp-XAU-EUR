@@ -50,6 +50,7 @@ MAIN_KEYBOARD: dict[str, Any] = {
         [{"text": BTN_STATUS}, {"text": BTN_PNL}, {"text": BTN_OPEN}],
         [{"text": BTN_START_PAPER}, {"text": BTN_START_LIVE}, {"text": BTN_STOP_BOT}],
         [{"text": BTN_HALT}, {"text": BTN_RESUME}],
+        [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_LOGS}, {"text": BTN_SETTINGS}, {"text": BTN_HELP}],
     ],
     "resize_keyboard": True,
@@ -59,6 +60,7 @@ MAIN_KEYBOARD: dict[str, Any] = {
 SETTINGS_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_CONN}, {"text": BTN_CONTROL}],
+        [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_CONN_SHOW}, {"text": BTN_CTRL_SHOW}],
         [{"text": BTN_MENU}],
     ],

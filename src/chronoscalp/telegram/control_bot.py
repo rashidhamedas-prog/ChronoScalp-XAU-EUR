@@ -204,14 +204,39 @@ class TelegramControlBot:
     def _cmd_help(self, chat_id: int, _text: str = "") -> None:
         self.send(chat_id, HELP_TEXT, reply_markup=MAIN_KEYBOARD)
 
+    def _trading_hours_label(self) -> str:
+        sessions = getattr(self.settings, "sessions", None) or {}
+        if callable(sessions):
+            try:
+                sessions = sessions()
+            except TypeError:
+                sessions = {}
+        if not isinstance(sessions, dict):
+            sessions = {}
+        from chronoscalp.filters.session_filter import normalize_trading_hours_mode
+
+        hours = normalize_trading_hours_mode(sessions.get("trading_hours_mode"))
+        return {
+            "london_ny": "سشن لندن/آمریکا",
+            "always_on_24h": "۲۴ ساعته",
+        }.get(hours, hours)
+
     def _cmd_menu(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
-        self.send(chat_id, "منوی اصلی", reply_markup=MAIN_KEYBOARD)
+        self.send(
+            chat_id,
+            f"منوی اصلی\nساعات معامله: {self._trading_hours_label()}",
+            reply_markup=MAIN_KEYBOARD,
+        )
 
     def _cmd_settings(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
         self.send(
-            chat_id, "تنظیمات — اتصال یا کنترل را انتخاب کنید.", reply_markup=SETTINGS_KEYBOARD
+            chat_id,
+            "تنظیمات — اتصال / کنترل / ساعات معامله\n"
+            f"ساعات فعلی: {self._trading_hours_label()}\n"
+            "دکمه‌های «سشن لندن/آمریکا» یا «۲۴ ساعته» را بزنید.",
+            reply_markup=SETTINGS_KEYBOARD,
         )
 
     def _cmd_conn_menu(self, chat_id: int, _text: str = "") -> None:
@@ -220,7 +245,13 @@ class TelegramControlBot:
 
     def _cmd_control_menu(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
-        self.send(chat_id, "تنظیمات کنترل (نماد / استراتژی / ریسک)", reply_markup=CONTROL_KEYBOARD)
+        self.send(
+            chat_id,
+            "تنظیمات کنترل (نماد / استراتژی / ساعات / ریسک)\n"
+            f"ساعات فعلی: {self._trading_hours_label()}\n"
+            "برای تغییر: «سشن لندن/آمریکا» یا «۲۴ ساعته»",
+            reply_markup=CONTROL_KEYBOARD,
+        )
 
     def _cmd_whoami(self, chat_id: int, _text: str = "") -> None:
         self.send(
@@ -510,11 +541,7 @@ class TelegramControlBot:
             strats.append("ultra_scalp")
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
-        from chronoscalp.filters.session_filter import normalize_trading_hours_mode
-
-        hours = normalize_trading_hours_mode(
-            (self.settings.sessions or {}).get("trading_hours_mode")
-        )
+        hours = self._trading_hours_label()
         text = (
             self._connection_summary()
             + "\n\nکنترل / Control\n"
