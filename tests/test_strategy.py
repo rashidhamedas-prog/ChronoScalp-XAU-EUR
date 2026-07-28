@@ -217,21 +217,15 @@ def test_ultra_scalp_trend_primary_allows_neutral_m1():
     from chronoscalp.strategy.multi_timeframe import ultra_scalp_trend
 
     assert (
-        ultra_scalp_trend(
-            [TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="primary"
-        )
+        ultra_scalp_trend([TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="primary")
         == TrendDirection.BULLISH
     )
     assert (
-        ultra_scalp_trend(
-            [TrendDirection.BULLISH, TrendDirection.BEARISH], mode="primary"
-        )
+        ultra_scalp_trend([TrendDirection.BULLISH, TrendDirection.BEARISH], mode="primary")
         == TrendDirection.NEUTRAL
     )
     assert (
-        ultra_scalp_trend(
-            [TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="strict"
-        )
+        ultra_scalp_trend([TrendDirection.BULLISH, TrendDirection.NEUTRAL], mode="strict")
         == TrendDirection.NEUTRAL
     )
 

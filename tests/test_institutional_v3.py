@@ -64,6 +64,29 @@ def test_volatility_allows_bounds():
     assert not volatility_allows(50.0, 1000.0, min_ratio=0.0005, max_ratio=0.02)
 
 
+def test_volatility_decision_reasons():
+    from chronoscalp.risk.institutional_guards import volatility_decision
+
+    ok, reason, ratio = volatility_decision(1.0, 1000.0, min_ratio=0.0005, max_ratio=0.02)
+    assert ok and reason == "ok" and ratio is not None
+    ok, reason, ratio = volatility_decision(0.1, 1000.0, min_ratio=0.0005, max_ratio=0.02)
+    assert not ok and reason == "low"
+    ok, reason, ratio = volatility_decision(50.0, 1000.0, min_ratio=0.0005, max_ratio=0.02)
+    assert not ok and reason == "high"
+    ok, reason, ratio = volatility_decision(float("nan"), 1000.0)
+    assert not ok and reason == "invalid" and ratio is None
+
+
+def test_volatility_defaults_allow_m5_fx_and_crypto():
+    """Defaults must allow typical M5 ATR/close for FX + crypto (not S15)."""
+    # EURUSD M5 ~3.5 pips, BTC M5 quiet, ETH M5 normal
+    assert volatility_allows(0.00035, 1.08)
+    assert volatility_allows(100.0, 118_000.0)
+    assert volatility_allows(12.0, 3500.0)
+    # S15-scale FX ratio must not be the regime input; still reject dead flat
+    assert not volatility_allows(0.00001, 1.08)
+
+
 def test_partial_tp_at_one_point_two_r():
     pos = Position(
         ticket=1,

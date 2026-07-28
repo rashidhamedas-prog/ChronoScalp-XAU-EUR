@@ -104,8 +104,11 @@ risk:
     max_abs_corr: 0.80
   volatility_guard:
     enabled: true
-    min_atr_close_ratio: 0.0005
-    max_atr_close_ratio: 0.02
+    # Use M5 ATR/close for regime (not S15/M1 trigger). Ultra-scalp S15 ATR
+    # ratios sit well below 0.0005 and previously blocked every symbol.
+    timeframe: M5
+    min_atr_close_ratio: 0.00005
+    max_atr_close_ratio: 0.05
   spread_ma_guard:
     enabled: true
     window: 100

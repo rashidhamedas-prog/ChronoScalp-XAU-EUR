@@ -62,5 +62,10 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Telegram control bot:** start/stop paper+live, status, P&L, open positions, kill switch, logs + Persian reply keyboard (`src/chronoscalp/telegram/control_bot.py`, `docs/TELEGRAM_BOT_FA.md`)
 - [x] **Telegram watchdog:** `scripts/watch_telegram.ps1` Scheduled Task keeps control bot alive on Windows VPS
 - [x] **Institutional Scalper v3:** Session VWAP + Asian mid trend (M15/M5), sweep+MSS+RVOL entry, ultra S15 VWAP/RVOL 1.3, 3-strikes, correlation/vol/spread-MA guards, daily DD close-all, partial TP@1.2R + Chandelier trail
+- [x] **Volatility guard fix:** regime uses M5 ATR/close (not S15 trigger); thresholds + skip reasons (`volatility_low`/`high`/`invalid`) so ultra-scalp no longer blocks every symbol
+- [x] **Telegram live positions:** «پوزیشن‌ها» live-first MT5/OANDA query (fallback: fresh `broker_positions_*.json`); empty-state shows login/equity/margin; journal ghost-drop has 90s grace; reconcile records external SL/TP closes with PnL
+- [x] **MT5 stale-stops gate:** refuse `order_send` when live ask/bid has moved through signal SL/TP (prevents `Invalid stops`); skip as `stale_stops` without tripping circuit breaker
+- [x] **Broker-clock tick window:** S15 bars from `copy_ticks_range` anchored to the broker's latest tick time (LiteFinance = UTC+3); real-UTC end silently dropped the newest 3h of ticks so all signals priced from stale bars
+- [x] **Commission-aware risk:** `commission_pct_notional`/`commission_per_lot` in `symbols.yaml` (LiteFinance crypto ≈0.12% round-turn); sizing keeps price-risk+commission ≤1%, `validate_signal` requires net R:R after commission (blocks guaranteed-negative crypto micro-scalps), fills slipping >50% of SL distance rejected; ETHUSD `pip_value_per_lot` corrected (was 100× under-risking)
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

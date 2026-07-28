@@ -9,6 +9,7 @@ here, not tuning knobs.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -48,6 +49,19 @@ def round_to_lot_step(volume: float, min_lot: float, max_lot: float, lot_step: f
     return max(min_lot, min(round(rounded, 8), max_lot))
 
 
+def commission_per_lot(symbol_spec: dict, entry_price: float) -> float:
+    """Estimated round-turn commission (account currency) for 1.0 lot.
+
+    Supports a fixed ``commission_per_lot`` and/or ``commission_pct_notional``
+    (fraction of entry notional, round-turn — e.g. LiteFinance crypto ≈0.0012).
+    Symbols without these fields cost 0 (spread-only pricing).
+    """
+    fixed = float(symbol_spec.get("commission_per_lot", 0.0) or 0.0)
+    pct = float(symbol_spec.get("commission_pct_notional", 0.0) or 0.0)
+    contract = float(symbol_spec.get("contract_size", 1.0) or 1.0)
+    return fixed + pct * contract * max(entry_price, 0.0)
+
+
 def calculate_position_size(
     equity: float,
     risk_pct: float,
@@ -55,8 +69,8 @@ def calculate_position_size(
     stop_loss: float,
     symbol_spec: dict,
 ) -> float:
-    """Position size (in lots) such that a stop-loss hit loses exactly
-    `risk_pct`% of `equity` (before slippage/commission)."""
+    """Position size (in lots) such that a stop-loss hit loses at most
+    `risk_pct`% of `equity` **including** estimated round-turn commission."""
     if equity <= 0:
         raise ValueError("equity must be positive")
 
@@ -71,7 +85,8 @@ def calculate_position_size(
     if risk_pips <= 0:
         raise ValueError("computed risk_pips must be positive")
 
-    raw_volume = risk_amount / (risk_pips * pip_value_per_lot)
+    loss_per_lot = risk_pips * pip_value_per_lot + commission_per_lot(symbol_spec, entry_price)
+    raw_volume = risk_amount / loss_per_lot
     return round_to_lot_step(
         raw_volume,
         min_lot=symbol_spec["min_lot"],
@@ -193,6 +208,59 @@ class RiskManager:
                 "Signal rejected: R:R {:.2f} < min {:.2f}", signal.risk_reward_ratio, min_rr
             )
             return False
+
+        # Net R:R must survive round-turn commission AND spread — a 25-point BTC
+        # scalp against a $78/lot commission, or a 0.8-pip EURJPY scalp against
+        # a 0.3-pip spread, is guaranteed negative expectancy regardless of win
+        # rate, so refuse it instead of burning the account on costs.
+        spec = self.symbols_cfg.get(signal.symbol)
+        if spec:
+            pip_size = float(spec["pip_size"])
+            pip_value = float(spec["pip_value_per_lot"])
+            sl_pips = abs(signal.entry_price - signal.stop_loss) / pip_size
+
+            # Hard floor: sub-spread stops (e.g. 0.39-pip USDJPY) are noise
+            # trades that also force absurd volumes; 2x typical spread minimum.
+            min_stop_pips = 2.0 * float(spec.get("typical_spread_pips", 0) or 0)
+            if min_stop_pips > 0 and sl_pips < min_stop_pips:
+                logger.info(
+                    "Signal rejected ({}): SL distance {:.2f} pips < floor {:.2f} "
+                    "(2x typical spread)",
+                    signal.symbol,
+                    sl_pips,
+                    min_stop_pips,
+                )
+                return False
+
+            comm = commission_per_lot(spec, signal.entry_price)
+            spread_cost = 0.0
+            if math.isfinite(current_spread_pips) and current_spread_pips > 0:
+                spread_cost = current_spread_pips * pip_value
+            cost = comm + spread_cost
+            if cost > 0:
+                risk_value = sl_pips * pip_value
+                reward_value = abs(signal.take_profit - signal.entry_price) / pip_size * pip_value
+                if risk_value + cost <= 0:
+                    return False
+                net_rr = (reward_value - cost) / (risk_value + cost)
+                # Gross geometry already passed min_rr above. After costs the
+                # trade must still offer at least 1:1 — otherwise expectancy is
+                # negative at any realistic win rate. Negligible costs (≤5% of
+                # reward) never veto.
+                net_floor = 1.0
+                if cost > 0.05 * reward_value and net_rr < net_floor:
+                    logger.info(
+                        "Signal rejected ({}): net R:R {:.2f} < floor {:.2f} after costs "
+                        "(commission={:.2f} spread={:.2f} per lot; reward={:.2f} risk={:.2f})",
+                        signal.symbol,
+                        net_rr,
+                        net_floor,
+                        comm,
+                        spread_cost,
+                        reward_value,
+                        risk_value,
+                    )
+                    return False
 
         if self.spread_cfg.get("enabled", True):
             max_spread = self.spread_cfg.get("max_spread_pips", {}).get(signal.symbol)

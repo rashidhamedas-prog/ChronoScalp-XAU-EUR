@@ -11,6 +11,133 @@ from chronoscalp.logging_setup import logger
 
 CHRONOSCALP_MAGIC = 20260711
 
+# MT5 order comments are broker-limited (commonly ≤31 chars, ASCII-safe).
+_MT5_COMMENT_MAX = 31
+
+
+class StaleStopsError(ValueError):
+    """Live fill price moved through signal SL/TP — refuse order_send (Invalid stops)."""
+
+
+def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
+    """Return a broker-safe MT5 order comment (ASCII, no spaces, ≤ ``max_len``)."""
+    raw = (text or "").strip()
+    cleaned = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in "._-")) else "_" for ch in raw)
+    cleaned = cleaned.strip("._-") or "ChronoScalp"
+    return cleaned[:max_len]
+
+
+def scale_volume_to_free_margin(
+    *,
+    volume: float,
+    required_margin: float,
+    free_margin: float,
+    volume_step: float,
+    volume_min: float,
+    utilization: float = 0.9,
+) -> float:
+    """Shrink ``volume`` so required margin fits inside ``utilization`` of free margin.
+
+    Returns 0.0 when even the minimum volume does not fit (caller should skip
+    the trade instead of letting the broker bounce it with ``No money``).
+    Never increases volume.
+    """
+    if volume <= 0:
+        return 0.0
+    if required_margin <= 0 or free_margin <= 0:
+        return volume
+    budget = utilization * free_margin
+    if required_margin <= budget:
+        return volume
+    scaled = volume * budget / required_margin
+    if volume_step > 0:
+        scaled = int(scaled / volume_step) * volume_step
+    scaled = round(scaled, 8)
+    if scaled < max(volume_min, 0.0) or scaled <= 0:
+        return 0.0
+    return min(scaled, volume)
+
+
+def validate_min_stop_distance(
+    *,
+    fill_price: float,
+    stop_loss: float,
+    take_profit: float,
+    min_distance: float,
+) -> None:
+    """Reject orders whose SL/TP sit inside the broker's minimum stop distance.
+
+    MT5 ``symbol_info.trade_stops_level`` (in points) defines how close stops
+    may sit to the current price; violating it returns ``Invalid stops``.
+    """
+    if min_distance <= 0:
+        return
+    if abs(fill_price - stop_loss) < min_distance:
+        raise StaleStopsError(
+            f"SL {stop_loss} is {abs(fill_price - stop_loss):.6g} from price {fill_price} "
+            f"< broker min stop distance {min_distance:.6g}"
+        )
+    if abs(take_profit - fill_price) < min_distance:
+        raise StaleStopsError(
+            f"TP {take_profit} is {abs(take_profit - fill_price):.6g} from price {fill_price} "
+            f"< broker min stop distance {min_distance:.6g}"
+        )
+
+
+def validate_fill_vs_signal_entry(
+    *,
+    fill_price: float,
+    signal_entry: float,
+    stop_loss: float,
+    max_slippage_fraction: float = 0.5,
+) -> None:
+    """Reject fills that slipped too far from the signal's sizing basis.
+
+    Volume is sized on ``signal_entry``→``stop_loss`` distance; a fill that
+    moved a large fraction of that distance silently inflates realized risk
+    beyond the 1% cap, so refuse it (fresh signal will re-price next bar).
+    """
+    if signal_entry <= 0 or fill_price <= 0:
+        return
+    sl_distance = abs(signal_entry - stop_loss)
+    if sl_distance <= 0:
+        return
+    slippage = abs(fill_price - signal_entry)
+    if slippage > max_slippage_fraction * sl_distance:
+        raise StaleStopsError(
+            f"fill {fill_price} slipped {slippage:.6g} from signal entry {signal_entry} "
+            f"(> {max_slippage_fraction:.0%} of SL distance {sl_distance:.6g})"
+        )
+
+
+def validate_stops_vs_fill_price(
+    *,
+    is_buy: bool,
+    fill_price: float,
+    stop_loss: float,
+    take_profit: float,
+) -> None:
+    """Require SL/TP on the correct side of the live fill price.
+
+    Strategy builds stops from bar close; ``order_send`` uses ask/bid. If price
+    gaps through the stop before send, MT5 returns ``Invalid stops``. Reject
+    here instead of tightening risk or flipping geometry.
+    """
+    if fill_price <= 0 or stop_loss <= 0 or take_profit <= 0:
+        raise StaleStopsError(
+            f"non-positive stop levels fill={fill_price} sl={stop_loss} tp={take_profit}"
+        )
+    if is_buy:
+        if not (stop_loss < fill_price < take_profit):
+            raise StaleStopsError(
+                f"BUY requires sl < price < tp; got sl={stop_loss} price={fill_price} tp={take_profit}"
+            )
+    else:
+        if not (take_profit < fill_price < stop_loss):
+            raise StaleStopsError(
+                f"SELL requires tp < price < sl; got tp={take_profit} price={fill_price} sl={stop_loss}"
+            )
+
 
 def spread_points_to_pips(spread_points: float, point: float, pip_size: float) -> float:
     """Convert MT5 ``symbol_info.spread`` (points) to pips using broker point size."""

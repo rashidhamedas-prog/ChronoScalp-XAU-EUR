@@ -1,11 +1,15 @@
-# ChronoScalp API launcher — intended to run as SYSTEM via Scheduled Task.
+# ChronoScalp API launcher — single process tree (venv may spawn base python).
 $ErrorActionPreference = 'Continue'
-Set-Location C:\ChronoScalp\ChronoScalp-XAU-EUR
-$py = Join-Path (Get-Location) '.venv\Scripts\python.exe'
-$env:PYTHONPATH = (Resolve-Path '.\src').Path
+$Root = 'C:\ChronoScalp\ChronoScalp-XAU-EUR'
+Set-Location $Root
+$Py = Join-Path $Root '.venv\Scripts\python.exe'
+if (-not (Test-Path $Py)) {
+  Write-Output 'API_NO_VENV'
+  exit 1
+}
+$env:PYTHONPATH = Join-Path $Root 'src'
 
-# Load token from .env if present
-$envFile = Join-Path (Get-Location) '.env'
+$envFile = Join-Path $Root '.env'
 if (Test-Path $envFile) {
   Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*CHRONOSCALP_API_TOKEN\s*=\s*(.+)\s*$') {
@@ -13,7 +17,9 @@ if (Test-Path $envFile) {
     }
   }
 }
-if (-not $env:CHRONOSCALP_API_TOKEN) { $env:CHRONOSCALP_API_TOKEN = 'Hamed95240' }
+if (-not $env:CHRONOSCALP_API_TOKEN) {
+  Write-Output 'API_TOKEN_MISSING'
+}
 
 function Test-ApiUp {
   try {
@@ -22,20 +28,35 @@ function Test-ApiUp {
   } catch { return $false }
 }
 
+function Get-ApiRoots {
+  $all = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and ($_.CommandLine -match 'run_api\.py')
+  })
+  $ids = @{}
+  foreach ($p in $all) { $ids[$p.ProcessId] = $p }
+  $roots = @()
+  foreach ($p in $all) {
+    if ($ids.ContainsKey($p.ParentProcessId)) { continue }
+    $roots += $p
+  }
+  return $roots
+}
+
 if (Test-ApiUp) {
   Write-Output 'API_ALREADY_UP'
   exit 0
 }
 
-Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -and ($_.CommandLine -match 'run_api\.py') } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+$roots = @(Get-ApiRoots)
+foreach ($p in $roots) {
+  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 1
 
 New-Item -ItemType Directory -Path 'logs' -Force | Out-Null
-Start-Process -FilePath $py `
+Start-Process -FilePath $Py `
   -ArgumentList @('scripts\run_api.py','--host','0.0.0.0','--port','8510') `
-  -WorkingDirectory (Get-Location) `
+  -WorkingDirectory $Root `
   -WindowStyle Hidden
 
 Start-Sleep -Seconds 5

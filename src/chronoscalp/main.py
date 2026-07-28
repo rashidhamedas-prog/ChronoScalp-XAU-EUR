@@ -11,6 +11,7 @@ Deployment targets:
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ import pandas as pd
 from chronoscalp.config import Settings, get_settings
 from chronoscalp.data.spread_sampler import SpreadSampler
 from chronoscalp.execution.mt5_broker import MT5Broker
+from chronoscalp.execution.mt5_utils import StaleStopsError
 from chronoscalp.execution.oanda_broker import OANDABroker
 from chronoscalp.execution.position_logic import (
     apply_breakeven_or_trailing,
@@ -48,13 +50,18 @@ from chronoscalp.orchestration.bootstrap import (
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.state_store import TradingStateStore
-from chronoscalp.orchestration.trade_journal import TradeJournal, journal_path_for
+from chronoscalp.orchestration.trade_journal import (
+    TradeJournal,
+    journal_path_for,
+    load_daily_reset_marker,
+    sum_closed_pnl_today,
+)
 from chronoscalp.risk.institutional_guards import (
     DailyDrawdownGuard,
     SpreadMovingAverageGuard,
     ThreeStrikesGuard,
     correlation_blocks,
-    volatility_allows,
+    volatility_decision,
 )
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
@@ -160,6 +167,19 @@ class TradingBot:
 
         self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
         self.trade_journal.load()
+
+        # Re-seed today's realized P&L so restarts can't bypass the daily stop.
+        # An explicit operator marker (scripts/reset_daily_tracker.py) excludes
+        # trades closed before the reset.
+        reset_marker = load_daily_reset_marker(self.state_dir, mode)
+        today_pnl = sum_closed_pnl_today(self.trade_journal.closed_trades, since=reset_marker)
+        if today_pnl:
+            self.risk_manager.daily_tracker.record_trade_pnl(today_pnl)
+            logger.info(
+                "Daily tracker seeded from journal: realized_today={:+.2f} (reset_marker={})",
+                today_pnl,
+                reset_marker.isoformat() if reset_marker else "none",
+            )
 
         resilience_cfg = settings.resilience
         self.kill_switch = KillSwitch(
@@ -273,10 +293,18 @@ class TradingBot:
         else:
             managed = self.broker.get_open_positions()
 
+        managed_tickets = {p.ticket for p in managed}
+        now = datetime.now(tz=UTC)
+        for symbol, ticket in list(previous.items()):
+            if ticket not in managed_tickets:
+                # SL/TP/manual close — record PnL before state/journal ghost-drop.
+                self._on_position_closed_externally(symbol, ticket, now)
+
         broker_map = {p.symbol: p.ticket for p in managed}
         self.state_store.reconcile_open_tickets(broker_map)
         self.open_tickets = dict(self.state_store.state.open_tickets)
-        self.trade_journal.sync_open_from_broker(managed)
+        self.trade_journal.sync_open_from_broker(managed, now=now)
+        self._write_broker_positions_snapshot()
 
         if alert_on_change and previous != self.open_tickets:
             self.alerts.notify(
@@ -284,6 +312,58 @@ class TradingBot:
                 f"before={previous} after={self.open_tickets}",
                 AlertLevel.WARNING,
             )
+
+    def _write_broker_positions_snapshot(self) -> None:
+        """Persist live account positions for Telegram/dashboard (all magics)."""
+        path = self.state_dir / f"broker_positions_{self.mode}.json"
+        rows: list[dict] = []
+        account: dict = {}
+        try:
+            if isinstance(self.broker, MT5Broker):
+                rows = self.broker.snapshot_account_positions()
+                account = self.broker.snapshot_account_summary()
+            else:
+                for p in self.broker.get_open_positions():
+                    direction = (
+                        p.direction.value if hasattr(p.direction, "value") else str(p.direction)
+                    )
+                    rows.append(
+                        {
+                            "ticket": int(p.ticket),
+                            "symbol": str(p.symbol),
+                            "direction": direction,
+                            "volume": float(p.volume),
+                            "entry_price": float(p.entry_price),
+                            "stop_loss": float(p.stop_loss),
+                            "take_profit": float(p.take_profit),
+                            "profit": 0.0,
+                            "magic": 0,
+                            "comment": "",
+                            "open_time": p.open_time.isoformat() if p.open_time else "",
+                        }
+                    )
+                try:
+                    bal = float(self.broker.get_balance())
+                    account = {
+                        "equity": bal,
+                        "balance": bal,
+                        "margin": 0.0,
+                        "profit": 0.0,
+                        "login": 0,
+                        "server": "",
+                    }
+                except Exception:  # noqa: BLE001
+                    account = {}
+            payload = {
+                "mode": self.mode,
+                "updated_at": datetime.now(tz=UTC).isoformat(),
+                "account": account,
+                "positions": rows,
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed writing broker positions snapshot to {}", path)
 
     def _maybe_reconcile(self, now: datetime) -> None:
         if self._reconcile_interval <= 0:
@@ -310,7 +390,9 @@ class TradingBot:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(self._skip_counts.items()))
             logger.info("Entry skip heartbeat ({}s): {}", self._skip_heartbeat_seconds, summary)
         else:
-            logger.info("Entry skip heartbeat ({}s): no skips recorded", self._skip_heartbeat_seconds)
+            logger.info(
+                "Entry skip heartbeat ({}s): no skips recorded", self._skip_heartbeat_seconds
+            )
         self._skip_counts.clear()
         self._last_skip_log_at = now
 
@@ -383,9 +465,7 @@ class TradingBot:
         equity_now = self.broker.get_balance()
         unrealized = self._estimate_unrealized_pnl()
         realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
-        daily_dd_hit = self.daily_dd_guard.check(
-            equity_now, realized, unrealized, at=now
-        )
+        daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
         daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
             at=now
         )
@@ -457,16 +537,47 @@ class TradingBot:
                     continue
 
                 if bool(self.vol_cfg.get("enabled", True)):
-                    last = trigger_df.iloc[-1]
-                    atr_v = float(last.get("atr", 0) or 0)
-                    close_v = float(last.get("close", 0) or 0)
-                    if not volatility_allows(
+                    # Regime check on M5 (configurable), not S15/M1 trigger ATR —
+                    # ultra-scalp trigger bars have tiny ATR/close and would
+                    # permanently fail a min ratio calibrated for higher TFs.
+                    vol_tf_name = str(self.vol_cfg.get("timeframe", "M5"))
+                    try:
+                        vol_tf = Timeframe(vol_tf_name)
+                    except ValueError:
+                        vol_tf = Timeframe.M5
+                    vol_df = data_by_tf.get(vol_tf)
+                    if vol_df is None or vol_df.empty:
+                        vol_df = data_by_tf.get(Timeframe.M5)
+                    if vol_df is None or vol_df.empty:
+                        vol_df = trigger_df
+                    last = vol_df.iloc[-1]
+                    atr_raw = last.get("atr", 0)
+                    close_raw = last.get("close", 0)
+                    try:
+                        atr_v = float(atr_raw) if atr_raw is not None else 0.0
+                    except (TypeError, ValueError):
+                        atr_v = 0.0
+                    try:
+                        close_v = float(close_raw) if close_raw is not None else 0.0
+                    except (TypeError, ValueError):
+                        close_v = 0.0
+                    allowed, vol_reason, ratio = volatility_decision(
                         atr_v,
                         close_v,
-                        min_ratio=float(self.vol_cfg.get("min_atr_close_ratio", 0.0005)),
-                        max_ratio=float(self.vol_cfg.get("max_atr_close_ratio", 0.02)),
-                    ):
-                        self._note_skip(f"{symbol}:volatility_guard")
+                        min_ratio=float(self.vol_cfg.get("min_atr_close_ratio", 0.00005)),
+                        max_ratio=float(self.vol_cfg.get("max_atr_close_ratio", 0.05)),
+                    )
+                    if not allowed:
+                        self._note_skip(f"{symbol}:volatility_{vol_reason}")
+                        logger.debug(
+                            "{} volatility_guard {}: atr={:.6g} close={:.6g} ratio={} tf={}",
+                            symbol,
+                            vol_reason,
+                            atr_v,
+                            close_v,
+                            f"{ratio:.6g}" if ratio is not None else "n/a",
+                            vol_tf.value,
+                        )
                         continue
 
                 if bool(self.corr_cfg.get("enabled", True)) and self.open_tickets:
@@ -560,6 +671,11 @@ class TradingBot:
                     ),
                     AlertLevel.INFO,
                 )
+
+            except StaleStopsError as exc:
+                # Price moved through SL/TP before fill — skip, do not trip circuit breaker.
+                self._note_skip(f"{symbol}:stale_stops")
+                logger.warning("Skipping {} — {}", symbol, exc)
 
             except Exception:  # noqa: BLE001 - one symbol's failure must not kill the loop
                 tick_had_failure = True
@@ -734,11 +850,8 @@ class TradingBot:
                 meta["breakeven_moved"] = True
                 position.partial_taken = True
                 position.breakeven_moved = True
-                if (
-                    action.partial.new_stop_loss is not None
-                    and self.broker.modify_sl_tp(
-                        ticket, action.partial.new_stop_loss, position.take_profit
-                    )
+                if action.partial.new_stop_loss is not None and self.broker.modify_sl_tp(
+                    ticket, action.partial.new_stop_loss, position.take_profit
                 ):
                     position.stop_loss = action.partial.new_stop_loss
                 logger.info(

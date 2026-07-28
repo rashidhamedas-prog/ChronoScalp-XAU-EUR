@@ -6,7 +6,13 @@ from unittest.mock import patch
 
 import pytest
 
-from chronoscalp.execution.mt5_utils import resolve_order_filling_mode, spread_points_to_pips
+from chronoscalp.execution.mt5_utils import (
+    StaleStopsError,
+    resolve_order_filling_mode,
+    sanitize_mt5_comment,
+    spread_points_to_pips,
+    validate_stops_vs_fill_price,
+)
 from chronoscalp.execution.position_logic import check_sl_tp_hit, exit_price_for_hit
 from chronoscalp.utils.types import Position, SignalType
 
@@ -24,6 +30,105 @@ def test_resolve_order_filling_mode_without_symbol_filling_attrs():
         patch.dict("sys.modules", {"MetaTrader5": mt5_mod}),
     ):
         assert resolve_order_filling_mode("BTCUSD") == 1
+
+
+def test_sanitize_mt5_comment_ascii_and_length():
+    assert sanitize_mt5_comment("chronoscalp:sweep+MSS/rvol") == "chronoscalp_sweep_MSS_rvol"[:31]
+    assert len(sanitize_mt5_comment("x" * 100)) == 31
+    assert sanitize_mt5_comment("سیگنال تست") == "ChronoScalp"
+    assert sanitize_mt5_comment("") == "ChronoScalp"
+
+
+def test_validate_stops_vs_fill_price_buy_ok():
+    validate_stops_vs_fill_price(
+        is_buy=True, fill_price=1965.0, stop_loss=1960.0, take_profit=1972.0
+    )
+
+
+def test_validate_stops_vs_fill_price_buy_stale_sl_above():
+    with pytest.raises(StaleStopsError):
+        validate_stops_vs_fill_price(
+            is_buy=True, fill_price=1964.57, stop_loss=1967.06, take_profit=1968.34
+        )
+
+
+def test_validate_stops_vs_fill_price_sell_ok():
+    validate_stops_vs_fill_price(
+        is_buy=False, fill_price=1965.0, stop_loss=1970.0, take_profit=1958.0
+    )
+
+
+def test_scale_volume_to_free_margin():
+    """35 lots USDJPY on a $9k account must shrink (or skip), not bounce No money."""
+    from chronoscalp.execution.mt5_utils import scale_volume_to_free_margin
+
+    # Requires 10x the free margin → shrink to ~9% of requested, floored to step.
+    scaled = scale_volume_to_free_margin(
+        volume=35.63,
+        required_margin=89_075.0,
+        free_margin=9_000.0,
+        volume_step=0.01,
+        volume_min=0.01,
+    )
+    assert 0 < scaled < 35.63
+    assert scaled == pytest.approx(3.23, abs=0.02)
+
+    # Fits already → unchanged.
+    assert (
+        scale_volume_to_free_margin(
+            volume=0.5,
+            required_margin=500.0,
+            free_margin=9_000.0,
+            volume_step=0.01,
+            volume_min=0.01,
+        )
+        == 0.5
+    )
+
+    # Even min volume does not fit → 0 (skip).
+    assert (
+        scale_volume_to_free_margin(
+            volume=0.02,
+            required_margin=50_000.0,
+            free_margin=100.0,
+            volume_step=0.01,
+            volume_min=0.01,
+        )
+        == 0.0
+    )
+
+
+def test_validate_min_stop_distance_rejects_sub_pip_stops():
+    """EURJPY 0.8-pip SL vs broker stops_level — MT5 would return Invalid stops."""
+    from chronoscalp.execution.mt5_utils import validate_min_stop_distance
+
+    with pytest.raises(StaleStopsError):
+        validate_min_stop_distance(
+            fill_price=186.19,
+            stop_loss=186.1997,
+            take_profit=186.1843,
+            min_distance=0.03,  # 3 pips × point 0.001... broker-configured
+        )
+    # Wide stops pass.
+    validate_min_stop_distance(
+        fill_price=186.19, stop_loss=186.40, take_profit=185.90, min_distance=0.03
+    )
+    # min_distance 0 (broker reports none) never rejects.
+    validate_min_stop_distance(
+        fill_price=186.19, stop_loss=186.1997, take_profit=186.1843, min_distance=0.0
+    )
+
+
+def test_validate_fill_vs_signal_entry_rejects_large_slippage():
+    """BTC fill 12.7 below a 25-point-SL signal = +50% realized risk — reject."""
+    from chronoscalp.execution.mt5_utils import validate_fill_vs_signal_entry
+
+    with pytest.raises(StaleStopsError):
+        validate_fill_vs_signal_entry(
+            fill_price=64_660.0, signal_entry=64_672.7, stop_loss=64_697.7
+        )
+    # Small slippage passes.
+    validate_fill_vs_signal_entry(fill_price=64_670.0, signal_entry=64_672.7, stop_loss=64_697.7)
 
 
 def test_resolve_order_filling_mode_fok_bit():

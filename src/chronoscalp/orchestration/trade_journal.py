@@ -373,15 +373,40 @@ class TradeJournal:
         self.save()
         return record
 
-    def sync_open_from_broker(self, positions: list[Position]) -> None:
-        """Reconcile journal opens with broker: adopt missing, drop ghosts."""
+    def sync_open_from_broker(
+        self,
+        positions: list[Position],
+        *,
+        ghost_grace_seconds: float = 90.0,
+        now: datetime | None = None,
+    ) -> None:
+        """Reconcile journal opens with broker: adopt missing, drop stale ghosts.
+
+        Fresh opens are kept for ``ghost_grace_seconds`` even if a transient
+        ``positions_get`` miss would otherwise wipe them (common right after
+        ``order_send`` or during MT5 reconnect hiccups).
+        """
         changed = False
         broker_tickets = {position.ticket for position in positions}
+        as_of = now or datetime.now(tz=UTC)
         for ticket in list(self.open_trades):
-            if ticket not in broker_tickets:
-                self.open_trades.pop(ticket, None)
-                changed = True
-                logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
+            if ticket in broker_tickets:
+                continue
+            open_rec = self.open_trades.get(ticket)
+            opened_at = _parse_iso(open_rec.open_time if open_rec else "")
+            if opened_at is not None and ghost_grace_seconds > 0:
+                age = (as_of - opened_at).total_seconds()
+                if age < ghost_grace_seconds:
+                    logger.debug(
+                        "Journal: keeping recent open ticket={} age={:.1f}s < grace={:.0f}s",
+                        ticket,
+                        age,
+                        ghost_grace_seconds,
+                    )
+                    continue
+            self.open_trades.pop(ticket, None)
+            changed = True
+            logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
         for position in positions:
             if position.ticket not in self.open_trades:
                 self.open_trades[position.ticket] = OpenTradeRecord.from_position(
@@ -402,6 +427,57 @@ class TradeJournal:
             closed_trades=list(self.closed_trades),
             stats=stats,
         )
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def sum_closed_pnl_today(
+    closed_trades: list[ClosedTradeRecord],
+    now: datetime | None = None,
+    since: datetime | None = None,
+) -> float:
+    """Realized P&L of trades closed on the current UTC date.
+
+    Used to re-seed the daily loss tracker after a restart so the 3% daily
+    stop cannot be bypassed by bouncing the process. ``since`` (an explicit
+    operator reset marker) excludes trades closed at or before that moment —
+    a conscious demo-account reset, not an accidental loophole.
+    """
+    ref = (now or datetime.now(tz=UTC)).astimezone(UTC)
+    today = ref.date().isoformat()
+    total = 0.0
+    for t in closed_trades:
+        close_time = t.close_time or ""
+        if close_time[:10] != today:
+            continue
+        if since is not None:
+            closed_at = _parse_iso(close_time)
+            if closed_at is not None and closed_at <= since:
+                continue
+        total += t.pnl
+    return float(total)
+
+
+def load_daily_reset_marker(state_dir: str | Path, mode: str) -> datetime | None:
+    """Operator's explicit daily-tracker reset timestamp (or None)."""
+    path = Path(state_dir) / f"daily_reset_{mode}.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        return _parse_iso(str(payload.get("reset_at") or ""))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def journal_path_for(state_dir: str | Path, mode: str) -> Path:

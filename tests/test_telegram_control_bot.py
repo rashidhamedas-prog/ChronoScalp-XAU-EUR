@@ -218,7 +218,11 @@ def test_risk_preset_button(bot: TelegramControlBot, monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
     bot.handle(42, "ریسک ۱٫۵٪")
-    assert "1.0%" in bot.send.call_args.args[1] or "۱" in bot.send.call_args.args[1] or "ریسک" in bot.send.call_args.args[1]
+    assert (
+        "1.0%" in bot.send.call_args.args[1]
+        or "۱" in bot.send.call_args.args[1]
+        or "ریسک" in bot.send.call_args.args[1]
+    )
 
 
 def test_symbols_command(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,3 +233,64 @@ def test_symbols_command(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
     bot.handle(42, "/symbols XAUUSD,EURUSD")
     assert "XAUUSD" in bot.send.call_args.args[1]
+
+
+def test_open_positions_from_fresh_broker_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:
+    import json
+    from datetime import UTC, datetime
+
+    state = Path(bot.settings.execution["state_dir"])
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "trade_journal_live.json").write_text(
+        json.dumps({"mode": "live", "open_trades": [], "closed_trades": []}),
+        encoding="utf-8",
+    )
+    payload = {
+        "mode": "live",
+        "updated_at": datetime.now(tz=UTC).isoformat(),
+        "positions": [
+            {
+                "ticket": 111,
+                "symbol": "ETHUSD",
+                "direction": "buy",
+                "volume": 1.5,
+                "entry_price": 2000.0,
+                "profit": -1.25,
+            }
+        ],
+    }
+    (state / "broker_positions_live.json").write_text(json.dumps(payload), encoding="utf-8")
+    bot.handle(42, "پوزیشن‌ها")
+    text = bot.send.call_args.args[1]
+    assert "زنده از بروکر" in text
+    assert "ETHUSD" in text
+    assert "#111" in text
+
+
+def test_open_positions_empty_live_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:
+    import json
+    from datetime import UTC, datetime
+
+    state = Path(bot.settings.execution["state_dir"])
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "trade_journal_live.json").write_text(
+        json.dumps({"mode": "live", "open_trades": [], "closed_trades": []}),
+        encoding="utf-8",
+    )
+    payload = {
+        "mode": "live",
+        "updated_at": datetime.now(tz=UTC).isoformat(),
+        "account": {
+            "login": 91323064,
+            "server": "LiteFinance-MT5-Demo",
+            "equity": 9426.47,
+            "margin": 0.0,
+        },
+        "positions": [],
+    }
+    (state / "broker_positions_live.json").write_text(json.dumps(payload), encoding="utf-8")
+    bot.handle(42, "پوزیشن‌ها")
+    text = bot.send.call_args.args[1]
+    assert "پوزیشن بازی روی بروکر نیست" in text
+    assert "91323064" in text
+    assert "equity=9426.47" in text

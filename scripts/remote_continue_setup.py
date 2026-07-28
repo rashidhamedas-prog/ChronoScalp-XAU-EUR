@@ -89,7 +89,11 @@ def main() -> None:
         check=False,
     )
 
-    run(c, f"id {DEPLOY_USER} >/dev/null 2>&1 || adduser --disabled-password --gecos '' {DEPLOY_USER}", check=False)
+    run(
+        c,
+        f"id {DEPLOY_USER} >/dev/null 2>&1 || adduser --disabled-password --gecos '' {DEPLOY_USER}",
+        check=False,
+    )
     run(c, f"usermod -aG sudo,docker {DEPLOY_USER}", check=False)
     run(
         c,
@@ -182,7 +186,10 @@ def main() -> None:
             continue
         remote = f"{INSTALL_DIR}/{rel}"
         # ensure remote dir
-        run(c, f"mkdir -p $(dirname {remote}) && chown {DEPLOY_USER}:{DEPLOY_USER} $(dirname {remote})")
+        run(
+            c,
+            f"mkdir -p $(dirname {remote}) && chown {DEPLOY_USER}:{DEPLOY_USER} $(dirname {remote})",
+        )
         sftp.put(str(local), remote)
         run(c, f"chown {DEPLOY_USER}:{DEPLOY_USER} {remote}")
         print("uploaded", rel)
@@ -201,7 +208,7 @@ def main() -> None:
         "  telegram_enabled: true\n"
         "licensing:\n"
         "  require_license: false\n"
-        "EOF\"",
+        'EOF"',
     )
 
     print("SETUP_DONE")

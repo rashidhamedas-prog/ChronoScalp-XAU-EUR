@@ -9,10 +9,16 @@ from datetime import UTC, datetime
 from chronoscalp.data.mt5_connector import MT5Connector, _require_windows
 from chronoscalp.execution.mt5_utils import (
     CHRONOSCALP_MAGIC,
+    StaleStopsError,
     fetch_closed_position_pnl,
     find_managed_position_ticket,
     resolve_order_filling_mode,
+    sanitize_mt5_comment,
+    scale_volume_to_free_margin,
     spread_points_to_pips,
+    validate_fill_vs_signal_entry,
+    validate_min_stop_distance,
+    validate_stops_vs_fill_price,
 )
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
@@ -57,8 +63,17 @@ class MT5Broker:
     def get_open_positions(self, symbol: str | None = None) -> list[Position]:
         return self.get_managed_positions(symbol=symbol)
 
+    def get_account_positions(self, symbol: str | None = None) -> list[Position]:
+        """All open account positions (no magic filter) — for operator display."""
+        return self._positions_from_mt5(symbol=symbol, magic=None)
+
     def get_managed_positions(self, symbol: str | None = None) -> list[Position]:
         """Open positions placed by this bot (filtered by magic number)."""
+        return self._positions_from_mt5(symbol=symbol, magic=self._magic)
+
+    def _positions_from_mt5(
+        self, *, symbol: str | None = None, magic: int | None
+    ) -> list[Position]:
         _require_windows()
         import MetaTrader5 as mt5
 
@@ -66,9 +81,9 @@ class MT5Broker:
         if raw_positions is None:
             return []
 
-        positions = []
+        positions: list[Position] = []
         for p in raw_positions:
-            if p.magic != self._magic:
+            if magic is not None and int(getattr(p, "magic", 0) or 0) != magic:
                 continue
             positions.append(
                 Position(
@@ -85,6 +100,52 @@ class MT5Broker:
                 )
             )
         return positions
+
+    def snapshot_account_summary(self) -> dict:
+        """Account login/equity/margin for operator display (Telegram empty-state)."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        info = mt5.account_info()
+        if info is None:
+            return {}
+        return {
+            "login": int(info.login),
+            "server": str(getattr(info, "server", "") or ""),
+            "balance": float(info.balance),
+            "equity": float(info.equity),
+            "margin": float(info.margin),
+            "profit": float(getattr(info, "profit", 0.0) or 0.0),
+        }
+
+    def snapshot_account_positions(self, symbol: str | None = None) -> list[dict]:
+        """Rich open-position rows for Telegram/dashboard (includes profit/magic)."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        raw_positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        if raw_positions is None:
+            return []
+
+        rows: list[dict] = []
+        for p in raw_positions:
+            direction = "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell"
+            rows.append(
+                {
+                    "ticket": int(p.ticket),
+                    "symbol": str(p.symbol),
+                    "direction": direction,
+                    "volume": float(p.volume),
+                    "entry_price": float(p.price_open),
+                    "stop_loss": float(p.sl or 0.0),
+                    "take_profit": float(p.tp or 0.0),
+                    "profit": float(getattr(p, "profit", 0.0) or 0.0),
+                    "magic": int(getattr(p, "magic", 0) or 0),
+                    "comment": str(getattr(p, "comment", "") or ""),
+                    "open_time": datetime.fromtimestamp(p.time, tz=UTC).isoformat(),
+                }
+            )
+        return rows
 
     def get_current_spread_pips(self, symbol: str) -> float:
         spread_points = self._connector.current_spread_points(symbol)
@@ -117,6 +178,56 @@ class MT5Broker:
         if tick is None:
             raise RuntimeError(f"No tick data for {signal.symbol}: {mt5.last_error()}")
         price = tick.ask if signal.signal_type == SignalType.BUY else tick.bid
+        validate_fill_vs_signal_entry(
+            fill_price=float(price),
+            signal_entry=float(signal.entry_price),
+            stop_loss=float(signal.stop_loss),
+        )
+        validate_stops_vs_fill_price(
+            is_buy=signal.signal_type == SignalType.BUY,
+            fill_price=float(price),
+            stop_loss=float(signal.stop_loss),
+            take_profit=float(signal.take_profit),
+        )
+        info = mt5.symbol_info(signal.symbol)
+        if info is not None:
+            stops_points = float(getattr(info, "trade_stops_level", 0) or 0)
+            point = float(getattr(info, "point", 0) or 0)
+            validate_min_stop_distance(
+                fill_price=float(price),
+                stop_loss=float(signal.stop_loss),
+                take_profit=float(signal.take_profit),
+                min_distance=stops_points * point,
+            )
+
+        # Fit volume inside free margin instead of letting MT5 bounce "No money".
+        account = mt5.account_info()
+        required = None
+        try:
+            required = mt5.order_calc_margin(order_type, signal.symbol, float(volume), float(price))
+        except Exception:  # noqa: BLE001 - older builds may lack order_calc_margin
+            required = None
+        if account is not None and required is not None and required > 0:
+            adjusted = scale_volume_to_free_margin(
+                volume=float(volume),
+                required_margin=float(required),
+                free_margin=float(getattr(account, "margin_free", 0.0) or 0.0),
+                volume_step=float(getattr(info, "volume_step", 0.01) or 0.01) if info else 0.01,
+                volume_min=float(getattr(info, "volume_min", 0.01) or 0.01) if info else 0.01,
+            )
+            if adjusted <= 0:
+                raise StaleStopsError(
+                    f"{signal.symbol}: even minimum volume does not fit free margin "
+                    f"(required={required:.2f} free={getattr(account, 'margin_free', 0.0):.2f})"
+                )
+            if adjusted < float(volume):
+                logger.warning(
+                    "Volume reduced to fit margin: {} {:.2f} -> {:.2f} lots",
+                    signal.symbol,
+                    float(volume),
+                    adjusted,
+                )
+                volume = adjusted
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -128,13 +239,17 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": f"chronoscalp:{signal.reason[:40]}",
+            "comment": sanitize_mt5_comment("ChronoScalp"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            raise RuntimeError(f"MT5 order_send failed: {result}")
+            last_err = mt5.last_error()
+            raise RuntimeError(
+                f"MT5 order_send failed: result={result} last_error={last_err} "
+                f"symbol={signal.symbol} volume={volume} type_filling={request.get('type_filling')}"
+            )
 
         ticket = find_managed_position_ticket(signal.symbol, magic=self._magic)
         if ticket is None:
@@ -211,7 +326,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:close",
+            "comment": sanitize_mt5_comment("CS_close"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }
@@ -258,7 +373,7 @@ class MT5Broker:
             "price": close_price,
             "deviation": 10,
             "magic": self._magic,
-            "comment": "chronoscalp:partial",
+            "comment": sanitize_mt5_comment("CS_partial"),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(position.symbol),
         }
