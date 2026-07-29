@@ -223,6 +223,20 @@ def _write_overrides(overrides_path: Path, payload: dict) -> None:
     )
 
 
+def _symbol_case_catalog() -> dict[str, str]:
+    """Map UPPERCASE symbol → exact key from ``config/symbols.yaml`` when available."""
+    path = Path("config/symbols.yaml")
+    if not path.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(name).upper(): str(name) for name in raw}
+
+
 def apply_active_symbols(
     symbols: list[str],
     *,
@@ -235,13 +249,18 @@ def apply_active_symbols(
         if allowed is not None
         else None
     )
+    # Prefer contract-spec casing (XAUUSD_o) so LiteFinance names are never saved as XAUUSD_O.
+    catalog = _symbol_case_catalog()
     cleaned = [str(s).strip() for s in symbols if str(s).strip()]
     # Preserve order, drop dupes
     seen: set[str] = set()
     ordered: list[str] = []
     for s in cleaned:
         key = s.upper()
-        canonical = allowed_lookup.get(key, s.upper()) if allowed_lookup is not None else s.upper()
+        if allowed_lookup is not None:
+            canonical = allowed_lookup.get(key, catalog.get(key, s))
+        else:
+            canonical = catalog.get(key, s)
         if key not in seen:
             seen.add(key)
             ordered.append(canonical)

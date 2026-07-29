@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from chronoscalp.saas.broker_wizard import (
@@ -79,6 +80,26 @@ def test_apply_active_symbols_preserves_broker_symbol_case(tmp_path: Path):
     assert saved == ["XAUUSD_o", "EURUSD_o"]
     data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
     assert data["symbols"] == ["XAUUSD_o", "EURUSD_o"]
+
+
+def test_apply_active_symbols_without_allowed_uses_symbols_yaml_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: bare uppercasing used to persist LiteFinance XAUUSD_O (untradeable)."""
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "symbols.yaml").write_text(
+        "XAUUSD_o: {}\nEURUSD_o: {}\nBTCUSD: {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    overrides = tmp_path / "runtime_overrides.yaml"
+    saved = apply_active_symbols(
+        ["XAUUSD_O", "eurusd_o", "BTCUSD"],
+        overrides_path=overrides,
+        allowed=None,
+    )
+    assert saved == ["XAUUSD_o", "EURUSD_o", "BTCUSD"]
 
 
 def test_user_config_roundtrip(tmp_path: Path):
