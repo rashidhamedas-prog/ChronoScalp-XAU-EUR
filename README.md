@@ -45,9 +45,10 @@ Pick your deployment target once (Windows VPS + MT5, **or** Linux VPS + OANDA) �
 ```
 ChronoScalp-XAU-EUR/
 ├── CLAUDE.md                 # Instructions for Claude Code sessions
+├── AGENTS.md                 # Shared guidance for coding agents
 ├── .cursor/rules/project.mdc # Instructions for Cursor
 ├── config/                   # settings.yaml, symbols.yaml
-├── docs/                     # architecture, roadmap, risk disclaimer
+├── docs/                     # architecture, roadmap, risk disclaimer, VPS ops
 ├── src/chronoscalp/
 │   ├── config.py             # typed settings loader
 │   ├── logging_setup.py
@@ -97,6 +98,7 @@ python scripts/run_live.py --mode live
 `--mode live` refuses to start unless `CHRONOSCALP_CONFIRM_LIVE=yes` is set in `.env` — a deliberate friction point so nobody flips to real money by accident.
 
 **راهنمای فارسی قدم‌به‌قدم:** [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md)  
+**عیب‌یابی VPS ویندوز:** [docs/VPS_TROUBLESHOOTING_FA.md](docs/VPS_TROUBLESHOOTING_FA.md)
 **فروش لایسنس + IB:** [docs/FOROOSH_FA.md](docs/FOROOSH_FA.md)  
 **VPS هلند (انگلیسی):** [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md)
 

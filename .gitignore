@@ -17,10 +17,21 @@ dist/
 !.env.example
 # Local secrets / filled samples (never commit)
 مهم/
+لاگین.txt
+*لاگین*
 _list_dirs.txt
 debug-*.log
 scripts/_deploy_*.py
 scripts/_vps_*.py
+# One-off VPS debug dumps (may embed operator tokens) — keep durable helpers tracked
+scripts/_vps_skip_audit*.ps1
+scripts/_vps_deploy_restart.ps1
+scripts/_vps_final_check.ps1
+scripts/_vps_fix_symbols.ps1
+# Operator scratch notes at repo root (canonical runbooks live under docs/)
+مشکلات سرور.txt
+*.local.ps1
+.chronoscalp_desktop.json
 
 # Market data / generated artifacts
 data/raw/

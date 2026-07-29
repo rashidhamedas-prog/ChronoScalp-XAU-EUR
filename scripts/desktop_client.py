@@ -17,10 +17,14 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-DEFAULT_SSH_HOST = "45.90.98.99"
-DEFAULT_SSH_USER = "Administrator"
-DEFAULT_SSH_KEY = os.path.join(os.path.expanduser("~"), ".ssh", "chronoscalp_vps")
-DEFAULT_TOKEN = "Hamed95240"
+DEFAULT_SSH_HOST = os.environ.get("CHRONOSCALP_SSH_HOST", "45.90.98.99")
+DEFAULT_SSH_USER = os.environ.get("CHRONOSCALP_SSH_USER", "Administrator")
+DEFAULT_SSH_KEY = os.environ.get(
+    "CHRONOSCALP_SSH_KEY",
+    os.path.join(os.path.expanduser("~"), ".ssh", "chronoscalp_vps"),
+)
+# Never hardcode tokens — fill via env, ~/.chronoscalp_desktop.json, or the UI.
+DEFAULT_TOKEN = os.environ.get("CHRONOSCALP_API_TOKEN", "")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".chronoscalp_desktop.json")
 
 

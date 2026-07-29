@@ -30,14 +30,17 @@ if (-not $hasFix) {
 
 Write-Host "HEAD=$(git rev-parse --short HEAD) $(git log -1 --oneline)" -ForegroundColor Green
 
-$token = "Hamed95240"
+$token = $env:CHRONOSCALP_API_TOKEN
 $envFile = Join-Path $root ".env"
-if (Test-Path $envFile) {
+if (-not $token -and (Test-Path $envFile)) {
     Get-Content $envFile | ForEach-Object {
         if ($_ -match '^\s*CHRONOSCALP_API_TOKEN\s*=\s*(.+)\s*$') {
             $token = $Matches[1].Trim()
         }
     }
+}
+if (-not $token) {
+    throw "CHRONOSCALP_API_TOKEN missing in env/.env — refuse to call Control API with a hardcoded secret."
 }
 $headers = @{ Authorization = "Bearer $token" }
 
