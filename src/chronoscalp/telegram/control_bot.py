@@ -24,7 +24,6 @@ from chronoscalp.logging_setup import logger
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.trade_journal import load_journal_snapshot
 from chronoscalp.saas.broker_wizard import (
-    KNOWN_STRATEGIES,
     apply_active_symbols,
     apply_broker_to_settings_yaml,
     apply_enabled_strategies,
@@ -54,6 +53,13 @@ from chronoscalp.telegram.keyboards import (
     MAIN_KEYBOARD,
     OANDA_ENV_KEYBOARD,
     SETTINGS_KEYBOARD,
+    STRATEGY_LABEL_TO_KEY,
+    STRATEGY_LABELS,
+    hours_keyboard,
+    parse_toggle_label,
+    risk_keyboard,
+    strategies_keyboard,
+    symbols_keyboard,
 )
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -231,11 +237,12 @@ class TelegramControlBot:
 
     def _cmd_settings(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
+        self._reload_settings()
         self.send(
             chat_id,
-            "تنظیمات — اتصال / کنترل / ساعات معامله\n"
+            "⚙️ تنظیمات — همه گزینه‌ها از منو (بدون تایپ).\n"
             f"ساعات فعلی: {self._trading_hours_label()}\n"
-            "دکمه‌های «سشن لندن/آمریکا» یا «۲۴ ساعته» را بزنید.",
+            "نماد · استراتژی · ساعات · ریسک · اتصال · تأیید Live",
             reply_markup=SETTINGS_KEYBOARD,
         )
 
@@ -247,10 +254,26 @@ class TelegramControlBot:
         self._pending.pop(chat_id, None)
         self.send(
             chat_id,
-            "تنظیمات کنترل (نماد / استراتژی / ساعات / ریسک)\n"
-            f"ساعات فعلی: {self._trading_hours_label()}\n"
-            "برای تغییر: «سشن لندن/آمریکا» یا «۲۴ ساعته»",
+            "تنظیمات کنترل — از دکمه‌ها انتخاب کنید (بدون تایپ):\n"
+            f"ساعات فعلی: {self._trading_hours_label()}",
             reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _cmd_hours_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            f"ساعات معامله را انتخاب کنید:\nفعلی: {self._trading_hours_label()}",
+            reply_markup=hours_keyboard(),
+        )
+
+    def _cmd_risk_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            "ریسک هر معامله را انتخاب کنید:\n"
+            "۰٫۵٪ / ۱٪ / ۱٫۵٪ — سقف امن پروژه ۱٪ است (۱٫۵٪ → ۱٪).",
+            reply_markup=risk_keyboard(),
         )
 
     def _cmd_whoami(self, chat_id: int, _text: str = "") -> None:
@@ -552,7 +575,7 @@ class TelegramControlBot:
             + f"trading_hours={hours}\n"
             + f"risk_effective={risk}%"
         )
-        self.send(chat_id, text, reply_markup=CONTROL_KEYBOARD)
+        self.send(chat_id, text, reply_markup=SETTINGS_KEYBOARD)
 
     def _save_user_broker(
         self,
@@ -754,66 +777,237 @@ class TelegramControlBot:
         data = pending["data"]
         self._finish_oanda(chat_id, data["token"], data["account"], "live")
 
-    # --- control: symbols / strategies / risk ---
+    # --- control: symbols / strategies / risk (menu-only pickers) ---
 
-    def _cmd_symbols_prompt(self, chat_id: int, _text: str = "") -> None:
-        catalog = list(self.settings.available_symbols) or list(self.settings.symbols)
-        current = ", ".join(self.settings.symbols) or "—"
-        avail = ", ".join(catalog) or "—"
-        self._pending[chat_id] = {"flow": "symbols", "step": "list", "data": {}}
-        self.send(
-            chat_id,
-            f"نمادهای فعال: {current}\nموجود: {avail}\n\n"
-            "لیست جدید را با ویرگول بفرستید:\nXAUUSD,EURUSD\nیا /cancel",
-            reply_markup=CONTROL_KEYBOARD,
+    def _symbol_catalog(self) -> list[str]:
+        return list(self.settings.available_symbols) or list(self.settings.symbols)
+
+    def _current_strategies(self) -> list[str]:
+        from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+
+        use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(self.settings.strategy)
+        out: list[str] = []
+        if use_smc:
+            out.append("smc_confluence")
+        if use_liq:
+            out.append("liquidity_volume")
+        if use_scalp:
+            out.append("ultra_scalp")
+        if use_news:
+            out.append("news_straddle")
+        return out
+
+    def _symbols_menu_state(self, chat_id: int) -> list[str]:
+        pending = self._pending.get(chat_id)
+        if pending and pending.get("flow") == "symbols_menu":
+            return list(pending.get("selected") or [])
+        return list(self.settings.symbols)
+
+    def _strategies_menu_state(self, chat_id: int) -> list[str]:
+        pending = self._pending.get(chat_id)
+        if pending and pending.get("flow") == "strategies_menu":
+            return list(pending.get("selected") or [])
+        return self._current_strategies()
+
+    def _send_symbols_menu(self, chat_id: int, *, note: str = "") -> None:
+        catalog = self._symbol_catalog()
+        selected = self._symbols_menu_state(chat_id)
+        self._pending[chat_id] = {
+            "flow": "symbols_menu",
+            "step": "pick",
+            "selected": selected,
+        }
+        active = ", ".join(selected) or "(هیچکدام)"
+        msg = (
+            "نمادها — روی هر نماد بزنید تا روشن/خاموش شود، بعد «ذخیره نمادها».\n"
+            f"انتخاب فعلی: {active}"
         )
+        if note:
+            msg = f"{note}\n\n{msg}"
+        self.send(chat_id, msg, reply_markup=symbols_keyboard(catalog, selected))
 
-    def _cmd_symbols(self, chat_id: int, text: str = "") -> None:
-        args = self._args(text)
-        raw = " ".join(args) if args else ""
-        if not raw:
-            self._cmd_symbols_prompt(chat_id)
-            return
-        self._apply_symbols(chat_id, raw)
+    def _send_strategies_menu(self, chat_id: int, *, note: str = "") -> None:
+        selected = self._strategies_menu_state(chat_id)
+        self._pending[chat_id] = {
+            "flow": "strategies_menu",
+            "step": "pick",
+            "selected": selected,
+        }
+        labels = [STRATEGY_LABELS.get(k, k) for k in selected]
+        active = ", ".join(labels) if labels else "(فقط MACD/trend)"
+        msg = (
+            "استراتژی‌ها — روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره استراتژی‌ها».\n"
+            f"SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبری\n"
+            f"انتخاب فعلی: {active}"
+        )
+        if note:
+            msg = f"{note}\n\n{msg}"
+        self.send(chat_id, msg, reply_markup=strategies_keyboard(selected))
 
-    def _apply_symbols(self, chat_id: int, raw: str) -> None:
-        parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
-        catalog = list(self.settings.available_symbols) or list(self.settings.symbols)
+    def _cmd_symbols_menu(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        self._send_symbols_menu(chat_id)
+
+    def _cmd_strategies_menu(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        self._send_strategies_menu(chat_id)
+
+    def _cmd_symbols_all(self, chat_id: int, _text: str = "") -> None:
+        catalog = self._symbol_catalog()
+        self._pending[chat_id] = {
+            "flow": "symbols_menu",
+            "step": "pick",
+            "selected": list(catalog),
+        }
+        self._send_symbols_menu(chat_id, note="همه نمادها انتخاب شدند.")
+
+    def _cmd_symbols_none(self, chat_id: int, _text: str = "") -> None:
+        # Keep at least empty draft — save will reject empty; user must pick one.
+        self._pending[chat_id] = {"flow": "symbols_menu", "step": "pick", "selected": []}
+        self._send_symbols_menu(chat_id, note="انتخاب پاک شد — حداقل یک نماد لازم است.")
+
+    def _cmd_symbols_save(self, chat_id: int, _text: str = "") -> None:
+        selected = self._symbols_menu_state(chat_id)
+        catalog = self._symbol_catalog()
         try:
-            saved = apply_active_symbols(parts, allowed=catalog or None)
+            saved = apply_active_symbols(selected, allowed=catalog or None)
         except ValueError as exc:
-            self.send(chat_id, f"❌ {exc}")
+            self._send_symbols_menu(chat_id, note=f"❌ {exc}")
             return
         self._reload_settings()
         self._pending.pop(chat_id, None)
         self.send(
             chat_id,
-            f"✅ نمادها: {', '.join(saved)}\nربات را ری‌استارت کنید.",
+            f"✅ نمادها ذخیره شد: {', '.join(saved)}\nربات را Stop سپس Start کنید.",
             reply_markup=CONTROL_KEYBOARD,
         )
 
-    def _cmd_strategies_prompt(self, chat_id: int, _text: str = "") -> None:
-        known = ", ".join(KNOWN_STRATEGIES)
-        self._pending[chat_id] = {"flow": "strategies", "step": "list", "data": {}}
+    def _cmd_strategies_all(self, chat_id: int, _text: str = "") -> None:
+        self._pending[chat_id] = {
+            "flow": "strategies_menu",
+            "step": "pick",
+            "selected": list(STRATEGY_LABELS.keys()),
+        }
+        self._send_strategies_menu(chat_id, note="همه استراتژی‌ها انتخاب شدند.")
+
+    def _cmd_strategies_none(self, chat_id: int, _text: str = "") -> None:
+        self._pending[chat_id] = {
+            "flow": "strategies_menu",
+            "step": "pick",
+            "selected": [],
+        }
+        self._send_strategies_menu(chat_id, note="فقط MACD/trend (بدون confluence).")
+
+    def _cmd_strategies_save(self, chat_id: int, _text: str = "") -> None:
+        selected = self._strategies_menu_state(chat_id)
+        saved = apply_enabled_strategies(selected)
+        self._reload_settings()
+        self._pending.pop(chat_id, None)
+        label = ", ".join(STRATEGY_LABELS.get(s, s) for s in saved) if saved else "(MACD/trend only)"
         self.send(
             chat_id,
-            f"استراتژی‌های شناخته‌شده:\n{known}\n\n"
-            "لیست را با ویرگول بفرستید (خالی = فقط MACD/trend):\n"
-            "smc_confluence,liquidity_volume,ultra_scalp,news_straddle\n"
-            "news_straddle = استرادل خبری ATR (NFP/CPI/FOMC) با Spread Shield و OCO\n"
-            "یا /cancel",
+            f"✅ استراتژی‌ها ذخیره شد: {label}\nربات را Stop سپس Start کنید.",
+            reply_markup=CONTROL_KEYBOARD,
+        )
+
+    def _toggle_symbol_pick(self, chat_id: int, symbol: str) -> None:
+        catalog = self._symbol_catalog()
+        catalog_u = {s.upper(): s for s in catalog}
+        key = catalog_u.get(symbol.upper())
+        if key is None:
+            self._send_symbols_menu(chat_id, note=f"نماد ناشناخته: {symbol}")
+            return
+        selected = list(self._symbols_menu_state(chat_id))
+        selected_u = {s.upper() for s in selected}
+        if key.upper() in selected_u:
+            selected = [s for s in selected if s.upper() != key.upper()]
+        else:
+            selected.append(key)
+        self._pending[chat_id] = {
+            "flow": "symbols_menu",
+            "step": "pick",
+            "selected": selected,
+        }
+        self._send_symbols_menu(chat_id)
+
+    def _toggle_strategy_pick(self, chat_id: int, label_or_key: str) -> None:
+        key = STRATEGY_LABEL_TO_KEY.get(label_or_key) or (
+            label_or_key if label_or_key in STRATEGY_LABELS else None
+        )
+        if key is None:
+            self._send_strategies_menu(chat_id, note=f"استراتژی ناشناخته: {label_or_key}")
+            return
+        selected = list(self._strategies_menu_state(chat_id))
+        if key in selected:
+            selected = [s for s in selected if s != key]
+        else:
+            selected.append(key)
+        self._pending[chat_id] = {
+            "flow": "strategies_menu",
+            "step": "pick",
+            "selected": selected,
+        }
+        self._send_strategies_menu(chat_id)
+
+    def _handle_menu_toggle(self, chat_id: int, text: str) -> bool:
+        """Handle ✅/⬜ taps inside symbols/strategies pickers (no typing)."""
+        payload = parse_toggle_label(text)
+        if payload is None:
+            return False
+        pending = self._pending.get(chat_id) or {}
+        flow = pending.get("flow")
+        if flow == "symbols_menu":
+            self._toggle_symbol_pick(chat_id, payload)
+            return True
+        if flow == "strategies_menu":
+            self._toggle_strategy_pick(chat_id, payload)
+            return True
+        # Not in a picker — open the matching menu if payload looks known.
+        catalog_u = {s.upper() for s in self._symbol_catalog()}
+        if payload.upper() in catalog_u:
+            self._cmd_symbols_menu(chat_id)
+            self._toggle_symbol_pick(chat_id, payload)
+            return True
+        if payload in STRATEGY_LABEL_TO_KEY or payload in STRATEGY_LABELS:
+            self._cmd_strategies_menu(chat_id)
+            self._toggle_strategy_pick(chat_id, payload)
+            return True
+        return False
+
+    def _cmd_symbols(self, chat_id: int, text: str = "") -> None:
+        """Slash `/symbols` opens menu; optional CSV args still accepted for automation."""
+        args = self._args(text)
+        raw = " ".join(args) if args else ""
+        if not raw:
+            self._cmd_symbols_menu(chat_id)
+            return
+        self._apply_symbols_csv(chat_id, raw)
+
+    def _apply_symbols_csv(self, chat_id: int, raw: str) -> None:
+        parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
+        catalog = self._symbol_catalog()
+        try:
+            saved = apply_active_symbols(parts, allowed=catalog or None)
+        except ValueError as exc:
+            self.send(chat_id, f"❌ {exc}", reply_markup=CONTROL_KEYBOARD)
+            return
+        self._reload_settings()
+        self._pending.pop(chat_id, None)
+        self.send(
+            chat_id,
+            f"✅ نمادها: {', '.join(saved)}\nربات را Stop سپس Start کنید.",
             reply_markup=CONTROL_KEYBOARD,
         )
 
     def _cmd_strategies(self, chat_id: int, text: str = "") -> None:
         args = self._args(text)
         if not args:
-            self._cmd_strategies_prompt(chat_id)
+            self._cmd_strategies_menu(chat_id)
             return
         raw = " ".join(args)
-        self._apply_strategies(chat_id, raw)
+        self._apply_strategies_csv(chat_id, raw)
 
-    def _apply_strategies(self, chat_id: int, raw: str) -> None:
+    def _apply_strategies_csv(self, chat_id: int, raw: str) -> None:
         parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
         saved = apply_enabled_strategies(parts)
         self._reload_settings()
@@ -821,7 +1015,7 @@ class TelegramControlBot:
         label = ", ".join(saved) if saved else "(MACD/trend only)"
         self.send(
             chat_id,
-            f"✅ استراتژی‌ها: {label}\nربات را ری‌استارت کنید.",
+            f"✅ استراتژی‌ها: {label}\nربات را Stop سپس Start کنید.",
             reply_markup=CONTROL_KEYBOARD,
         )
 
@@ -834,8 +1028,8 @@ class TelegramControlBot:
         }
         self.send(
             chat_id,
-            f"✅ ساعات معامله: {labels.get(saved, saved)}\nربات را ری‌استارت کنید.",
-            reply_markup=CONTROL_KEYBOARD,
+            f"✅ ساعات معامله: {labels.get(saved, saved)}\nربات را Stop سپس Start کنید.",
+            reply_markup=hours_keyboard(),
         )
 
     def _cmd_hours_london_ny(self, chat_id: int, _text: str = "") -> None:
@@ -847,11 +1041,7 @@ class TelegramControlBot:
     def _cmd_hours(self, chat_id: int, text: str = "") -> None:
         args = self._args(text)
         if not args:
-            self.send(
-                chat_id,
-                "استفاده: /hours london_ny|always_on_24h",
-                reply_markup=CONTROL_KEYBOARD,
-            )
+            self._cmd_hours_menu(chat_id)
             return
         self._set_hours(chat_id, args[0])
 
@@ -863,8 +1053,8 @@ class TelegramControlBot:
             note = f"\n(انتخاب {pct}% بود؛ سقف امنیتی → {effective}%)"
         self.send(
             chat_id,
-            f"✅ ریسک مؤثر = {effective}%{note}",
-            reply_markup=CONTROL_KEYBOARD,
+            f"✅ ریسک مؤثر = {effective}%{note}\nربات را Stop سپس Start کنید.",
+            reply_markup=risk_keyboard(),
         )
 
     def _cmd_risk_05(self, chat_id: int, _text: str = "") -> None:
@@ -946,13 +1136,9 @@ class TelegramControlBot:
                 )
                 return True
 
-        if flow == "symbols" and step == "list":
-            self._apply_symbols(chat_id, raw)
-            return True
-
-        if flow == "strategies" and step == "list":
-            self._apply_strategies(chat_id, raw)
-            return True
+        # symbols_menu / strategies_menu use button toggles, not free text.
+        if flow in ("symbols_menu", "strategies_menu"):
+            return False
 
         return False
 
@@ -964,6 +1150,9 @@ class TelegramControlBot:
             return
 
         self._bind_chat_if_needed(chat_id)
+
+        if self._handle_menu_toggle(chat_id, text):
+            return
 
         if self._handle_pending(chat_id, text):
             return
@@ -1008,10 +1197,18 @@ class TelegramControlBot:
             "set_oanda": self._cmd_set_oanda,
             "oanda_env_practice": self._cmd_oanda_env_practice,
             "oanda_env_live": self._cmd_oanda_env_live,
-            "symbols_prompt": self._cmd_symbols_prompt,
+            "symbols_menu": self._cmd_symbols_menu,
             "symbols": self._cmd_symbols,
-            "strategies_prompt": self._cmd_strategies_prompt,
+            "symbols_all": self._cmd_symbols_all,
+            "symbols_none": self._cmd_symbols_none,
+            "symbols_save": self._cmd_symbols_save,
+            "strategies_menu": self._cmd_strategies_menu,
             "strategies": self._cmd_strategies,
+            "strategies_all": self._cmd_strategies_all,
+            "strategies_none": self._cmd_strategies_none,
+            "strategies_save": self._cmd_strategies_save,
+            "hours_menu": self._cmd_hours_menu,
+            "risk_menu": self._cmd_risk_menu,
             "hours_london_ny": self._cmd_hours_london_ny,
             "hours_24h": self._cmd_hours_24h,
             "hours": self._cmd_hours,

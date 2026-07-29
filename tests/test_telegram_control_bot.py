@@ -31,14 +31,16 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         alerting={"timeout_seconds": 5},
         backtest={"initial_balance": 10_000},
         symbols=["XAUUSD"],
-        available_symbols=["XAUUSD", "EURUSD"],
+        available_symbols=["XAUUSD", "EURUSD", "USDJPY"],
         risk={"active_risk_per_trade_pct": 1.0, "max_risk_per_trade_pct": 1.0},
         strategy={
             "enabled_strategies": ["smc_confluence"],
             "use_smc_confluence": True,
             "use_liquidity_volume": False,
             "use_ultra_scalp": False,
+            "use_news_straddle": False,
         },
+        sessions={"trading_hours_mode": "london_ny"},
     )
 
 
@@ -225,14 +227,59 @@ def test_risk_preset_button(bot: TelegramControlBot, monkeypatch: pytest.MonkeyP
     )
 
 
-def test_symbols_command(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_symbols_menu_toggle_and_save(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[list[str]] = []
+
     monkeypatch.setattr(
         "chronoscalp.telegram.control_bot.apply_active_symbols",
-        lambda parts, allowed=None: ["XAUUSD", "EURUSD"],
+        lambda parts, allowed=None: saved.append(list(parts)) or list(parts),
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
-    bot.handle(42, "/symbols XAUUSD,EURUSD")
-    assert "XAUUSD" in bot.send.call_args.args[1]
+
+    bot.handle(42, "نمادها")
+    assert bot._pending[42]["flow"] == "symbols_menu"
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    assert any("✅ XAUUSD" in (b.get("text") or "") for row in kb["keyboard"] for b in row)
+
+    bot.handle(42, "⬜ EURUSD")
+    assert "EURUSD" in bot._pending[42]["selected"]
+
+    bot.handle(42, "ذخیره نمادها")
+    assert saved and "XAUUSD" in saved[-1] and "EURUSD" in saved[-1]
+    assert "✅" in bot.send.call_args.args[1]
+
+
+def test_strategies_menu_toggle_news_straddle(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_enabled_strategies",
+        lambda parts: saved.append(list(parts)) or list(parts),
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+
+    bot.handle(42, "استراتژی‌ها")
+    bot.handle(42, "⬜ استرادل خبر")
+    assert "news_straddle" in bot._pending[42]["selected"]
+    bot.handle(42, "ذخیره استراتژی‌ها")
+    assert saved and "news_straddle" in saved[-1] and "smc_confluence" in saved[-1]
+
+
+def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
+    bot.handle(42, "تنظیمات")
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    labels = {b["text"] for row in kb["keyboard"] for b in row}
+    assert "نمادها" in labels
+    assert "استراتژی‌ها" in labels
+    assert "ساعات معامله" in labels
+    assert "ریسک معامله" in labels
+    assert "اتصال" in labels
+    assert "تأیید Live روشن" in labels
+
 
 
 def test_open_positions_from_fresh_broker_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:
