@@ -37,9 +37,7 @@ class TradingState:
             last_evaluated_bars={
                 str(k): str(v) for k, v in (data.get("last_evaluated_bars") or {}).items()
             },
-            position_meta={
-                str(k): dict(v) for k, v in raw_meta.items() if isinstance(v, dict)
-            },
+            position_meta={str(k): dict(v) for k, v in raw_meta.items() if isinstance(v, dict)},
             updated_at=str(data.get("updated_at") or ""),
         )
 

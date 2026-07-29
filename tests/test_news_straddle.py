@@ -129,7 +129,9 @@ def test_calendar_upcoming_and_placement_window():
     place_ok, _ = cal.is_straddle_placement_window(t_pause, place_seconds_before=30, currency="USD")
     assert place_ok is False  # 90s before — outside 30s place window
     t_place = release - timedelta(seconds=20)
-    place_ok2, _ = cal.is_straddle_placement_window(t_place, place_seconds_before=30, currency="USD")
+    place_ok2, _ = cal.is_straddle_placement_window(
+        t_place, place_seconds_before=30, currency="USD"
+    )
     assert place_ok2 is True
 
 
@@ -265,9 +267,7 @@ def test_dual_fill_closes_orphan_leg():
     from chronoscalp.utils.types import Position, SignalType
 
     buy = next(
-        o
-        for o in broker.get_pending_orders("XAUUSD")
-        if o.side == PendingOrderSide.BUY_STOP
+        o for o in broker.get_pending_orders("XAUUSD") if o.side == PendingOrderSide.BUY_STOP
     )
     broker.set_quote("XAUUSD", buy.price + 0.5, buy.price + 0.7)
     assert len(broker.get_open_positions("XAUUSD")) == 1
@@ -314,7 +314,6 @@ def test_oco_retry_when_cancel_fails(monkeypatch: pytest.MonkeyPatch):
     assert oco.action == "oco_retry"
     assert oco.phase == StraddlePhase.PENDING
     assert engine.sessions["XAUUSD"].phase == StraddlePhase.PENDING
-
 
 
 def test_spread_block_skips_placement():

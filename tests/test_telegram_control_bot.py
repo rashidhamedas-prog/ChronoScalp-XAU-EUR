@@ -281,7 +281,6 @@ def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     assert "تأیید Live روشن" in labels
 
 
-
 def test_open_positions_from_fresh_broker_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:
     import json
     from datetime import UTC, datetime

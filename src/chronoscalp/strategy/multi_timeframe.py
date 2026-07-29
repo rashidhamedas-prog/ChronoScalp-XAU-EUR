@@ -409,9 +409,7 @@ class MultiTimeframeStrategy:
         want_scalp = bool(use_scalp and run_scalp)
         # Institutional / SMC / liquidity path when those modes are on — even
         # alongside ultra-scalp — or when scalp is off (legacy single path).
-        want_institutional = bool(run_institutional) and (
-            use_smc or use_liq or (not use_scalp)
-        )
+        want_institutional = bool(run_institutional) and (use_smc or use_liq or (not use_scalp))
 
         higher_frames = [
             data_by_timeframe[tf] for tf in higher_timeframes if tf in data_by_timeframe
@@ -496,16 +494,10 @@ class MultiTimeframeStrategy:
                     symbol_spec=self.symbols_cfg.get(symbol),
                     spread_pips=spread_pips,
                     cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
-                    min_stop_spread_multiple=float(
-                        scalp_cfg.get("min_stop_spread_multiple", 2.0)
-                    ),
+                    min_stop_spread_multiple=float(scalp_cfg.get("min_stop_spread_multiple", 2.0)),
                     net_rr_after_costs=float(scalp_cfg.get("net_rr_after_costs", 1.0)),
-                    max_stop_atr_multiple=float(
-                        scalp_cfg.get("max_stop_atr_multiple", 8.0)
-                    ),
-                    max_target_atr_multiple=float(
-                        scalp_cfg.get("max_target_atr_multiple", 12.0)
-                    ),
+                    max_stop_atr_multiple=float(scalp_cfg.get("max_stop_atr_multiple", 8.0)),
+                    max_target_atr_multiple=float(scalp_cfg.get("max_target_atr_multiple", 12.0)),
                 )
                 scalp_signal = _apply_confidence(scalp_signal)
                 if scalp_signal.is_actionable:
@@ -514,11 +506,7 @@ class MultiTimeframeStrategy:
                     skip_reasons.append(f"scalp:{scalp_signal.reason or 'no_signal'}")
 
         if want_institutional:
-            inst_tf = (
-                Timeframe.M1
-                if Timeframe.M1 in data_by_timeframe
-                else trigger_timeframe
-            )
+            inst_tf = Timeframe.M1 if Timeframe.M1 in data_by_timeframe else trigger_timeframe
             inst_df = data_by_timeframe.get(inst_tf)
             if inst_df is None:
                 skip_reasons.append("inst:no_trigger_data")
@@ -539,9 +527,7 @@ class MultiTimeframeStrategy:
                         min_reward_risk_ratio=float(
                             self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
                         ),
-                        atr_stop_multiple=float(
-                            self.strategy_cfg.get("atr_stop_multiple", 1.5)
-                        ),
+                        atr_stop_multiple=float(self.strategy_cfg.get("atr_stop_multiple", 1.5)),
                         atr_target_multiple=float(
                             self.strategy_cfg.get("atr_target_multiple", 2.25)
                         ),

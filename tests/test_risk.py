@@ -272,6 +272,7 @@ def test_validate_signal_rejects_spread_burning_scalp():
     )
     assert rm.validate_signal(healthy, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
 
+
 def test_fit_economic_scalp_widens_eurjpy_sub_spread_stop():
     """S15 ATR stops under 2x typical spread must widen, then clear net R:R."""
     from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry

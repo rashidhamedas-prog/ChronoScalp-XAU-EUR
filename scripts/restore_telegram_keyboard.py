@@ -27,9 +27,7 @@ def main() -> None:
         raise SystemExit("TELEGRAM_CHAT_ID missing")
 
     bot = TelegramControlBot()
-    hours = normalize_trading_hours_mode(
-        (bot.settings.sessions or {}).get("trading_hours_mode")
-    )
+    hours = normalize_trading_hours_mode((bot.settings.sessions or {}).get("trading_hours_mode"))
     bot.send(
         chat,
         HELP_TEXT

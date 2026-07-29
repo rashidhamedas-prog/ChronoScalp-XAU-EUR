@@ -633,4 +633,3 @@ def test_institutional_still_runs_when_scalp_quiet(monkeypatch):
     assert scalp_calls["n"] == 1 and inst_calls["n"] == 1
     assert signal.signal_type == SignalType.BUY
     assert "institutional_entry" in signal.reason
-

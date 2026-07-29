@@ -421,9 +421,9 @@ class DynamicNewsStraddleEngine:
     def cancel_all_pending_orders(self, broker: Any, symbol: str | None = None) -> int:
         """Cancel news pending orders (expiry / place failure / operator abort)."""
         cancelled = 0
-        orders: list[PendingOrder] = broker.get_pending_orders(
-            symbol, comment_prefix=self.comment_prefix
-        ) or []
+        orders: list[PendingOrder] = (
+            broker.get_pending_orders(symbol, comment_prefix=self.comment_prefix) or []
+        )
         for order in orders:
             try:
                 if broker.cancel_pending_order(order.ticket):
@@ -491,14 +491,19 @@ class DynamicNewsStraddleEngine:
             ):
                 session.phase = StraddlePhase.IDLE
                 return StraddleTickResult(
-                    symbol=symbol, phase=StraddlePhase.IDLE, action="position_closed", session=session
+                    symbol=symbol,
+                    phase=StraddlePhase.IDLE,
+                    action="position_closed",
+                    session=session,
                 )
             return StraddleTickResult(
                 symbol=symbol, phase=StraddlePhase.FILLED, action="manage_open", session=session
             )
 
         if not allow_place:
-            return StraddleTickResult(symbol=symbol, phase=StraddlePhase.IDLE, action="place_blocked")
+            return StraddleTickResult(
+                symbol=symbol, phase=StraddlePhase.IDLE, action="place_blocked"
+            )
 
         paused, upcoming = self.calendar.is_scalp_paused(
             now,
@@ -554,7 +559,10 @@ class DynamicNewsStraddleEngine:
         quote = broker.get_quote(symbol)
         if quote is None:
             return StraddleTickResult(
-                symbol=symbol, phase=StraddlePhase.PAUSED, action="no_quote", message="quote_unavailable"
+                symbol=symbol,
+                phase=StraddlePhase.PAUSED,
+                action="no_quote",
+                message="quote_unavailable",
             )
 
         return self.place_straddle_orders(

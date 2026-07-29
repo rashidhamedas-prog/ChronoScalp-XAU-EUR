@@ -903,7 +903,9 @@ class TelegramControlBot:
         saved = apply_enabled_strategies(selected)
         self._reload_settings()
         self._pending.pop(chat_id, None)
-        label = ", ".join(STRATEGY_LABELS.get(s, s) for s in saved) if saved else "(MACD/trend only)"
+        label = (
+            ", ".join(STRATEGY_LABELS.get(s, s) for s in saved) if saved else "(MACD/trend only)"
+        )
         self.send(
             chat_id,
             f"✅ استراتژی‌ها ذخیره شد: {label}\nربات را Stop سپس Start کنید.",

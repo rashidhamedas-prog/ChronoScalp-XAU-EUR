@@ -105,9 +105,7 @@ def _chunk_buttons(labels: list[str], per_row: int = 2) -> list[list[dict[str, s
 def symbols_keyboard(catalog: list[str], selected: list[str] | set[str]) -> dict[str, Any]:
     """Reply keyboard: one toggle per symbol + save / bulk actions."""
     selected_u = {str(s).strip().upper() for s in selected}
-    labels = [
-        toggle_label(sym, enabled=str(sym).strip().upper() in selected_u) for sym in catalog
-    ]
+    labels = [toggle_label(sym, enabled=str(sym).strip().upper() in selected_u) for sym in catalog]
     rows = _chunk_buttons(labels, per_row=2)
     rows.append([{"text": BTN_SYM_ALL}, {"text": BTN_SYM_NONE}])
     rows.append([{"text": BTN_SYM_SAVE}, {"text": BTN_CANCEL}])
@@ -119,8 +117,7 @@ def strategies_keyboard(selected: list[str] | set[str]) -> dict[str, Any]:
     """Reply keyboard: toggle each known strategy + save."""
     selected_l = {str(s).strip().lower() for s in selected}
     labels = [
-        toggle_label(STRATEGY_LABELS[key], enabled=key in selected_l)
-        for key in STRATEGY_LABELS
+        toggle_label(STRATEGY_LABELS[key], enabled=key in selected_l) for key in STRATEGY_LABELS
     ]
     rows = _chunk_buttons(labels, per_row=2)
     rows.append([{"text": BTN_STRAT_ALL}, {"text": BTN_STRAT_NONE}])

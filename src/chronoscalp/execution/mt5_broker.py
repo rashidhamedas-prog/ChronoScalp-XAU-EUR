@@ -186,9 +186,11 @@ class MT5Broker:
             symbol=symbol,
             bid=float(tick.bid),
             ask=float(tick.ask),
-            time=datetime.fromtimestamp(float(getattr(tick, "time", 0) or 0), tz=UTC)
-            if getattr(tick, "time", 0)
-            else datetime.now(tz=UTC),
+            time=(
+                datetime.fromtimestamp(float(getattr(tick, "time", 0) or 0), tz=UTC)
+                if getattr(tick, "time", 0)
+                else datetime.now(tz=UTC)
+            ),
         )
 
     def place_pending_stop(
@@ -295,9 +297,7 @@ class MT5Broker:
             else:
                 continue
             exp_raw = int(getattr(order, "time_expiration", 0) or 0)
-            expiration = (
-                datetime.fromtimestamp(exp_raw, tz=UTC) if exp_raw > 0 else None
-            )
+            expiration = datetime.fromtimestamp(exp_raw, tz=UTC) if exp_raw > 0 else None
             out.append(
                 PendingOrder(
                     ticket=int(order.ticket),

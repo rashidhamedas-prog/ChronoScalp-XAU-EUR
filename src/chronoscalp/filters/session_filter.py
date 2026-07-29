@@ -91,11 +91,7 @@ class SessionFilter:
 
         if raw_mode is None:
             # Legacy configs: honour trade_outside_sessions + always_on_symbols.
-            mode = (
-                TRADING_HOURS_ALWAYS_ON_24H
-                if legacy_outside
-                else TRADING_HOURS_LONDON_NY
-            )
+            mode = TRADING_HOURS_ALWAYS_ON_24H if legacy_outside else TRADING_HOURS_LONDON_NY
             return cls(
                 windows=windows,
                 trade_outside_sessions=legacy_outside,

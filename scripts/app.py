@@ -503,9 +503,7 @@ def page_control(settings) -> None:
     selected_hours = st.radio(
         _t("hours_label"),
         options=hours_options,
-        index=hours_options.index(current_hours)
-        if current_hours in hours_options
-        else 0,
+        index=hours_options.index(current_hours) if current_hours in hours_options else 0,
         format_func=lambda k: hours_labels.get(k, k),
         horizontal=True,
         label_visibility="collapsed",

@@ -618,14 +618,10 @@ class TradingBot:
                         # Enter pause/place path even when not yet PENDING.
                         run_straddle = True
                         allow_place = (
-                            symbol not in self.open_tickets
-                            and not three_paused
-                            and not at_capacity
+                            symbol not in self.open_tickets and not three_paused and not at_capacity
                         )
                     if run_straddle:
-                        m1_for_straddle = self.connector.fetch_ohlcv(
-                            symbol, Timeframe.M1, count=40
-                        )
+                        m1_for_straddle = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
                         if m1_for_straddle is not None and not m1_for_straddle.empty:
                             atr_period = int(
                                 (self.settings.strategy.get("news_straddle") or {}).get(
@@ -639,9 +635,7 @@ class TradingBot:
                             if hasattr(self.broker, "set_quote"):
                                 mid = float(m1_for_straddle["close"].iloc[-1])
                                 pip_size = float(
-                                    self.settings.symbols_raw.get(symbol, {}).get(
-                                        "pip_size", 0.01
-                                    )
+                                    self.settings.symbols_raw.get(symbol, {}).get("pip_size", 0.01)
                                     or 0.01
                                 )
                                 half = max(spread_pips, 0.0) * pip_size / 2.0
@@ -749,8 +743,10 @@ class TradingBot:
                     inst_df = data_by_tf.get(self.trigger_timeframe)
                     inst_tf = self.trigger_timeframe
 
-                if use_scalp and (scalp_df is None or scalp_df.empty) and (
-                    inst_df is None or inst_df.empty
+                if (
+                    use_scalp
+                    and (scalp_df is None or scalp_df.empty)
+                    and (inst_df is None or inst_df.empty)
                 ):
                     self._note_skip(f"{symbol}:no_trigger_data")
                     continue
@@ -901,9 +897,7 @@ class TradingBot:
                         )
                     if cand_bar is None:
                         cand_bar = now
-                    dedup_key = signal_dedup_key(
-                        symbol, cand_tf, cand_bar, cand.signal_type
-                    )
+                    dedup_key = signal_dedup_key(symbol, cand_tf, cand_bar, cand.signal_type)
                     if self.signal_deduper.already_processed(dedup_key):
                         skip_parts.append(f"{cand_tf.value}:dedup")
                         continue
@@ -925,9 +919,7 @@ class TradingBot:
                         run_institutional=run_institutional,
                         inst_bar=inst_bar,
                     )
-                    detail = (
-                        "|".join(skip_parts) if skip_parts else "no_signal"
-                    ).replace(" ", "_")
+                    detail = ("|".join(skip_parts) if skip_parts else "no_signal").replace(" ", "_")
                     self._note_skip(f"{symbol}:{detail}")
                     continue
 
