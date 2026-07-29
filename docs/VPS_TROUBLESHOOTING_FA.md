@@ -95,13 +95,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\_vps_api_status.ps
 
 ## ۶) آپدیت کد از GitHub
 
+از لپ‌تاپ (SSH key = `%USERPROFILE%\.ssh\chronoscalp_vps`):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_vps_from_local.ps1
+```
+
+این اسکریپت `origin/main` را روی VPS می‌کشد و پنل (۸۵۰۱)، Control API (۸۵۱۰)، ربات live، و ربات تلگرام را ری‌استارت می‌کند.
+
+یا مستقیم روی VPS (RDP / SSH):
+
 ```powershell
 cd C:\ChronoScalp\ChronoScalp-XAU-EUR
 git fetch origin
 git checkout main
 git reset --hard origin/main
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-# سپس پنل/ربات را طبق بخش‌های بالا دوباره استارت کنید
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\_vps_full_deploy.ps1
 ```
 
 ---
