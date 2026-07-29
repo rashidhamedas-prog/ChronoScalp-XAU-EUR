@@ -50,9 +50,11 @@ strategy:
     - smc_confluence
     - liquidity_volume
     - ultra_scalp
+    # news_straddle — enable via panel/Telegram when trading NFP/CPI/FOMC straddles
   use_smc_confluence: true
   use_liquidity_volume: true
   use_ultra_scalp: true
+  use_news_straddle: false
   liquidity_rvol_min: 1.5
   entry_rvol_min: 1.5
   atr_stop_multiple: 1.5
@@ -73,6 +75,20 @@ strategy:
     net_rr_after_costs: 1.0
     max_stop_atr_multiple: 8.0
     max_target_atr_multiple: 12.0
+  news_straddle:
+    # Dynamic ATR BUY_STOP + SELL_STOP around high-impact releases (MT5/paper).
+    atr_period: 14
+    atr_multiplier: 2.0
+    max_spread_pips: 2.0
+    pause_minutes_before: 2.0
+    place_seconds_before: 30.0
+    expiry_seconds: 120.0
+    # SL/TP as fractions of ATR distance → R:R = 1.8/0.8 = 2.25 (≥ 1.5 floor)
+    sl_distance_fraction: 0.8
+    tp_distance_fraction: 1.8
+    comment_prefix: "CS_News"
+    # null = default NFP/CPI/FOMC/rate tokens; [] = any high-impact event
+    title_tokens: null
 
 sessions:
   timezone: "GMT"

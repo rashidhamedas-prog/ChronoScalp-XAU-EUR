@@ -47,7 +47,7 @@ VPS: Task `ChronoScalpWatchTelegram` یا همان اسکریپت.
 |---|---|
 | `/config` | همه تنظیمات |
 | `/symbols XAUUSD,EURUSD` | نمادهای فعال |
-| `/strategies smc_confluence,liquidity_volume` | استراتژی‌ها |
+| `/strategies smc_confluence,liquidity_volume,ultra_scalp,news_straddle` | استراتژی‌ها (شامل استرادل خبری ATR) |
 | `/risk 0.5\|1\|1.5` | ریسک (سقف سخت ۱٪) |
 
 بعد از تغییر نماد/استراتژی/mode معمولاً **ری‌استارت ربات معامله** لازم است.

@@ -38,3 +38,4 @@ Default branch is **`main`**. Keep feature work on short-lived `cursor/*` branch
 - `scripts/` — CLI / panel / VPS helpers
 - `config/*.yaml` — strategy & risk parameters
 - `tests/` — mirrors package layout
+- News ATR straddle: `filters/news_calendar.py` + `strategy/news_straddle_engine.py` (enable via `news_straddle` in panel/Telegram)

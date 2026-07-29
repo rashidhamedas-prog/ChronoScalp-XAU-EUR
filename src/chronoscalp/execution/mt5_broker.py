@@ -21,7 +21,15 @@ from chronoscalp.execution.mt5_utils import (
     validate_stops_vs_fill_price,
 )
 from chronoscalp.logging_setup import logger
-from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
+from chronoscalp.utils.types import (
+    PendingOrder,
+    PendingOrderSide,
+    Position,
+    Quote,
+    Signal,
+    SignalType,
+    TradeResult,
+)
 
 
 class MT5Broker:
@@ -166,6 +174,144 @@ class MT5Broker:
             return float(spread_points)
 
         return spread_points_to_pips(float(spread_points), point, pip_size)
+
+    def get_quote(self, symbol: str) -> Quote | None:
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return None
+        return Quote(
+            symbol=symbol,
+            bid=float(tick.bid),
+            ask=float(tick.ask),
+            time=datetime.fromtimestamp(float(getattr(tick, "time", 0) or 0), tz=UTC)
+            if getattr(tick, "time", 0)
+            else datetime.now(tz=UTC),
+        )
+
+    def place_pending_stop(
+        self,
+        *,
+        symbol: str,
+        side: PendingOrderSide,
+        volume: float,
+        price: float,
+        stop_loss: float,
+        take_profit: float,
+        expiration: datetime | None = None,
+        comment: str = "",
+    ) -> PendingOrder:
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        order_type = (
+            mt5.ORDER_TYPE_BUY_STOP
+            if side == PendingOrderSide.BUY_STOP
+            else mt5.ORDER_TYPE_SELL_STOP
+        )
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            raise RuntimeError(f"MT5 symbol_info failed for {symbol}: {mt5.last_error()}")
+
+        request: dict = {
+            "action": mt5.TRADE_ACTION_PENDING,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(price),
+            "sl": float(stop_loss),
+            "tp": float(take_profit),
+            "magic": self._magic,
+            "comment": sanitize_mt5_comment(comment or "CS_News"),
+            "type_filling": resolve_order_filling_mode(symbol),
+        }
+        if expiration is not None:
+            request["type_time"] = mt5.ORDER_TIME_SPECIFIED
+            request["expiration"] = int(expiration.timestamp())
+        else:
+            request["type_time"] = mt5.ORDER_TIME_GTC
+
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            raise RuntimeError(
+                f"MT5 pending order_send failed: result={result} last_error={mt5.last_error()} "
+                f"symbol={symbol} side={side.value} price={price}"
+            )
+        ticket = int(result.order)
+        logger.info(
+            "Pending placed: {} {} vol={} @ {} ticket={}",
+            symbol,
+            side.value,
+            volume,
+            price,
+            ticket,
+        )
+        return PendingOrder(
+            ticket=ticket,
+            symbol=symbol,
+            side=side,
+            volume=float(volume),
+            price=float(price),
+            stop_loss=float(stop_loss),
+            take_profit=float(take_profit),
+            comment=sanitize_mt5_comment(comment or "CS_News"),
+            expiration=expiration,
+        )
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        request = {"action": mt5.TRADE_ACTION_REMOVE, "order": int(ticket)}
+        result = mt5.order_send(request)
+        ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+        if not ok:
+            logger.warning("cancel_pending_order failed ticket={}: {}", ticket, result)
+        return ok
+
+    def get_pending_orders(
+        self, symbol: str | None = None, comment_prefix: str | None = None
+    ) -> list[PendingOrder]:
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        raw = mt5.orders_get(symbol=symbol) if symbol else mt5.orders_get()
+        if raw is None:
+            return []
+        out: list[PendingOrder] = []
+        for order in raw:
+            if self._magic and int(getattr(order, "magic", 0) or 0) != self._magic:
+                continue
+            comment = str(getattr(order, "comment", "") or "")
+            if comment_prefix and not comment.startswith(comment_prefix):
+                continue
+            otype = int(order.type)
+            if otype == mt5.ORDER_TYPE_BUY_STOP:
+                side = PendingOrderSide.BUY_STOP
+            elif otype == mt5.ORDER_TYPE_SELL_STOP:
+                side = PendingOrderSide.SELL_STOP
+            else:
+                continue
+            exp_raw = int(getattr(order, "time_expiration", 0) or 0)
+            expiration = (
+                datetime.fromtimestamp(exp_raw, tz=UTC) if exp_raw > 0 else None
+            )
+            out.append(
+                PendingOrder(
+                    ticket=int(order.ticket),
+                    symbol=str(order.symbol),
+                    side=side,
+                    volume=float(order.volume_current),
+                    price=float(order.price_open),
+                    stop_loss=float(order.sl),
+                    take_profit=float(order.tp),
+                    comment=comment,
+                    expiration=expiration,
+                )
+            )
+        return out
 
     def place_order(self, signal: Signal, volume: float) -> Position:
         _require_windows()

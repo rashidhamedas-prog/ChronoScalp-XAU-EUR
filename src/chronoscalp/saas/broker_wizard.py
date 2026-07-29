@@ -203,6 +203,7 @@ KNOWN_STRATEGIES: tuple[str, ...] = (
     "smc_confluence",
     "liquidity_volume",
     "ultra_scalp",
+    "news_straddle",
 )
 
 
@@ -297,6 +298,7 @@ def apply_enabled_strategies(
     strategy["use_smc_confluence"] = "smc_confluence" in seen
     strategy["use_liquidity_volume"] = "liquidity_volume" in seen
     strategy["use_ultra_scalp"] = "ultra_scalp" in seen
+    strategy["use_news_straddle"] = "news_straddle" in seen
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)
     logger.info("Enabled strategies saved: {}", ",".join(cleaned) or "(none)")

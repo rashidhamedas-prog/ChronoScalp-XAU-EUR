@@ -132,12 +132,12 @@ def test_both_strategies_or_allows_smc_without_vol():
 def test_resolve_enabled_strategies_from_list():
     from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-    smc, liq, scalp = resolve_enabled_strategies(
+    smc, liq, scalp, news = resolve_enabled_strategies(
         {"enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"]}
     )
-    assert smc and liq and scalp
-    smc2, liq2, scalp2 = resolve_enabled_strategies({"enabled_strategies": []})
-    assert not smc2 and not liq2 and not scalp2
+    assert smc and liq and scalp and not news
+    smc2, liq2, scalp2, news2 = resolve_enabled_strategies({"enabled_strategies": []})
+    assert not smc2 and not liq2 and not scalp2 and not news2
 
 
 def test_ultra_scalp_impulse_buy():

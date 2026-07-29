@@ -72,6 +72,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Parallel strategy engines:** S15 ultra-scalp and M1 institutional/SMC/liquidity evaluate independently on their own bar closes (not sequential fallback); strongest viable R:R wins if both fire
 - [x] **Independent symbol entries:** `risk.independent_symbol_entries` + correlation off + `max_concurrent_positions` ≥ active symbols so each pair can hold its own ticket without cross-pair correlation/`max_concurrent` blocking (1% risk / R:R unchanged; still one position per symbol)
 - [x] **Git hygiene:** secrets stripped from desktop/VPS helpers; ephemeral `_vps_skip_audit*` gitignored; durable `_vps_api_status.ps1` + `docs/VPS_TROUBLESHOOTING_FA.md` + `AGENTS.md`; finished work lands on `main`
+- [x] **News ATR straddle:** selectable `news_straddle` strategy — pause scalp 2m before high-impact (NFP/CPI/FOMC), place ATR BUY_STOP/SELL_STOP ~30s prior with spread shield, OCO cancel of the twin pending, 120s expiry; Broker pending APIs on MT5/paper (OANDA not supported); panel + Telegram toggles; volume via 1% risk sizing (R:R 2.25)
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand
 - [ ] **User action — rotate exposed tokens:** if any API/MT5 password was ever pasted into scripts or chat, rotate `CHRONOSCALP_API_TOKEN` / MT5 demo password on the VPS `.env`
