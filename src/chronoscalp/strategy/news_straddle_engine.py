@@ -320,74 +320,102 @@ class DynamicNewsStraddleEngine:
         )
 
     def manage_oco_and_trailing(self, broker: Any, symbol: str) -> StraddleTickResult:
-        """OCO: once one news leg fills, cancel the opposite pending order."""
+        """OCO: once one news leg fills, cancel the opposite pending (and orphans)."""
         session = self.sessions.get(symbol)
         if session is None or session.phase != StraddlePhase.PENDING:
             phase = session.phase if session else StraddlePhase.IDLE
             return StraddleTickResult(symbol=symbol, phase=phase, action="noop", session=session)
 
-        positions = broker.get_open_positions(symbol) or []
+        positions = list(broker.get_open_positions(symbol) or [])
         pending = broker.get_pending_orders(symbol, comment_prefix=self.comment_prefix) or []
         our_tickets = {t for t in (session.buy_ticket, session.sell_ticket) if t is not None}
         pending_ours = [o for o in pending if o.ticket in our_tickets]
 
-        # Paper/MT5: detect fill by open position appearing while a pending disappears.
-        filled: Position | None = None
-        for pos in positions:
-            # Prefer freshly opened positions while we still have a pending twin.
-            if session.filled_position_ticket and pos.ticket == session.filled_position_ticket:
-                filled = pos
-                break
-            if pos.ticket not in our_tickets:
-                # Market fill creates a position ticket different from pending order ticket.
-                if pending_ours and len(pending_ours) < 2:
-                    filled = pos
-                    break
-                if not pending_ours and session.phase == StraddlePhase.PENDING:
-                    filled = pos
-                    break
+        # Dual-fill on news spikes: keep one leg, flatten the rest.
+        if len(positions) >= 2:
+            if session.filled_position_ticket:
+                keeper = next(
+                    (p for p in positions if p.ticket == session.filled_position_ticket),
+                    None,
+                )
+            else:
+                keeper = None
+            if keeper is None:
+                keeper = max(positions, key=lambda p: p.open_time)
+            for pos in positions:
+                if pos.ticket == keeper.ticket:
+                    continue
+                try:
+                    broker.close_position(pos.ticket)
+                    logger.warning(
+                        "[OCO] {} closed orphan dual-fill ticket={} (keeper={})",
+                        symbol,
+                        pos.ticket,
+                        keeper.ticket,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[OCO] failed closing orphan {} on {}: {}", pos.ticket, symbol, exc
+                    )
+            positions = [keeper]
 
-        if filled is None and len(pending_ours) < 2 and positions:
-            # One pending gone — treat newest position as the fill.
+        filled: Position | None = None
+        if session.filled_position_ticket:
+            filled = next(
+                (p for p in positions if p.ticket == session.filled_position_ticket), None
+            )
+        if filled is None and positions and (len(pending_ours) < 2 or not pending_ours):
+            # Fill creates a position ticket different from the pending order ticket.
             filled = max(positions, key=lambda p: p.open_time)
 
-        if filled is not None and pending_ours:
-            for order in pending_ours:
-                try:
-                    broker.cancel_pending_order(order.ticket)
+        if filled is None:
+            return StraddleTickResult(
+                symbol=symbol, phase=StraddlePhase.PENDING, action="waiting", session=session
+            )
+
+        session.filled_position_ticket = filled.ticket
+        cancel_failures = 0
+        for order in list(pending_ours):
+            try:
+                ok = bool(broker.cancel_pending_order(order.ticket))
+                if ok:
                     logger.info(
                         "[OCO TRIGGERED] {} cancelled pending {} (filled ticket={})",
                         symbol,
                         order.ticket,
                         filled.ticket,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("OCO cancel failed ticket={}: {}", order.ticket, exc)
-            session.phase = StraddlePhase.FILLED
-            session.filled_position_ticket = filled.ticket
-            session.buy_ticket = None
-            session.sell_ticket = None
+                else:
+                    cancel_failures += 1
+                    logger.warning(
+                        "[OCO] cancel returned false for pending {} on {}", order.ticket, symbol
+                    )
+            except Exception as exc:  # noqa: BLE001
+                cancel_failures += 1
+                logger.warning("OCO cancel failed ticket={}: {}", order.ticket, exc)
+
+        still_pending = broker.get_pending_orders(symbol, comment_prefix=self.comment_prefix) or []
+        still_ours = [o for o in still_pending if o.ticket in our_tickets]
+        if cancel_failures or still_ours:
+            # Keep PENDING so the next tick retries cancel; still surface the fill.
             return StraddleTickResult(
                 symbol=symbol,
-                phase=StraddlePhase.FILLED,
-                action="oco_filled",
+                phase=StraddlePhase.PENDING,
+                action="oco_retry",
                 session=session,
                 opened_position=filled,
+                message=f"cancel_failures={cancel_failures} still={len(still_ours)}",
             )
 
-        if filled is not None and not pending_ours:
-            session.phase = StraddlePhase.FILLED
-            session.filled_position_ticket = filled.ticket
-            return StraddleTickResult(
-                symbol=symbol,
-                phase=StraddlePhase.FILLED,
-                action="filled",
-                session=session,
-                opened_position=filled,
-            )
-
+        session.phase = StraddlePhase.FILLED
+        session.buy_ticket = None
+        session.sell_ticket = None
         return StraddleTickResult(
-            symbol=symbol, phase=StraddlePhase.PENDING, action="waiting", session=session
+            symbol=symbol,
+            phase=StraddlePhase.FILLED,
+            action="oco_filled",
+            session=session,
+            opened_position=filled,
         )
 
     def cancel_all_pending_orders(self, broker: Any, symbol: str | None = None) -> int:
@@ -426,22 +454,30 @@ class DynamicNewsStraddleEngine:
         spread_pips: float,
         currency: str | None,
         already_open: bool,
+        allow_place: bool = True,
+        abort_pending: bool = False,
     ) -> StraddleTickResult:
-        """Drive pause → place → OCO → expiry for one symbol."""
+        """Drive pause → place → OCO → expiry for one symbol.
+
+        ``allow_place`` gates new bracket placement (kill switch / max concurrent).
+        ``abort_pending`` cancels working pendings when the bot must not hold risk
+        (e.g. kill switch / daily loss) while still running OCO first.
+        """
         now = moment if moment.tzinfo else moment.replace(tzinfo=UTC)
         session = self.sessions.get(symbol)
 
         if session and session.phase == StraddlePhase.PENDING:
             oco = self.manage_oco_and_trailing(broker, symbol)
-            if oco.action in ("oco_filled", "filled"):
+            if oco.action in ("oco_filled", "filled", "oco_retry"):
                 return oco
-            if session.expires_at and now >= session.expires_at:
+            if abort_pending or (session.expires_at and now >= session.expires_at):
                 n = self.cancel_all_pending_orders(broker, symbol)
-                logger.info("[STRADDLE EXPIRED] {} cancelled {} pendings", symbol, n)
+                action = "aborted" if abort_pending else "expired"
+                logger.info("[STRADDLE {}] {} cancelled {} pendings", action.upper(), symbol, n)
                 return StraddleTickResult(
                     symbol=symbol,
                     phase=StraddlePhase.IDLE,
-                    action="expired",
+                    action=action,
                     session=session,
                     message=f"cancelled={n}",
                 )
@@ -460,6 +496,9 @@ class DynamicNewsStraddleEngine:
             return StraddleTickResult(
                 symbol=symbol, phase=StraddlePhase.FILLED, action="manage_open", session=session
             )
+
+        if not allow_place:
+            return StraddleTickResult(symbol=symbol, phase=StraddlePhase.IDLE, action="place_blocked")
 
         paused, upcoming = self.calendar.is_scalp_paused(
             now,

@@ -166,6 +166,155 @@ def test_place_straddle_and_oco_on_paper():
     assert oco.opened_position is not None
     assert oco.opened_position.direction.value == "buy"
     assert broker.get_pending_orders("XAUUSD", comment_prefix=COMMENT_PREFIX) == []
+    assert len(broker.get_open_positions("XAUUSD")) == 1
+
+
+def test_paper_fills_only_one_stop_per_quote():
+    broker = PaperBroker(_symbols_cfg())
+    broker.set_quote("XAUUSD", 2000.0, 2000.2)
+    broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.1,
+        price=2001.0,
+        stop_loss=1999.0,
+        take_profit=2005.0,
+        comment="CS_News_B",
+    )
+    broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.SELL_STOP,
+        volume=0.1,
+        price=1999.0,
+        stop_loss=2001.0,
+        take_profit=1995.0,
+        comment="CS_News_S",
+    )
+    # Wide spike that would cross both triggers — only one fill allowed.
+    broker.set_quote("XAUUSD", 1998.0, 2002.0)
+    assert len(broker.get_open_positions("XAUUSD")) == 1
+    assert len(broker.get_pending_orders("XAUUSD")) == 1
+
+
+def test_abort_pending_when_entries_blocked():
+    release = datetime(2026, 7, 29, 12, 30, tzinfo=UTC)
+    engine = _engine([NewsEvent(timestamp=release, currency="USD", impact="high", title="NFP")])
+    broker = PaperBroker(_symbols_cfg())
+    broker.set_quote("XAUUSD", 2000.0, 2000.2)
+    placed = engine.tick(
+        broker,
+        symbol="XAUUSD",
+        moment=release - timedelta(seconds=10),
+        m1_df=_m1_df(),
+        spread_pips=1.0,
+        currency="USD",
+        already_open=False,
+    )
+    assert placed.action == "placed"
+    aborted = engine.tick(
+        broker,
+        symbol="XAUUSD",
+        moment=release - timedelta(seconds=5),
+        m1_df=_m1_df(),
+        spread_pips=1.0,
+        currency="USD",
+        already_open=False,
+        allow_place=False,
+        abort_pending=True,
+    )
+    assert aborted.action == "aborted"
+    assert broker.get_pending_orders("XAUUSD", comment_prefix=COMMENT_PREFIX) == []
+
+
+def test_allow_place_false_blocks_new_brackets():
+    release = datetime(2026, 7, 29, 12, 30, tzinfo=UTC)
+    engine = _engine([NewsEvent(timestamp=release, currency="USD", impact="high", title="CPI")])
+    broker = PaperBroker(_symbols_cfg())
+    broker.set_quote("XAUUSD", 2000.0, 2000.2)
+    result = engine.tick(
+        broker,
+        symbol="XAUUSD",
+        moment=release - timedelta(seconds=10),
+        m1_df=_m1_df(),
+        spread_pips=1.0,
+        currency="USD",
+        already_open=False,
+        allow_place=False,
+    )
+    assert result.action == "place_blocked"
+    assert broker.get_pending_orders() == []
+
+
+def test_dual_fill_closes_orphan_leg():
+    release = datetime(2026, 7, 29, 12, 30, tzinfo=UTC)
+    engine = _engine([NewsEvent(timestamp=release, currency="USD", impact="high", title="FOMC")])
+    broker = PaperBroker(_symbols_cfg())
+    broker.set_quote("XAUUSD", 2000.0, 2000.2)
+    placed = engine.tick(
+        broker,
+        symbol="XAUUSD",
+        moment=release - timedelta(seconds=10),
+        m1_df=_m1_df(),
+        spread_pips=1.0,
+        currency="USD",
+        already_open=False,
+    )
+    assert placed.action == "placed"
+    session = engine.sessions["XAUUSD"]
+    # Simulate both legs filled before OCO ran (inject second position).
+    from chronoscalp.utils.types import Position, SignalType
+
+    buy = next(
+        o
+        for o in broker.get_pending_orders("XAUUSD")
+        if o.side == PendingOrderSide.BUY_STOP
+    )
+    broker.set_quote("XAUUSD", buy.price + 0.5, buy.price + 0.7)
+    assert len(broker.get_open_positions("XAUUSD")) == 1
+    orphan = Position(
+        ticket=broker._next_ticket,
+        symbol="XAUUSD",
+        direction=SignalType.SELL,
+        volume=0.1,
+        entry_price=1990.0,
+        stop_loss=1995.0,
+        take_profit=1980.0,
+        open_time=datetime.now(tz=UTC),
+    )
+    broker._positions[orphan.ticket] = orphan
+    broker._next_ticket += 1
+    assert len(broker.get_open_positions("XAUUSD")) == 2
+
+    oco = engine.manage_oco_and_trailing(broker, "XAUUSD")
+    assert oco.action in ("oco_filled", "oco_retry")
+    assert len(broker.get_open_positions("XAUUSD")) == 1
+    assert session.filled_position_ticket is not None
+
+
+def test_oco_retry_when_cancel_fails(monkeypatch: pytest.MonkeyPatch):
+    release = datetime(2026, 7, 29, 12, 30, tzinfo=UTC)
+    engine = _engine([NewsEvent(timestamp=release, currency="USD", impact="high", title="CPI")])
+    broker = PaperBroker(_symbols_cfg())
+    broker.set_quote("XAUUSD", 2000.0, 2000.2)
+    engine.tick(
+        broker,
+        symbol="XAUUSD",
+        moment=release - timedelta(seconds=10),
+        m1_df=_m1_df(),
+        spread_pips=1.0,
+        currency="USD",
+        already_open=False,
+    )
+    pending = broker.get_pending_orders("XAUUSD", comment_prefix=COMMENT_PREFIX)
+    buy = next(o for o in pending if o.side == PendingOrderSide.BUY_STOP)
+    broker.set_quote("XAUUSD", buy.price + 1.0, buy.price + 1.2)
+
+    monkeypatch.setattr(broker, "cancel_pending_order", lambda _t: False)
+    oco = engine.manage_oco_and_trailing(broker, "XAUUSD")
+    assert oco.action == "oco_retry"
+    assert oco.phase == StraddlePhase.PENDING
+    assert engine.sessions["XAUUSD"].phase == StraddlePhase.PENDING
+
 
 
 def test_spread_block_skips_placement():
