@@ -196,6 +196,7 @@ class DailyDrawdownGuard:
     starting_equity: float = 0.0
     day_utc: date | None = None
     blocked: bool = False
+    enabled: bool = True
 
     def roll_day(self, equity: float, at: datetime) -> None:
         day = at.astimezone(UTC).date() if at.tzinfo else at.date()
@@ -213,6 +214,9 @@ class DailyDrawdownGuard:
         at: datetime | None = None,
     ) -> bool:
         """Return True if daily loss limit is hit (should close all + block)."""
+        if not self.enabled:
+            self.blocked = False
+            return False
         now = at or datetime.now(tz=UTC)
         self.roll_day(equity, now)
         if self.starting_equity <= 0:

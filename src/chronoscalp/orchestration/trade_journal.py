@@ -480,6 +480,22 @@ def load_daily_reset_marker(state_dir: str | Path, mode: str) -> datetime | None
         return None
 
 
+def write_daily_reset_marker(state_dir: str | Path, mode: str) -> datetime:
+    """Write an operator reset marker so prior closed trades stop counting today.
+
+    The live/paper bot must be restarted for the marker to take effect (it is
+    applied when seeding the daily tracker at startup).
+    """
+    path = Path(state_dir) / f"daily_reset_{mode}.json"
+    reset_at = datetime.now(tz=UTC)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"reset_at": reset_at.isoformat()}, indent=2),
+        encoding="utf-8",
+    )
+    return reset_at
+
+
 def journal_path_for(state_dir: str | Path, mode: str) -> Path:
     """Canonical path: ``data/state/trade_journal_{mode}.json``."""
     return Path(state_dir) / f"trade_journal_{mode}.json"

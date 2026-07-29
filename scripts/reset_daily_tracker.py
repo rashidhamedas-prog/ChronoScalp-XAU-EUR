@@ -12,9 +12,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import UTC, datetime
 from pathlib import Path
+
+from chronoscalp.orchestration.trade_journal import write_daily_reset_marker
 
 
 def main() -> None:
@@ -27,11 +27,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    reset_at = write_daily_reset_marker(Path(args.state_dir), args.mode)
     path = Path(args.state_dir) / f"daily_reset_{args.mode}.json"
-    payload = {"reset_at": datetime.now(tz=UTC).isoformat()}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"Daily tracker reset marker written: {path} -> {payload['reset_at']}")
+    print(f"Daily tracker reset marker written: {path} -> {reset_at.isoformat()}")
     print("Restart the bot (run_live) for the reset to take effect.")
 
 

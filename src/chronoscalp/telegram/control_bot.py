@@ -22,10 +22,11 @@ import requests
 from chronoscalp.config import Settings, get_settings
 from chronoscalp.logging_setup import logger
 from chronoscalp.orchestration.kill_switch import KillSwitch
-from chronoscalp.orchestration.trade_journal import load_journal_snapshot
+from chronoscalp.orchestration.trade_journal import load_journal_snapshot, write_daily_reset_marker
 from chronoscalp.saas.broker_wizard import (
     apply_active_symbols,
     apply_broker_to_settings_yaml,
+    apply_daily_loss_limit_enabled,
     apply_enabled_strategies,
     apply_risk_preset,
     apply_trading_hours_mode,
@@ -267,13 +268,24 @@ class TelegramControlBot:
             reply_markup=hours_keyboard(),
         )
 
+    def _daily_loss_enabled(self) -> bool:
+        return bool(self.settings.risk.get("daily_loss_limit_enabled", True))
+
+    def _risk_keyboard(self) -> dict:
+        return risk_keyboard(daily_loss_enabled=self._daily_loss_enabled())
+
     def _cmd_risk_menu(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
+        self._reload_settings()
+        enabled = self._daily_loss_enabled()
+        status = "روشن ✅" if enabled else "خاموش ⬜"
         self.send(
             chat_id,
             "ریسک هر معامله را انتخاب کنید:\n"
-            "۰٫۵٪ / ۱٪ / ۱٫۵٪ — سقف امن پروژه ۱٪ است (۱٫۵٪ → ۱٪).",
-            reply_markup=risk_keyboard(),
+            "۰٫۵٪ / ۱٪ / ۱٫۵٪ — سقف امن پروژه ۱٪ است (۱٫۵٪ → ۱٪).\n\n"
+            f"قفل ضرر روزانه: {status}\n"
+            f"سقف ضرر روز: {float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%",
+            reply_markup=self._risk_keyboard(),
         )
 
     def _cmd_whoami(self, chat_id: int, _text: str = "") -> None:
@@ -567,13 +579,16 @@ class TelegramControlBot:
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
         hours = self._trading_hours_label()
+        daily_loss = "on" if self._daily_loss_enabled() else "off"
         text = (
             self._connection_summary()
             + "\n\nکنترل / Control\n"
             + f"symbols={symbols}\n"
             + f"strategies={','.join(strats) or '(MACD/trend only)'}\n"
             + f"trading_hours={hours}\n"
-            + f"risk_effective={risk}%"
+            + f"risk_effective={risk}%\n"
+            + f"daily_loss_limit={daily_loss}"
+            + f" ({float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%)"
         )
         self.send(chat_id, text, reply_markup=SETTINGS_KEYBOARD)
 
@@ -1056,7 +1071,7 @@ class TelegramControlBot:
         self.send(
             chat_id,
             f"✅ ریسک مؤثر = {effective}%{note}\nربات را Stop سپس Start کنید.",
-            reply_markup=risk_keyboard(),
+            reply_markup=self._risk_keyboard(),
         )
 
     def _cmd_risk_05(self, chat_id: int, _text: str = "") -> None:
@@ -1082,6 +1097,82 @@ class TelegramControlBot:
             self.send(chat_id, "فقط presetهای 0.5 / 1 / 1.5 مجاز است.")
             return
         self._set_risk(chat_id, pct)
+
+    def _set_daily_loss_enabled(self, chat_id: int, enabled: bool) -> None:
+        apply_daily_loss_limit_enabled(enabled)
+        self._reload_settings()
+        label = "روشن ✅" if enabled else "خاموش ⬜"
+        self.send(
+            chat_id,
+            f"✅ قفل ضرر روزانه: {label}\n"
+            "ربات را Stop سپس Start کنید تا اعمال شود.",
+            reply_markup=self._risk_keyboard(),
+        )
+
+    def _cmd_daily_loss_on(self, chat_id: int, _text: str = "") -> None:
+        self._set_daily_loss_enabled(chat_id, True)
+
+    def _cmd_daily_loss_off(self, chat_id: int, _text: str = "") -> None:
+        self._set_daily_loss_enabled(chat_id, False)
+
+    def _detect_run_mode(self) -> str:
+        """Best-effort: user profile broker mode, else live if confirm, else paper."""
+        user = UserConfigStore().config
+        mode = (user.broker.mode or "").strip().lower()
+        if mode in ("live", "paper"):
+            return mode
+        if self.settings.secrets.live_trading_confirmed:
+            return "live"
+        return "paper"
+
+    def _restart_bot_for_mode(self, mode: str) -> str:
+        """Stop managed bot if running, then start in ``mode``. Returns status text."""
+        notes: list[str] = []
+        if self._running_fn():
+            ok, msg = self._stop_fn()
+            notes.append(("✅ " if ok else "⚠️ ") + msg)
+            time.sleep(1.5)
+        ok, msg = self._start_fn(mode)
+        notes.append(("✅ " if ok else "❌ ") + msg)
+        return "\n".join(notes)
+
+    def _cmd_daily_loss_unlock(self, chat_id: int, _text: str = "") -> None:
+        """Clear today's daily-loss count via reset marker and restart the bot."""
+        mode = self._detect_run_mode()
+        reset_at = write_daily_reset_marker(self.state_dir, mode)
+        # Also clear paper marker when unlocking live (and vice versa) so demos
+        # don't keep a stale seed if the operator switches modes.
+        other = "paper" if mode == "live" else "live"
+        write_daily_reset_marker(self.state_dir, other)
+        restart_msg = self._restart_bot_for_mode(mode)
+        self.send(
+            chat_id,
+            "✅ قفل ضرر امروز باز شد.\n"
+            f"marker={reset_at.isoformat()} mode={mode}\n"
+            f"{restart_msg}",
+            reply_markup=self._risk_keyboard(),
+        )
+
+    def _cmd_daily_loss(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args:
+            self._cmd_risk_menu(chat_id)
+            return
+        key = args[0].strip().lower()
+        if key in ("on", "1", "yes", "enable", "روشن"):
+            self._cmd_daily_loss_on(chat_id)
+            return
+        if key in ("off", "0", "no", "disable", "خاموش"):
+            self._cmd_daily_loss_off(chat_id)
+            return
+        if key in ("unlock", "reset", "باز", "unlock_today"):
+            self._cmd_daily_loss_unlock(chat_id)
+            return
+        self.send(
+            chat_id,
+            "استفاده: /daily_loss on|off|unlock",
+            reply_markup=self._risk_keyboard(),
+        )
 
     # --- pending wizard input ---
 
@@ -1218,6 +1309,10 @@ class TelegramControlBot:
             "risk_10": self._cmd_risk_10,
             "risk_15": self._cmd_risk_15,
             "risk": self._cmd_risk,
+            "daily_loss_on": self._cmd_daily_loss_on,
+            "daily_loss_off": self._cmd_daily_loss_off,
+            "daily_loss_unlock": self._cmd_daily_loss_unlock,
+            "daily_loss": self._cmd_daily_loss,
         }
         handlers[cmd](chat_id, text)
 

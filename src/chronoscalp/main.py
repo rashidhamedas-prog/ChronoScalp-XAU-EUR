@@ -181,9 +181,11 @@ class TradingBot:
         self.vol_cfg = risk_cfg.get("volatility_guard") or {}
         self.partial_cfg = risk_cfg.get("partial_tp") or {}
         self.chandelier_cfg = risk_cfg.get("chandelier") or {}
+        self.daily_loss_limit_enabled = bool(risk_cfg.get("daily_loss_limit_enabled", True))
         self.daily_dd_guard = DailyDrawdownGuard(
             max_daily_loss_pct=float(risk_cfg.get("max_daily_loss_pct", 3.0)),
             starting_equity=float(settings.backtest.get("initial_balance", 10_000)),
+            enabled=self.daily_loss_limit_enabled,
         )
         self.daily_dd_close_all = bool(risk_cfg.get("daily_drawdown_close_all", True))
         self._position_meta: dict[int, dict] = {}

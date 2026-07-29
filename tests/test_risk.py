@@ -90,6 +90,21 @@ def test_daily_tracker_manual_reset():
     assert not tracker.daily_loss_limit_hit(now)
 
 
+def test_daily_loss_limit_can_be_disabled():
+    tracker = DailyRiskTracker(
+        max_daily_loss_pct=3.0, starting_equity=10_000, enabled=False
+    )
+    now = datetime.now(tz=UTC)
+    tracker.record_trade_pnl(-500, at=now)
+    assert not tracker.daily_loss_limit_hit(now)
+
+    from chronoscalp.risk.institutional_guards import DailyDrawdownGuard
+
+    guard = DailyDrawdownGuard(max_daily_loss_pct=3.0, starting_equity=10_000, enabled=False)
+    assert not guard.check(10_000, realized_pnl_today=-500, unrealized_pnl=0, at=now)
+    assert not guard.blocked
+
+
 def test_resolve_active_risk_pct_default_and_presets():
     assert resolve_active_risk_pct({"active_risk_per_trade_pct": 0.5}) == 0.5
     assert resolve_active_risk_pct({"active_risk_per_trade_pct": 1.0}) == 1.0

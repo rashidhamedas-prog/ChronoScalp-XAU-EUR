@@ -52,6 +52,9 @@ BTN_HOURS_24H = "۲۴ ساعته"
 BTN_RISK_05 = "ریسک ۰٫۵٪"
 BTN_RISK_10 = "ریسک ۱٪"
 BTN_RISK_15 = "ریسک ۱٫۵٪"
+BTN_DAILY_LOSS_ON = "قفل ضرر روزانه روشن"
+BTN_DAILY_LOSS_OFF = "قفل ضرر روزانه خاموش"
+BTN_DAILY_LOSS_UNLOCK = "باز کردن قفل امروز"
 
 BTN_SYM_ALL = "همه نمادها ✓"
 BTN_SYM_NONE = "پاک کردن نمادها"
@@ -138,10 +141,16 @@ def hours_keyboard() -> dict[str, Any]:
     }
 
 
-def risk_keyboard() -> dict[str, Any]:
+def risk_keyboard(*, daily_loss_enabled: bool = True) -> dict[str, Any]:
+    daily_row = (
+        [{"text": BTN_DAILY_LOSS_OFF}, {"text": BTN_DAILY_LOSS_UNLOCK}]
+        if daily_loss_enabled
+        else [{"text": BTN_DAILY_LOSS_ON}, {"text": BTN_DAILY_LOSS_UNLOCK}]
+    )
     return {
         "keyboard": [
             [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
+            daily_row,
             [{"text": BTN_SUMMARY}, {"text": BTN_SETTINGS}],
             [{"text": BTN_MENU}],
         ],
@@ -193,6 +202,8 @@ CONTROL_KEYBOARD: dict[str, Any] = {
         [{"text": BTN_HOURS_MENU}, {"text": BTN_RISK_MENU}],
         [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
+        [{"text": BTN_DAILY_LOSS_ON}, {"text": BTN_DAILY_LOSS_OFF}],
+        [{"text": BTN_DAILY_LOSS_UNLOCK}],
         [{"text": BTN_SETTINGS}, {"text": BTN_MENU}],
     ],
     "resize_keyboard": True,
@@ -216,6 +227,7 @@ HELP_TEXT = (
     "• استراتژی‌ها → SMC / نقدینگی / اسکلپ / استرادل خبر → ذخیره\n"
     "• ساعات معامله → لندن/آمریکا یا ۲۴ ساعته\n"
     "• ریسک → ۰٫۵٪ / ۱٪ / ۱٫۵٪ (سقف امن ۱٪)\n"
+    "• قفل ضرر روزانه → روشن/خاموش یا باز کردن قفل امروز\n"
     "• اتصال → بروکر / حالت Paper|Live / تست / تأیید Live\n\n"
     "رمز MT5/OANDA فقط در ویزارد اتصال تایپ می‌شود (اجباری).\n"
     "نکته: Live بدون تأیید Live روشن استارت نمی‌شود.\n"
@@ -315,6 +327,13 @@ ALIASES: dict[str, str] = {
     BTN_RISK_15: "risk_15",
     "ریسک ۱٫۵٪": "risk_15",
     "/risk": "risk",
+    BTN_DAILY_LOSS_ON: "daily_loss_on",
+    "قفل ضرر روزانه روشن": "daily_loss_on",
+    BTN_DAILY_LOSS_OFF: "daily_loss_off",
+    "قفل ضرر روزانه خاموش": "daily_loss_off",
+    BTN_DAILY_LOSS_UNLOCK: "daily_loss_unlock",
+    "باز کردن قفل امروز": "daily_loss_unlock",
+    "/daily_loss": "daily_loss",
     "/provider": "provider",
     "/mode": "mode",
     "/set_mt5": "set_mt5",

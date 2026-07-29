@@ -337,6 +337,21 @@ def apply_trading_hours_mode(
     return normalized
 
 
+def apply_daily_loss_limit_enabled(
+    enabled: bool,
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> bool:
+    """Persist ``risk.daily_loss_limit_enabled`` (daily DD / loss entry block)."""
+    payload = _load_overrides(overrides_path)
+    risk = dict(payload.get("risk") or {})
+    risk["daily_loss_limit_enabled"] = bool(enabled)
+    payload["risk"] = risk
+    _write_overrides(overrides_path, payload)
+    logger.info("Daily loss limit enabled={}", bool(enabled))
+    return bool(enabled)
+
+
 def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
     import os

@@ -71,6 +71,18 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     assert data4["sessions"]["trade_outside_sessions"] is False
 
 
+def test_apply_daily_loss_limit_enabled(tmp_path: Path):
+    from chronoscalp.saas.broker_wizard import apply_daily_loss_limit_enabled
+
+    overrides = tmp_path / "runtime_overrides.yaml"
+    assert apply_daily_loss_limit_enabled(False, overrides_path=overrides) is False
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["risk"]["daily_loss_limit_enabled"] is False
+    assert apply_daily_loss_limit_enabled(True, overrides_path=overrides) is True
+    data2 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data2["risk"]["daily_loss_limit_enabled"] is True
+
+
 def test_apply_active_symbols_preserves_broker_symbol_case(tmp_path: Path):
     overrides = tmp_path / "runtime_overrides.yaml"
     saved = apply_active_symbols(

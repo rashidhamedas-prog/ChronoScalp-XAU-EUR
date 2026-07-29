@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,11 +32,15 @@ from chronoscalp.licensing import (  # noqa: E402
     issue_license,
 )
 from chronoscalp.orchestration.kill_switch import STOP_FILE_NAME, KillSwitch  # noqa: E402
-from chronoscalp.orchestration.trade_journal import load_journal_snapshot  # noqa: E402
+from chronoscalp.orchestration.trade_journal import (  # noqa: E402
+    load_journal_snapshot,
+    write_daily_reset_marker,
+)
 from chronoscalp.saas import (  # noqa: E402
     UserConfigStore,
     apply_active_symbols,
     apply_broker_to_settings_yaml,
+    apply_daily_loss_limit_enabled,
     apply_enabled_strategies,
     apply_risk_preset,
     apply_trading_hours_mode,
@@ -102,6 +107,11 @@ UI = {
         "risk_title": "ریسک هر معامله (% سرمایه)",
         "risk_hint": "پیش‌فرض ۱٪. سه گزینه: ۰٫۵ / ۱ / ۱٫۵ — سقف امنیتی پروژه حداکثر ۱٪ است؛ انتخاب ۱٫۵٪ عملاً ۱٪ اعمال می‌شود.",
         "risk_save": "اعمال ریسک",
+        "daily_loss_title": "قفل ضرر روزانه",
+        "daily_loss_hint": "اگر روشن باشد، بعد از رسیدن به سقف ضرر روزانه (مثلاً ۳٪) ورود جدید تا روز بعد یا تا «باز کردن قفل» متوقف می‌شود.",
+        "daily_loss_enable": "فعال باشد",
+        "daily_loss_save": "اعمال قفل ضرر روزانه",
+        "daily_loss_unlock": "باز کردن قفل امروز + ری‌استارت",
         "symbols_label": "نمادهای فعال",
         "symbols_hint": "یک یا چند نماد را انتخاب کنید. پیش‌فرض: همه.",
         "symbols_save": "اعمال نمادها",
@@ -188,6 +198,11 @@ UI = {
         "risk_title": "Risk per trade (% of equity)",
         "risk_hint": "Default 1%. Presets: 0.5 / 1 / 1.5 — project hard-caps at 1%; selecting 1.5% applies 1%.",
         "risk_save": "Apply risk",
+        "daily_loss_title": "Daily loss lock",
+        "daily_loss_hint": "When on, hitting the daily loss ceiling (e.g. 3%) blocks new entries until next day or unlock.",
+        "daily_loss_enable": "Enabled",
+        "daily_loss_save": "Apply daily loss lock",
+        "daily_loss_unlock": "Unlock today + restart",
         "symbols_label": "Active symbols",
         "symbols_hint": "Select one or more symbols. Default: all.",
         "symbols_save": "Apply symbols",
@@ -553,6 +568,50 @@ def page_control(settings) -> None:
     from chronoscalp.risk.position_sizing import resolve_active_risk_pct
 
     st.caption(f"Effective now: **{resolve_active_risk_pct(settings.risk)}%**")
+
+    st.markdown(f"#### {_t('daily_loss_title')}")
+    st.caption(_t("daily_loss_hint"))
+    daily_enabled = bool(settings.risk.get("daily_loss_limit_enabled", True))
+    daily_pct = float(settings.risk.get("max_daily_loss_pct", 3.0))
+    st.write(
+        f"{'سقف' if st.session_state.lang == 'fa' else 'Ceiling'}: **{daily_pct}%** | "
+        f"{'وضعیت' if st.session_state.lang == 'fa' else 'Status'}: "
+        f"**{'ON' if daily_enabled else 'OFF'}**"
+    )
+    daily_box = st.checkbox(
+        _t("daily_loss_enable"),
+        value=daily_enabled,
+        key="daily_loss_limit_cb",
+    )
+    dl1, dl2 = st.columns(2)
+    with dl1:
+        if st.button(_t("daily_loss_save"), key="daily_loss_save_btn"):
+            apply_daily_loss_limit_enabled(bool(daily_box))
+            get_settings.cache_clear()
+            st.success("ON" if daily_box else "OFF")
+            st.info(_t("need_restart"))
+            st.rerun()
+    with dl2:
+        if st.button(_t("daily_loss_unlock"), key="daily_loss_unlock_btn"):
+            user_cfg = UserConfigStore().config
+            unlock_mode = (
+                user_cfg.broker.mode
+                if user_cfg.broker.mode in ("paper", "live")
+                else "live"
+            )
+            reset_at = write_daily_reset_marker(Path("data/state"), unlock_mode)
+            write_daily_reset_marker(
+                Path("data/state"), "paper" if unlock_mode == "live" else "live"
+            )
+            if bot_is_running():
+                stop_bot()
+                time.sleep(1.5)
+                ok, msg = start_bot(mode=unlock_mode)
+                st.success(f"Unlocked @ {reset_at.isoformat()}")
+                st.info(msg)
+            else:
+                st.success(f"Unlocked @ {reset_at.isoformat()} — start the bot to apply")
+            st.rerun()
 
     user = UserConfigStore().config
     mode = user.broker.mode if user.broker.mode in ("paper", "live") else "paper"

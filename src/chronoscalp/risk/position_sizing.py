@@ -192,10 +192,11 @@ def passes_reward_risk_filter(signal: Signal, min_ratio: float) -> bool:
 class DailyRiskTracker:
     """Tracks realized P&L for the current day and enforces the daily loss
     limit — once hit, no new trades are permitted until the tracker rolls
-    over to a new day."""
+    over to a new day (unless ``enabled`` is False)."""
 
     max_daily_loss_pct: float
     starting_equity: float
+    enabled: bool = True
     _current_date: date = field(default_factory=lambda: datetime.now(tz=UTC).date())
     _realized_pnl_today: float = 0.0
 
@@ -219,6 +220,8 @@ class DailyRiskTracker:
             self._realized_pnl_today = 0.0
 
     def daily_loss_limit_hit(self, at: datetime | None = None) -> bool:
+        if not self.enabled:
+            return False
         self._roll_over_if_new_day(at or datetime.now(tz=UTC))
         loss_limit = -abs(self.starting_equity * (self.max_daily_loss_pct / 100.0))
         hit = self._realized_pnl_today <= loss_limit
@@ -253,6 +256,7 @@ class RiskManager:
         self.daily_tracker = DailyRiskTracker(
             max_daily_loss_pct=risk_cfg.get("max_daily_loss_pct", 3.0),
             starting_equity=starting_equity,
+            enabled=bool(risk_cfg.get("daily_loss_limit_enabled", True)),
         )
 
     def validate_signal(
