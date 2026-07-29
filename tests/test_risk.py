@@ -14,7 +14,7 @@ from chronoscalp.risk.position_sizing import (
     resolve_active_risk_pct,
     round_to_lot_step,
 )
-from chronoscalp.utils.types import Signal, SignalType, Timeframe
+from chronoscalp.utils.types import Position, Signal, SignalType, Timeframe
 
 XAUUSD_SPEC = {
     "pip_size": 0.01,
@@ -381,3 +381,39 @@ def test_fit_economic_scalp_returns_none_when_caps_too_tight():
         )
         is None
     )
+
+
+def test_breakeven_stop_uses_initial_sl_and_never_widens():
+    rm = RiskManager(
+        risk_cfg={"breakeven_at_r_multiple": 1.0},
+        spread_cfg={"enabled": False},
+        symbols_cfg={"XAUUSD": XAUUSD_SPEC},
+        starting_equity=10_000,
+    )
+    # Trailed BUY: current SL already above entry.
+    pos = Position(
+        ticket=1,
+        symbol="XAUUSD",
+        direction=SignalType.BUY,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=2010.0,
+        take_profit=2030.0,
+        open_time=datetime.now(tz=UTC),
+        initial_stop_loss=1990.0,
+    )
+    assert rm.breakeven_stop(pos, current_price=2020.0) is None
+
+    # Fresh BUY at 1R from initial stop → BE at entry.
+    fresh = Position(
+        ticket=2,
+        symbol="XAUUSD",
+        direction=SignalType.BUY,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=1990.0,
+        take_profit=2020.0,
+        open_time=datetime.now(tz=UTC),
+        initial_stop_loss=1990.0,
+    )
+    assert rm.breakeven_stop(fresh, current_price=2010.0) == pytest.approx(2000.0)

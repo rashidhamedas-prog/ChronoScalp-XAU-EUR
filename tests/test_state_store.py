@@ -42,3 +42,23 @@ def test_state_store_loads_utf8_bom(tmp_path: Path):
     store = TradingStateStore(path)
     store.load()
     assert store.state.open_tickets == {"BTCUSD": 7}
+
+
+def test_state_store_persists_position_meta(tmp_path: Path):
+    path = tmp_path / "state_meta.json"
+    store = TradingStateStore(path)
+    store.state.open_tickets = {"XAUUSD": 42}
+    store.state.position_meta = {
+        "42": {
+            "initial_volume": 0.1,
+            "initial_stop_loss": 1990.0,
+            "partial_taken": True,
+            "breakeven_moved": False,
+        }
+    }
+    store.save()
+
+    reloaded = TradingStateStore(path)
+    reloaded.load()
+    assert reloaded.state.position_meta["42"]["initial_stop_loss"] == 1990.0
+    assert reloaded.state.position_meta["42"]["partial_taken"] is True

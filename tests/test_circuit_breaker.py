@@ -20,6 +20,18 @@ def test_circuit_breaker_resets_on_success():
     assert cb.record_failure("y") is False
 
 
+def test_circuit_breaker_untrips_after_success():
+    """A brief disconnect must not permanently block entries until restart."""
+    cb = CircuitBreaker(max_consecutive_errors=2)
+    cb.record_failure("a")
+    assert cb.record_failure("b") is True
+    assert cb.is_tripped is True
+    cb.record_success()
+    assert cb.is_tripped is False
+    assert cb.consecutive_errors == 0
+    assert cb.tripped_at is None
+
+
 def test_circuit_breaker_manual_reset():
     cb = CircuitBreaker(max_consecutive_errors=1)
     cb.record_failure("x")

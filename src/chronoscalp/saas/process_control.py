@@ -13,6 +13,7 @@ from chronoscalp.logging_setup import logger
 
 PID_FILE = Path("data/user/bot.pid")
 ROOT = Path(__file__).resolve().parents[3]
+_BOT_STDOUT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB — rotate before VPS disk fills
 
 
 def _python_executable() -> str:
@@ -57,6 +58,19 @@ def bot_is_running(pid_file: Path = PID_FILE) -> bool:
     return True
 
 
+def _rotate_bot_stdout_if_needed(stdout_path: Path) -> None:
+    """Rotate ``bot_stdout.log`` when oversized (no built-in rotation otherwise)."""
+    try:
+        if not stdout_path.exists() or stdout_path.stat().st_size < _BOT_STDOUT_MAX_BYTES:
+            return
+        backup = stdout_path.with_suffix(".log.1")
+        backup.unlink(missing_ok=True)
+        stdout_path.rename(backup)
+        logger.info("Rotated oversized bot_stdout.log -> {}", backup.name)
+    except OSError as exc:
+        logger.warning("Could not rotate bot_stdout.log: {}", exc)
+
+
 def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str]:
     """Spawn ``scripts/run_live.py`` in the background."""
     if bot_is_running(pid_file):
@@ -84,6 +98,7 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
     log_dir = ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = log_dir / "bot_stdout.log"
+    _rotate_bot_stdout_if_needed(stdout_path)
     stdout = stdout_path.open("a", encoding="utf-8")
 
     creationflags = 0

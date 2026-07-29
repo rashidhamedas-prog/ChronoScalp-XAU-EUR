@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal
@@ -196,16 +196,16 @@ class DailyRiskTracker:
 
     max_daily_loss_pct: float
     starting_equity: float
-    _current_date: date = field(default_factory=lambda: datetime.utcnow().date())
+    _current_date: date = field(default_factory=lambda: datetime.now(tz=UTC).date())
     _realized_pnl_today: float = 0.0
 
     def record_trade_pnl(self, pnl: float, at: datetime | None = None) -> None:
-        self._roll_over_if_new_day(at or datetime.utcnow())
+        self._roll_over_if_new_day(at or datetime.now(tz=UTC))
         self._realized_pnl_today += pnl
 
     def reset(self, *, starting_equity: float | None = None) -> None:
         """Zero today's realized P&L (manual override / demo unlock)."""
-        self._current_date = datetime.utcnow().date()
+        self._current_date = datetime.now(tz=UTC).date()
         self._realized_pnl_today = 0.0
         if starting_equity is not None:
             self.starting_equity = float(starting_equity)
@@ -213,17 +213,18 @@ class DailyRiskTracker:
         logger.info("Daily risk tracker reset (realized_pnl_today=0)")
 
     def _roll_over_if_new_day(self, at: datetime) -> None:
-        if at.date() != self._current_date:
-            self._current_date = at.date()
+        day = at.date() if at.tzinfo is None else at.astimezone(UTC).date()
+        if day != self._current_date:
+            self._current_date = day
             self._realized_pnl_today = 0.0
 
     def daily_loss_limit_hit(self, at: datetime | None = None) -> bool:
-        self._roll_over_if_new_day(at or datetime.utcnow())
+        self._roll_over_if_new_day(at or datetime.now(tz=UTC))
         loss_limit = -abs(self.starting_equity * (self.max_daily_loss_pct / 100.0))
         hit = self._realized_pnl_today <= loss_limit
         if hit:
             # Avoid flooding logs every poll tick while the limit remains active.
-            now_ts = (at or datetime.utcnow()).timestamp()
+            now_ts = (at or datetime.now(tz=UTC)).timestamp()
             last = getattr(self, "_last_limit_log_at", 0.0)
             if now_ts - last >= 300.0:
                 self._last_limit_log_at = now_ts
@@ -369,11 +370,23 @@ class RiskManager:
         )
 
     def breakeven_stop(self, position: Position, current_price: float) -> float | None:
-        """Return a new stop-loss at entry price (breakeven) once price has
-        moved `breakeven_at_r_multiple` R in favor, else None (no change)."""
+        """Return a new stop-loss at entry (breakeven) once price has moved
+        ``breakeven_at_r_multiple`` R in favor, else None.
+
+        R is measured from the *initial* stop (not a already-trailed SL). Never
+        returns a stop that widens risk versus the current SL — e.g. after ATR
+        trailing has already locked profit past entry.
+        """
+        if position.breakeven_moved:
+            return None
         r_trigger = self.risk_cfg.get("breakeven_at_r_multiple", 1.0)
-        risk = abs(position.entry_price - position.stop_loss)
-        if risk == 0 or position.breakeven_moved:
+        sl0 = (
+            position.initial_stop_loss
+            if position.initial_stop_loss is not None
+            else position.stop_loss
+        )
+        risk = abs(position.entry_price - sl0)
+        if risk == 0:
             return None
 
         favorable_move = (
@@ -381,9 +394,13 @@ class RiskManager:
             if position.direction.value == "buy"
             else position.entry_price - current_price
         )
-        if favorable_move >= r_trigger * risk:
-            return position.entry_price
-        return None
+        if favorable_move < r_trigger * risk:
+            return None
+
+        candidate = position.entry_price
+        if position.direction.value == "buy":
+            return candidate if candidate > position.stop_loss else None
+        return candidate if candidate < position.stop_loss else None
 
     def trailing_stop(
         self, position: Position, current_price: float, atr_value: float

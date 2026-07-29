@@ -254,6 +254,13 @@ class MT5Connector:
             pd.DatetimeIndex([], tz="UTC", name="time")
         )
 
+    @staticmethod
+    def _drop_forming_bar(df: pd.DataFrame) -> pd.DataFrame:
+        """Drop the incomplete current candle so callers see completed bars only."""
+        if len(df) >= 2:
+            return df.iloc[:-1].copy()
+        return df
+
     def _mark_empty(self) -> None:
         self._consecutive_empty += 1
         if self._consecutive_empty >= 8:
@@ -322,13 +329,16 @@ class MT5Connector:
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df = df.set_index("time")
-        return df[
+        df = df[
             [
                 c
                 for c in ["open", "high", "low", "close", "tick_volume", "spread"]
                 if c in df.columns
             ]
         ]
+        # Position 0 from copy_rates_from_pos is the still-forming candle —
+        # drop it so strategy iloc[-1] matches the bar-close gate.
+        return self._drop_forming_bar(df)
 
     def _broker_time_now(self, symbol: str) -> datetime:
         """Latest tick timestamp for ``symbol`` (server-stamped pseudo-UTC).
@@ -382,7 +392,8 @@ class MT5Connector:
         bars = ticks_to_ohlcv(tdf, seconds)
         if bars.empty:
             return bars
-        return bars.tail(count)
+        # Last tick-bucket is incomplete until the period rolls — drop it.
+        return self._drop_forming_bar(bars.tail(count + 1))
 
     def fetch_ohlcv_range(
         self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime

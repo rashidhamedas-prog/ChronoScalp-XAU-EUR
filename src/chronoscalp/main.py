@@ -191,6 +191,11 @@ class TradingBot:
         state_path = self.state_dir / f"trading_state_{mode}.json"
         self.state_store = TradingStateStore(state_path)
         self.state_store.load()
+        for ticket_key, meta in (self.state_store.state.position_meta or {}).items():
+            try:
+                self._position_meta[int(ticket_key)] = dict(meta)
+            except (TypeError, ValueError):
+                logger.warning("Skipping invalid position_meta key {!r}", ticket_key)
 
         self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
         self.trade_journal.load()
@@ -270,6 +275,7 @@ class TradingBot:
         self._reconcile_state_with_broker()
         self._last_reconcile_at = datetime.now(tz=UTC)
         self._started_at = self._last_reconcile_at
+        self._seed_daily_equity_from_broker()
 
         poll_seconds = int(self.poll_interval)
         logger.info(
@@ -465,7 +471,40 @@ class TradingBot:
         self.state_store.state.last_evaluated_bars = {
             sym: ts.isoformat() for sym, ts in self.bar_gate.last_evaluated_bars().items()
         }
+        self.state_store.state.position_meta = {
+            str(ticket): dict(meta) for ticket, meta in self._position_meta.items()
+        }
         self.state_store.save()
+
+    def _seed_daily_equity_from_broker(self) -> None:
+        """Align daily-loss bases with live account equity (not backtest config)."""
+        try:
+            bal = float(self.broker.get_balance())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not seed daily equity from broker: {}", exc)
+            return
+        if bal <= 0:
+            return
+        self.risk_manager.daily_tracker.starting_equity = bal
+        self.daily_dd_guard.starting_equity = bal
+        self.daily_dd_guard.day_utc = datetime.now(tz=UTC).date()
+        logger.info("Daily risk seeded from live equity={:.2f}", bal)
+
+    def _mark_engine_bars_evaluated(
+        self,
+        symbol: str,
+        *,
+        run_scalp: bool,
+        scalp_bar: datetime | None,
+        run_institutional: bool,
+        inst_bar: datetime | None,
+    ) -> None:
+        if not self.trade_on_bar_close:
+            return
+        if run_scalp and scalp_bar is not None:
+            self.bar_gate.mark_evaluated(f"{symbol}:scalp", scalp_bar)
+        if run_institutional and inst_bar is not None:
+            self.bar_gate.mark_evaluated(f"{symbol}:inst", inst_bar)
 
     def tick(self) -> None:
         now = datetime.now(tz=UTC)
@@ -493,6 +532,11 @@ class TradingBot:
         unrealized = self._estimate_unrealized_pnl()
         realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
         daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
+        # Keep DailyRiskTracker base equity aligned with the DD guard day seed.
+        if self.daily_dd_guard.starting_equity > 0:
+            self.risk_manager.daily_tracker.starting_equity = float(
+                self.daily_dd_guard.starting_equity
+            )
         daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
             at=now
         )
@@ -843,12 +887,6 @@ class TradingBot:
                     else:
                         skip_parts.append(f"inst:{(inst_sig.reason or 'no_signal')}")
 
-                if self.trade_on_bar_close:
-                    if run_scalp and scalp_bar is not None:
-                        self.bar_gate.mark_evaluated(f"{symbol}:scalp", scalp_bar)
-                    if run_institutional and inst_bar is not None:
-                        self.bar_gate.mark_evaluated(f"{symbol}:inst", inst_bar)
-
                 # Risk/dedup each candidate independently, then pick the strongest.
                 viable = []
                 for cand in raw_signals:
@@ -879,6 +917,14 @@ class TradingBot:
                     viable.append((cand, cand_tf, cand_bar, dedup_key))
 
                 if not viable:
+                    # Soft skips (no signal / risk / dedup) consume the bar.
+                    self._mark_engine_bars_evaluated(
+                        symbol,
+                        run_scalp=run_scalp,
+                        scalp_bar=scalp_bar,
+                        run_institutional=run_institutional,
+                        inst_bar=inst_bar,
+                    )
                     detail = (
                         "|".join(skip_parts) if skip_parts else "no_signal"
                     ).replace(" ", "_")
@@ -903,10 +949,24 @@ class TradingBot:
                 equity = self.broker.get_balance()
                 volume = self.risk_manager.position_size_for(signal, equity)
                 if volume <= 0:
+                    self._mark_engine_bars_evaluated(
+                        symbol,
+                        run_scalp=run_scalp,
+                        scalp_bar=scalp_bar,
+                        run_institutional=run_institutional,
+                        inst_bar=inst_bar,
+                    )
                     self._note_skip(f"{symbol}:zero_volume")
                     continue
 
                 position = self.broker.place_order(signal, volume)
+                self._mark_engine_bars_evaluated(
+                    symbol,
+                    run_scalp=run_scalp,
+                    scalp_bar=scalp_bar,
+                    run_institutional=run_institutional,
+                    inst_bar=inst_bar,
+                )
                 self.open_tickets[symbol] = position.ticket
                 self._position_meta[position.ticket] = {
                     "initial_volume": position.volume,
@@ -931,10 +991,19 @@ class TradingBot:
 
             except StaleStopsError as exc:
                 # Price moved through SL/TP before fill — skip, do not trip circuit breaker.
+                # Consume the bar so we do not hammer the same stale geometry.
+                self._mark_engine_bars_evaluated(
+                    symbol,
+                    run_scalp=locals().get("run_scalp", False),
+                    scalp_bar=locals().get("scalp_bar"),
+                    run_institutional=locals().get("run_institutional", False),
+                    inst_bar=locals().get("inst_bar"),
+                )
                 self._note_skip(f"{symbol}:stale_stops")
                 logger.warning("Skipping {} — {}", symbol, exc)
 
             except Exception:  # noqa: BLE001 - one symbol's failure must not kill the loop
+                # Do NOT mark the bar evaluated — retry on the next poll for soft broker errors.
                 tick_had_failure = True
                 failure_context = f"symbol={symbol}"
                 self._note_skip(f"{symbol}:exception")

@@ -44,6 +44,13 @@ def exit_price_for_hit(position: Position, hit: SlTpHit) -> float:
     return position.stop_loss if hit.hit_sl else position.take_profit
 
 
+def _is_tighter_stop(position: Position, new_sl: float) -> bool:
+    """True when ``new_sl`` reduces risk vs the current stop (never widens)."""
+    if position.direction == SignalType.BUY:
+        return new_sl > position.stop_loss
+    return new_sl < position.stop_loss
+
+
 def apply_breakeven_or_trailing(
     risk_manager: RiskManager,
     position: Position,
@@ -52,10 +59,12 @@ def apply_breakeven_or_trailing(
 ) -> float | None:
     """Return a tighter stop-loss if breakeven or trailing rules apply, else None."""
     new_sl = risk_manager.breakeven_stop(position, current_price)
-    if new_sl is not None:
+    if new_sl is not None and _is_tighter_stop(position, new_sl):
         return new_sl
     if atr_value is not None and atr_value > 0:
-        return risk_manager.trailing_stop(position, current_price, atr_value)
+        trailed = risk_manager.trailing_stop(position, current_price, atr_value)
+        if trailed is not None and _is_tighter_stop(position, trailed):
+            return trailed
     return None
 
 

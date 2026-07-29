@@ -13,16 +13,22 @@ from chronoscalp.orchestration.bar_scheduler import (
 from chronoscalp.utils.types import SignalType, Timeframe
 
 
-def test_last_completed_bar_time_uses_penultimate_row():
+def test_last_completed_bar_time_uses_last_row():
+    """Completed-only frames: gate key must match strategy iloc[-1]."""
     index = pd.date_range("2026-01-01", periods=5, freq="1min", tz="UTC")
     df = pd.DataFrame({"close": range(5)}, index=index)
-    assert last_completed_bar_time(df) == index[-2].to_pydatetime()
+    assert last_completed_bar_time(df) == index[-1].to_pydatetime()
 
 
-def test_last_completed_bar_time_requires_two_rows():
+def test_last_completed_bar_time_empty():
+    df = pd.DataFrame({"close": []}, index=pd.DatetimeIndex([], tz="UTC"))
+    assert last_completed_bar_time(df) is None
+
+
+def test_last_completed_bar_time_single_row():
     index = pd.date_range("2026-01-01", periods=1, freq="1min", tz="UTC")
     df = pd.DataFrame({"close": [1]}, index=index)
-    assert last_completed_bar_time(df) is None
+    assert last_completed_bar_time(df) == index[-1].to_pydatetime()
 
 
 def test_bar_close_gate_only_fires_once_per_bar():

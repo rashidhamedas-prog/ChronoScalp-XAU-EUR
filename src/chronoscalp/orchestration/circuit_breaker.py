@@ -34,7 +34,18 @@ class CircuitBreaker:
         return self._tripped_at
 
     def record_success(self) -> None:
+        """Clear the failure streak and un-trip after a clean tick.
+
+        Without clearing ``_tripped``, a brief disconnect permanently blocks
+        new entries until process restart (``reset()`` was never wired into
+        the live loop).
+        """
+        was_tripped = self._tripped
         self._consecutive_errors = 0
+        self._tripped = False
+        self._tripped_at = None
+        if was_tripped:
+            logger.info("Circuit breaker reset after successful tick")
 
     def record_failure(self, context: str = "") -> bool:
         """Increment failure count; return True if the breaker just tripped."""

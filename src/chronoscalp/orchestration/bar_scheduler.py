@@ -10,14 +10,16 @@ from chronoscalp.utils.types import SignalType, Timeframe
 
 
 def last_completed_bar_time(df: pd.DataFrame) -> datetime | None:
-    """Timestamp of the most recently *closed* bar (index -2).
+    """Timestamp of the most recently *closed* bar (index -1).
 
-    ``copy_rates_from_pos(..., 0, n)`` includes the forming bar at index -1;
-    strategy signals must be evaluated on completed bars only.
+    Callers must pass frames that contain **completed bars only**. Live MT5
+    fetches drop the forming candle before returning; OANDA already filters
+    ``complete=false``. Strategy code reads ``iloc[-1]``, so the gate key must
+    match that same row — using -2 previously keyed dedup/gate on the wrong bar.
     """
-    if df.empty or len(df) < 2:
+    if df.empty:
         return None
-    ts = df.index[-2]
+    ts = df.index[-1]
     if isinstance(ts, pd.Timestamp):
         return ts.to_pydatetime()
     if isinstance(ts, datetime):

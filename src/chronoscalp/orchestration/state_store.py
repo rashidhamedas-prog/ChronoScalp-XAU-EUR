@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ class TradingState:
     open_tickets: dict[str, int] = field(default_factory=dict)
     processed_signals: list[str] = field(default_factory=list)
     last_evaluated_bars: dict[str, str] = field(default_factory=dict)
+    position_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
     updated_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -23,16 +24,21 @@ class TradingState:
             "open_tickets": dict(self.open_tickets),
             "processed_signals": list(self.processed_signals),
             "last_evaluated_bars": dict(self.last_evaluated_bars),
+            "position_meta": {str(k): dict(v) for k, v in self.position_meta.items()},
             "updated_at": self.updated_at,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TradingState:
+        raw_meta = data.get("position_meta") or {}
         return cls(
             open_tickets={str(k): int(v) for k, v in (data.get("open_tickets") or {}).items()},
             processed_signals=list(data.get("processed_signals") or []),
             last_evaluated_bars={
                 str(k): str(v) for k, v in (data.get("last_evaluated_bars") or {}).items()
+            },
+            position_meta={
+                str(k): dict(v) for k, v in raw_meta.items() if isinstance(v, dict)
             },
             updated_at=str(data.get("updated_at") or ""),
         )
@@ -64,7 +70,7 @@ class TradingStateStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.state.updated_at = datetime.utcnow().isoformat()
+        self.state.updated_at = datetime.now(tz=UTC).isoformat()
         with self.path.open("w", encoding="utf-8") as f:
             json.dump(self.state.to_dict(), f, indent=2)
 

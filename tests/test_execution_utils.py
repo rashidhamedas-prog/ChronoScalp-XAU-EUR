@@ -13,7 +13,11 @@ from chronoscalp.execution.mt5_utils import (
     spread_points_to_pips,
     validate_stops_vs_fill_price,
 )
-from chronoscalp.execution.position_logic import check_sl_tp_hit, exit_price_for_hit
+from chronoscalp.execution.position_logic import (
+    apply_breakeven_or_trailing,
+    check_sl_tp_hit,
+    exit_price_for_hit,
+)
 from chronoscalp.utils.types import Position, SignalType
 
 
@@ -189,3 +193,31 @@ def test_check_sl_tp_hit_sell_take_profit():
     hit = check_sl_tp_hit(position, bar_high=1.1005, bar_low=1.0965)
     assert hit.hit_tp is True
     assert exit_price_for_hit(position, hit) == pytest.approx(1.0970)
+
+
+def test_apply_breakeven_never_widens_after_trail():
+    """ATR trail locked profit past entry — classic BE must not pull SL back."""
+    from chronoscalp.risk.position_sizing import RiskManager
+
+    rm = RiskManager(
+        risk_cfg={"breakeven_at_r_multiple": 1.0, "trailing_stop_atr_multiple": 1.5},
+        spread_cfg={"enabled": False},
+        symbols_cfg={},
+        starting_equity=10_000,
+    )
+    position = Position(
+        ticket=9,
+        symbol="XAUUSD",
+        direction=SignalType.BUY,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=2010.0,  # already trailed into profit
+        take_profit=2030.0,
+        open_time=datetime.now(tz=UTC),
+        breakeven_moved=False,
+        initial_stop_loss=1990.0,
+    )
+    # Favorable move from initial R easily clears 1R, but BE at 2000 would widen.
+    new_sl = apply_breakeven_or_trailing(rm, position, current_price=2020.0, atr_value=5.0)
+    assert new_sl is None or new_sl > position.stop_loss
+    assert rm.breakeven_stop(position, 2020.0) is None

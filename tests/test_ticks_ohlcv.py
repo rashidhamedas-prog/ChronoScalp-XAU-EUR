@@ -38,6 +38,17 @@ def test_ticks_to_ohlcv_counts_ticks_when_volume_zero():
     assert bars["tick_volume"].iloc[0] >= 10
 
 
+def test_drop_forming_bar_keeps_completed_only():
+    from chronoscalp.data.mt5_connector import MT5Connector
+
+    index = pd.date_range("2026-01-01", periods=4, freq="1min", tz="UTC")
+    df = pd.DataFrame({"close": [1, 2, 3, 4]}, index=index)
+    out = MT5Connector._drop_forming_bar(df)
+    assert len(out) == 3
+    assert out.index[-1] == index[-2]
+    assert list(out["close"]) == [1, 2, 3]
+
+
 def test_subminute_tick_window_uses_broker_clock():
     """UTC+3 broker: tick range must end at broker tick time, not real UTC.
 
