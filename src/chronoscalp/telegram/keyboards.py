@@ -1,4 +1,9 @@
-"""Telegram keyboards, labels, and help text for ChronoScalp control bot."""
+"""Telegram keyboards, labels, and help text for ChronoScalp control bot.
+
+Settings are **menu-only** (reply keyboards): tap to toggle / choose — no typing
+required for symbols, strategies, hours, or risk. Credential wizards (MT5/OANDA
+passwords) still accept typed secrets because those values cannot be enumerated.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +26,9 @@ BTN_MENU = "منوی اصلی"
 # --- Settings hub ---
 BTN_CONN = "اتصال"
 BTN_CONTROL = "کنترل"
+BTN_HOURS_MENU = "ساعات معامله"
+BTN_RISK_MENU = "ریسک معامله"
+BTN_SUMMARY = "خلاصه تنظیمات"
 
 # --- Connection ---
 BTN_CONN_SHOW = "نمایش اتصال"
@@ -35,7 +43,7 @@ BTN_OANDA_PRACTICE = "OANDA practice"
 BTN_OANDA_LIVE = "OANDA live"
 BTN_CANCEL = "لغو"
 
-# --- Control ---
+# --- Control / trading settings ---
 BTN_CTRL_SHOW = "نمایش کنترل"
 BTN_SYMBOLS = "نمادها"
 BTN_STRATEGIES = "استراتژی‌ها"
@@ -45,12 +53,111 @@ BTN_RISK_05 = "ریسک ۰٫۵٪"
 BTN_RISK_10 = "ریسک ۱٪"
 BTN_RISK_15 = "ریسک ۱٫۵٪"
 
+BTN_SYM_ALL = "همه نمادها ✓"
+BTN_SYM_NONE = "پاک کردن نمادها"
+BTN_SYM_SAVE = "ذخیره نمادها"
+BTN_STRAT_ALL = "همه استراتژی‌ها ✓"
+BTN_STRAT_NONE = "فقط MACD/trend"
+BTN_STRAT_SAVE = "ذخیره استراتژی‌ها"
+
+# Toggle markers (menu-only pickers)
+TOGGLE_ON = "✅"
+TOGGLE_OFF = "⬜"
+
+STRATEGY_LABELS: dict[str, str] = {
+    "smc_confluence": "SMC",
+    "liquidity_volume": "نقدینگی+حجم",
+    "ultra_scalp": "اسکلپ S15",
+    "news_straddle": "استرادل خبر",
+}
+STRATEGY_LABEL_TO_KEY: dict[str, str] = {v: k for k, v in STRATEGY_LABELS.items()}
+
+
+def toggle_label(name: str, *, enabled: bool) -> str:
+    """Build a tap-to-toggle reply-keyboard label."""
+    mark = TOGGLE_ON if enabled else TOGGLE_OFF
+    return f"{mark} {name}"
+
+
+def parse_toggle_label(text: str) -> str | None:
+    """Extract the payload after ✅/⬜, or None if not a toggle button."""
+    raw = (text or "").strip()
+    for mark in (TOGGLE_ON, TOGGLE_OFF, "✓", "○"):
+        prefix = f"{mark} "
+        if raw.startswith(prefix):
+            return raw[len(prefix) :].strip() or None
+    return None
+
+
+def _chunk_buttons(labels: list[str], per_row: int = 2) -> list[list[dict[str, str]]]:
+    rows: list[list[dict[str, str]]] = []
+    row: list[dict[str, str]] = []
+    for label in labels:
+        row.append({"text": label})
+        if len(row) >= per_row:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return rows
+
+
+def symbols_keyboard(catalog: list[str], selected: list[str] | set[str]) -> dict[str, Any]:
+    """Reply keyboard: one toggle per symbol + save / bulk actions."""
+    selected_u = {str(s).strip().upper() for s in selected}
+    labels = [
+        toggle_label(sym, enabled=str(sym).strip().upper() in selected_u) for sym in catalog
+    ]
+    rows = _chunk_buttons(labels, per_row=2)
+    rows.append([{"text": BTN_SYM_ALL}, {"text": BTN_SYM_NONE}])
+    rows.append([{"text": BTN_SYM_SAVE}, {"text": BTN_CANCEL}])
+    rows.append([{"text": BTN_CONTROL}, {"text": BTN_SETTINGS}])
+    return {"keyboard": rows, "resize_keyboard": True, "is_persistent": True}
+
+
+def strategies_keyboard(selected: list[str] | set[str]) -> dict[str, Any]:
+    """Reply keyboard: toggle each known strategy + save."""
+    selected_l = {str(s).strip().lower() for s in selected}
+    labels = [
+        toggle_label(STRATEGY_LABELS[key], enabled=key in selected_l)
+        for key in STRATEGY_LABELS
+    ]
+    rows = _chunk_buttons(labels, per_row=2)
+    rows.append([{"text": BTN_STRAT_ALL}, {"text": BTN_STRAT_NONE}])
+    rows.append([{"text": BTN_STRAT_SAVE}, {"text": BTN_CANCEL}])
+    rows.append([{"text": BTN_CONTROL}, {"text": BTN_SETTINGS}])
+    return {"keyboard": rows, "resize_keyboard": True, "is_persistent": True}
+
+
+def hours_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
+            [{"text": BTN_SUMMARY}, {"text": BTN_SETTINGS}],
+            [{"text": BTN_MENU}],
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
+def risk_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
+            [{"text": BTN_SUMMARY}, {"text": BTN_SETTINGS}],
+            [{"text": BTN_MENU}],
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
 MAIN_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_STATUS}, {"text": BTN_PNL}, {"text": BTN_OPEN}],
         [{"text": BTN_START_PAPER}, {"text": BTN_START_LIVE}, {"text": BTN_STOP_BOT}],
         [{"text": BTN_HALT}, {"text": BTN_RESUME}],
-        [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_LOGS}, {"text": BTN_SETTINGS}, {"text": BTN_HELP}],
     ],
     "resize_keyboard": True,
@@ -59,9 +166,11 @@ MAIN_KEYBOARD: dict[str, Any] = {
 
 SETTINGS_KEYBOARD: dict[str, Any] = {
     "keyboard": [
+        [{"text": BTN_SUMMARY}],
         [{"text": BTN_CONN}, {"text": BTN_CONTROL}],
-        [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
-        [{"text": BTN_CONN_SHOW}, {"text": BTN_CTRL_SHOW}],
+        [{"text": BTN_SYMBOLS}, {"text": BTN_STRATEGIES}],
+        [{"text": BTN_HOURS_MENU}, {"text": BTN_RISK_MENU}],
+        [{"text": BTN_LIVE_ON}, {"text": BTN_LIVE_OFF}],
         [{"text": BTN_MENU}],
     ],
     "resize_keyboard": True,
@@ -84,6 +193,7 @@ CONTROL_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_CTRL_SHOW}],
         [{"text": BTN_SYMBOLS}, {"text": BTN_STRATEGIES}],
+        [{"text": BTN_HOURS_MENU}, {"text": BTN_RISK_MENU}],
         [{"text": BTN_HOURS_LONDON}, {"text": BTN_HOURS_24H}],
         [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
         [{"text": BTN_SETTINGS}, {"text": BTN_MENU}],
@@ -101,26 +211,18 @@ OANDA_ENV_KEYBOARD: dict[str, Any] = {
 }
 
 HELP_TEXT = (
-    "ChronoScalp — کنترل کامل از تلگرام\n\n"
-    "اجرا:\n"
-    "/status /start_paper /start_live /bot_stop\n"
-    "/pnl /open /halt /resume /logs\n\n"
-    "اتصال:\n"
-    "/conn — خلاصه اتصال\n"
-    "/provider mt5|oanda\n"
-    "/mode paper|live\n"
-    "/set_mt5 LOGIN PASS SERVER [PATH]\n"
-    "/set_oanda TOKEN ACCOUNT [practice|live]\n"
-    "/test_conn\n"
-    "/live_confirm yes|no\n\n"
-    "کنترل:\n"
-    "/config — همه تنظیمات\n"
-    "/symbols XAUUSD,EURUSD\n"
-    "/strategies smc_confluence,liquidity_volume,ultra_scalp,news_straddle\n"
-    "/hours london_ny|always_on_24h\n"
-    "/risk 0.5|1|1.5\n\n"
-    "منو: /settings\n"
-    "نکته: Live بدون CHRONOSCALP_CONFIRM_LIVE=yes استارت نمی‌شود."
+    "ChronoScalp — کنترل از تلگرام\n\n"
+    "اجرا (منوی اصلی):\n"
+    "وضعیت · سود/زیان · پوزیشن‌ها · استارت/توقف · Kill Switch · لاگ\n\n"
+    "تنظیمات (فقط از منو — بدون تایپ):\n"
+    "• نمادها → تیک بزنید → ذخیره نمادها\n"
+    "• استراتژی‌ها → SMC / نقدینگی / اسکلپ / استرادل خبر → ذخیره\n"
+    "• ساعات معامله → لندن/آمریکا یا ۲۴ ساعته\n"
+    "• ریسک → ۰٫۵٪ / ۱٪ / ۱٫۵٪ (سقف امن ۱٪)\n"
+    "• اتصال → بروکر / حالت Paper|Live / تست / تأیید Live\n\n"
+    "رمز MT5/OANDA فقط در ویزارد اتصال تایپ می‌شود (اجباری).\n"
+    "نکته: Live بدون تأیید Live روشن استارت نمی‌شود.\n"
+    "بعد از تغییر تنظیمات ربات را Stop سپس Start کنید."
 )
 
 # Map button labels / command aliases → canonical command key.
@@ -174,7 +276,9 @@ ALIASES: dict[str, str] = {
     BTN_CONTROL: "control_menu",
     "کنترل": "control_menu",
     BTN_CTRL_SHOW: "config",
+    BTN_SUMMARY: "config",
     "نمایش کنترل": "config",
+    "خلاصه تنظیمات": "config",
     "/config": "config",
     BTN_PROVIDER_MT5: "wizard_mt5",
     "بروکر mt5": "wizard_mt5",
@@ -192,12 +296,16 @@ ALIASES: dict[str, str] = {
     BTN_LIVE_OFF: "live_off",
     "تأیید live خاموش": "live_off",
     "/live_confirm": "live_confirm",
-    BTN_SYMBOLS: "symbols_prompt",
-    "نمادها": "symbols_prompt",
+    BTN_SYMBOLS: "symbols_menu",
+    "نمادها": "symbols_menu",
     "/symbols": "symbols",
-    BTN_STRATEGIES: "strategies_prompt",
-    "استراتژی‌ها": "strategies_prompt",
+    BTN_STRATEGIES: "strategies_menu",
+    "استراتژی‌ها": "strategies_menu",
     "/strategies": "strategies",
+    BTN_HOURS_MENU: "hours_menu",
+    "ساعات معامله": "hours_menu",
+    BTN_RISK_MENU: "risk_menu",
+    "ریسک معامله": "risk_menu",
     BTN_HOURS_LONDON: "hours_london_ny",
     "سشن لندن/آمریکا": "hours_london_ny",
     BTN_HOURS_24H: "hours_24h",
@@ -218,4 +326,12 @@ ALIASES: dict[str, str] = {
     BTN_OANDA_LIVE: "oanda_env_live",
     BTN_CANCEL: "cancel",
     "لغو": "cancel",
+    BTN_SYM_ALL: "symbols_all",
+    BTN_SYM_NONE: "symbols_none",
+    BTN_SYM_SAVE: "symbols_save",
+    "ذخیره نمادها": "symbols_save",
+    BTN_STRAT_ALL: "strategies_all",
+    BTN_STRAT_NONE: "strategies_none",
+    BTN_STRAT_SAVE: "strategies_save",
+    "ذخیره استراتژی‌ها": "strategies_save",
 }
