@@ -70,5 +70,6 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Cost-aware ultra-scalp geometry:** `fit_economic_scalp_geometry` widens S15 SL to 2× typical spread and TP to net ≥1:1 after costs (within ATR caps); config uses wider ATR multiples + `trend_mode: primary` — 1% equity risk ceiling unchanged
 - [x] **Multi-strategy OR + trading hours modes:** ultra-scalp no longer blocks SMC/liquidity; panel/Telegram `london_ny` vs `always_on_24h` (`sessions.trading_hours_mode`)
 - [x] **Parallel strategy engines:** S15 ultra-scalp and M1 institutional/SMC/liquidity evaluate independently on their own bar closes (not sequential fallback); strongest viable R:R wins if both fire
+- [x] **Independent symbol entries:** `risk.independent_symbol_entries` + correlation off + `max_concurrent_positions` ≥ active symbols so each pair can hold its own ticket without cross-pair correlation/`max_concurrent` blocking (1% risk / R:R unchanged; still one position per symbol)
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand

@@ -61,6 +61,8 @@ from chronoscalp.risk.institutional_guards import (
     SpreadMovingAverageGuard,
     ThreeStrikesGuard,
     correlation_blocks,
+    correlation_guard_enabled,
+    effective_max_concurrent_positions,
     volatility_decision,
 )
 from chronoscalp.risk.position_sizing import RiskManager
@@ -116,7 +118,12 @@ class TradingBot:
             self.fetch_timeframes = list(STANDARD_TIMEFRAMES)
 
         self.trade_on_bar_close = bool(settings.execution.get("trade_on_bar_close_only", True))
-        self.max_concurrent = int(settings.risk.get("max_concurrent_positions", 2))
+        self.independent_symbol_entries = bool(
+            settings.risk.get("independent_symbol_entries", False)
+        )
+        self.max_concurrent = effective_max_concurrent_positions(
+            settings.risk, len(settings.symbols)
+        )
         self.state_dir = Path(settings.execution.get("state_dir", "data/state"))
         self.data_source = resolve_data_source(settings)
 
@@ -605,7 +612,9 @@ class TradingBot:
                         )
                         continue
 
-                if bool(self.corr_cfg.get("enabled", True)) and self.open_tickets:
+                # Cross-symbol correlation is optional. With independent_symbol_entries
+                # each pair may open regardless of other open tickets (still one per symbol).
+                if correlation_guard_enabled(self.settings.risk) and self.open_tickets:
                     m5 = data_by_tf.get(Timeframe.M5)
                     if m5 is not None and not m5.empty:
                         closes_map = {symbol: m5["close"]}

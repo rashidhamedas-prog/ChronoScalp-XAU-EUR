@@ -165,6 +165,29 @@ def correlation_blocks(
     return False
 
 
+def effective_max_concurrent_positions(risk_cfg: dict, n_symbols: int) -> int:
+    """Portfolio-wide open-ticket cap.
+
+    With ``independent_symbol_entries``, raise the cap to at least one slot per
+    active symbol (``already_open`` still prevents doubling the same pair).
+    """
+    base = int(risk_cfg.get("max_concurrent_positions", 2))
+    if bool(risk_cfg.get("independent_symbol_entries", False)):
+        return max(base, max(1, int(n_symbols)))
+    return base
+
+
+def correlation_guard_enabled(risk_cfg: dict) -> bool:
+    """Whether cross-symbol correlation should block new entries.
+
+    Independent mode defaults correlation OFF so pairs do not suppress each other.
+    """
+    corr = risk_cfg.get("correlation") or {}
+    if bool(risk_cfg.get("independent_symbol_entries", False)):
+        return bool(corr.get("enabled", False))
+    return bool(corr.get("enabled", True))
+
+
 @dataclass
 class DailyDrawdownGuard:
     """Hard daily cutoff using starting equity at 00:00 GMT (realized + unrealized)."""

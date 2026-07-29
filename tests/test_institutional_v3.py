@@ -9,7 +9,13 @@ import pandas as pd
 
 from chronoscalp.execution.trade_manager import manage_open_position, partial_tp_action
 from chronoscalp.indicators.session_vwap import asian_range_midpoint, session_vwap
-from chronoscalp.risk.institutional_guards import ThreeStrikesGuard, volatility_allows
+from chronoscalp.risk.institutional_guards import (
+    ThreeStrikesGuard,
+    correlation_blocks,
+    correlation_guard_enabled,
+    effective_max_concurrent_positions,
+    volatility_allows,
+)
 from chronoscalp.strategy.trend_filter import institutional_bias
 from chronoscalp.utils.types import Position, SignalType, Timeframe, TrendDirection
 
@@ -134,6 +140,60 @@ def test_manage_open_uses_partial_before_chandelier():
     )
     action = manage_open_position(pos, 1.1120, df, spread_price=0.0001)
     assert action.partial is not None
+
+
+def test_correlation_blocks_high_abs_corr():
+    idx = pd.date_range("2026-07-25", periods=30, freq="5min", tz="UTC")
+    a = pd.Series(np.linspace(1.0, 1.3, 30), index=idx)
+    b = pd.Series(np.linspace(2.0, 2.6, 30), index=idx)  # perfectly correlated
+    open_pos = [
+        Position(
+            ticket=1,
+            symbol="EURUSD_o",
+            direction=SignalType.BUY,
+            volume=1.0,
+            entry_price=1.1,
+            stop_loss=1.0,
+            take_profit=1.2,
+            open_time=datetime(2026, 7, 25, tzinfo=UTC),
+        )
+    ]
+    assert correlation_blocks(
+        "XAUUSD_o",
+        a,
+        open_pos,
+        {"XAUUSD_o": a, "EURUSD_o": b},
+        period=20,
+        max_abs_corr=0.80,
+    )
+    # Uncorrelated noise should not block
+    rng = np.random.default_rng(0)
+    noise = pd.Series(rng.normal(size=30).cumsum(), index=idx)
+    assert not correlation_blocks(
+        "BTCUSD",
+        noise,
+        open_pos,
+        {"BTCUSD": noise, "EURUSD_o": b},
+        period=20,
+        max_abs_corr=0.99,
+    )
+
+
+def test_independent_symbol_entries_raises_concurrent_and_disables_corr_by_default():
+    risk = {
+        "max_concurrent_positions": 2,
+        "independent_symbol_entries": True,
+        "correlation": {},
+    }
+    assert effective_max_concurrent_positions(risk, n_symbols=5) == 5
+    assert correlation_guard_enabled(risk) is False
+    # Explicit re-enable still honored
+    risk["correlation"] = {"enabled": True}
+    assert correlation_guard_enabled(risk) is True
+    # Legacy mode keeps prior defaults
+    legacy = {"max_concurrent_positions": 3, "independent_symbol_entries": False}
+    assert effective_max_concurrent_positions(legacy, n_symbols=5) == 3
+    assert correlation_guard_enabled(legacy) is True
 
 
 def test_timeframe_m15_seconds():

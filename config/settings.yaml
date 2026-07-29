@@ -99,7 +99,12 @@ risk:
   active_risk_per_trade_pct: 1.0
   min_reward_risk_ratio: 1.5
   max_daily_loss_pct: 3.0
-  max_concurrent_positions: 3
+  # One open position per symbol is already enforced; this cap is portfolio-wide.
+  # Keep >= number of active symbols so pairs do not block each other.
+  max_concurrent_positions: 8
+  # When true: each symbol may open independently (no cross-pair correlation block;
+  # max_concurrent is at least len(active symbols)). Per-trade 1% risk / R:R unchanged.
+  independent_symbol_entries: true
   use_kelly_sizing: false
   breakeven_at_r_multiple: 1.0
   trailing_stop_atr_multiple: 1.5
@@ -109,7 +114,9 @@ risk:
     max_losses: 3
     pause_hours: 12
   correlation:
-    enabled: true
+    # Off by default with independent_symbol_entries — re-enable only if you want
+    # correlated pairs to suppress each other.
+    enabled: false
     period: 20
     max_abs_corr: 0.80
   volatility_guard:
