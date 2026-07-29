@@ -18,7 +18,15 @@ from chronoscalp.execution.oanda_utils import (
     to_instrument,
 )
 from chronoscalp.logging_setup import logger
-from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
+from chronoscalp.utils.types import (
+    PendingOrder,
+    PendingOrderSide,
+    Position,
+    Quote,
+    Signal,
+    SignalType,
+    TradeResult,
+)
 
 
 class OANDABroker:
@@ -128,6 +136,48 @@ class OANDABroker:
         ask = float(asks[0].get("price", 0))
         pip_size = float(self._symbols_cfg.get(symbol, {}).get("pip_size", 0.0001))
         return spread_pips_from_prices(bid, ask, pip_size)
+
+    def get_quote(self, symbol: str) -> Quote | None:
+        instrument = to_instrument(symbol)
+        url = f"{self._base_url}/v3/accounts/{self._account_id}/pricing"
+        params = {"instruments": instrument}
+        response = requests.get(url, headers=self._headers(), params=params, timeout=self._timeout)
+        if response.status_code >= 400:
+            return None
+        prices = (response.json().get("prices") or [{}])[0]
+        bids = prices.get("bids") or [{}]
+        asks = prices.get("asks") or [{}]
+        bid = float(bids[0].get("price", 0) or 0)
+        ask = float(asks[0].get("price", 0) or 0)
+        if bid <= 0 or ask <= 0:
+            return None
+        return Quote(symbol=symbol, bid=bid, ask=ask, time=datetime.now(tz=UTC))
+
+    def place_pending_stop(
+        self,
+        *,
+        symbol: str,
+        side: PendingOrderSide,
+        volume: float,
+        price: float,
+        stop_loss: float,
+        take_profit: float,
+        expiration: datetime | None = None,
+        comment: str = "",
+    ) -> PendingOrder:
+        raise NotImplementedError(
+            "News straddle pending STOP orders require MT5 (or paper). "
+            "OANDA stop-entry wiring is not implemented in this release."
+        )
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        logger.warning("OANDA cancel_pending_order unsupported (ticket={})", ticket)
+        return False
+
+    def get_pending_orders(
+        self, symbol: str | None = None, comment_prefix: str | None = None
+    ) -> list[PendingOrder]:
+        return []
 
     def place_order(self, signal: Signal, volume: float) -> Position:
         instrument = to_instrument(signal.symbol)

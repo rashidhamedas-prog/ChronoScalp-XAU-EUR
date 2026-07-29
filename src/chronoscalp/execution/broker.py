@@ -9,9 +9,17 @@ implementations without touching anything above this layer.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
-from chronoscalp.utils.types import Position, Signal, TradeResult
+from chronoscalp.utils.types import (
+    PendingOrder,
+    PendingOrderSide,
+    Position,
+    Quote,
+    Signal,
+    TradeResult,
+)
 
 
 class Broker(Protocol):
@@ -31,8 +39,37 @@ class Broker(Protocol):
         """Current bid/ask spread in pips, used by the spread filter."""
         ...
 
+    def get_quote(self, symbol: str) -> Quote | None:
+        """Live bid/ask quote, or None when unavailable."""
+        ...
+
     def place_order(self, signal: Signal, volume: float) -> Position:
         """Submit a market order derived from `signal`, sized at `volume` lots."""
+        ...
+
+    def place_pending_stop(
+        self,
+        *,
+        symbol: str,
+        side: PendingOrderSide,
+        volume: float,
+        price: float,
+        stop_loss: float,
+        take_profit: float,
+        expiration: datetime | None = None,
+        comment: str = "",
+    ) -> PendingOrder:
+        """Place a BUY_STOP / SELL_STOP pending order (news straddle)."""
+        ...
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        """Cancel a working pending order by ticket."""
+        ...
+
+    def get_pending_orders(
+        self, symbol: str | None = None, comment_prefix: str | None = None
+    ) -> list[PendingOrder]:
+        """Working pending orders, optionally filtered by symbol / comment prefix."""
         ...
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:

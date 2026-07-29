@@ -531,7 +531,7 @@ class TelegramControlBot:
         from chronoscalp.risk.position_sizing import resolve_active_risk_pct
         from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.settings.strategy)
+        use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(self.settings.strategy)
         strats = []
         if use_smc:
             strats.append("smc_confluence")
@@ -539,6 +539,8 @@ class TelegramControlBot:
             strats.append("liquidity_volume")
         if use_scalp:
             strats.append("ultra_scalp")
+        if use_news:
+            strats.append("news_straddle")
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
         hours = self._trading_hours_label()
@@ -797,7 +799,9 @@ class TelegramControlBot:
             chat_id,
             f"استراتژی‌های شناخته‌شده:\n{known}\n\n"
             "لیست را با ویرگول بفرستید (خالی = فقط MACD/trend):\n"
-            "smc_confluence,liquidity_volume\nیا /cancel",
+            "smc_confluence,liquidity_volume,ultra_scalp,news_straddle\n"
+            "news_straddle = استرادل خبری ATR (NFP/CPI/FOMC) با Spread Shield و OCO\n"
+            "یا /cancel",
             reply_markup=CONTROL_KEYBOARD,
         )
 

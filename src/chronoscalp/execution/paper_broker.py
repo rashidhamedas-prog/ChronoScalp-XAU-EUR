@@ -10,7 +10,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from chronoscalp.logging_setup import logger
-from chronoscalp.utils.types import Position, Signal, SignalType, TradeResult
+from chronoscalp.utils.types import (
+    PendingOrder,
+    PendingOrderSide,
+    Position,
+    Quote,
+    Signal,
+    SignalType,
+    TradeResult,
+)
 
 
 class PaperBroker:
@@ -25,6 +33,8 @@ class PaperBroker:
         self.balance = starting_balance
         self.slippage_pips = slippage_pips
         self._positions: dict[int, Position] = {}
+        self._pending: dict[int, PendingOrder] = {}
+        self._quotes: dict[str, Quote] = {}
         self._next_ticket = 1
 
     def connect(self) -> bool:
@@ -35,6 +45,11 @@ class PaperBroker:
         return self.balance
 
     def get_open_positions(self, symbol: str | None = None) -> list[Position]:
+        if symbol:
+            self._maybe_fill_pendings(symbol)
+        else:
+            for sym in {o.symbol for o in self._pending.values()}:
+                self._maybe_fill_pendings(sym)
         positions = list(self._positions.values())
         if symbol:
             positions = [p for p in positions if p.symbol == symbol]
@@ -42,6 +57,130 @@ class PaperBroker:
 
     def get_current_spread_pips(self, symbol: str) -> float:
         return float(self.symbols_cfg[symbol]["typical_spread_pips"])
+
+    def set_quote(self, symbol: str, bid: float, ask: float, at: datetime | None = None) -> None:
+        """Test/paper helper — inject a live quote for pending fill simulation."""
+        self._quotes[symbol] = Quote(
+            symbol=symbol, bid=float(bid), ask=float(ask), time=at or datetime.now(tz=UTC)
+        )
+        self._maybe_fill_pendings(symbol)
+
+    def get_quote(self, symbol: str) -> Quote | None:
+        if symbol in self._quotes:
+            return self._quotes[symbol]
+        # Fallback synthetic quote around last known mid from an open position or 0.
+        spread_pips = self.get_current_spread_pips(symbol)
+        pip_size = float(self.symbols_cfg[symbol]["pip_size"])
+        half = spread_pips * pip_size / 2.0
+        mid = None
+        for pos in self._positions.values():
+            if pos.symbol == symbol:
+                mid = pos.entry_price
+                break
+        if mid is None:
+            for pend in self._pending.values():
+                if pend.symbol == symbol:
+                    mid = pend.price
+                    break
+        if mid is None:
+            return None
+        return Quote(symbol=symbol, bid=mid - half, ask=mid + half, time=datetime.now(tz=UTC))
+
+    def place_pending_stop(
+        self,
+        *,
+        symbol: str,
+        side: PendingOrderSide,
+        volume: float,
+        price: float,
+        stop_loss: float,
+        take_profit: float,
+        expiration: datetime | None = None,
+        comment: str = "",
+    ) -> PendingOrder:
+        order = PendingOrder(
+            ticket=self._next_ticket,
+            symbol=symbol,
+            side=side,
+            volume=float(volume),
+            price=float(price),
+            stop_loss=float(stop_loss),
+            take_profit=float(take_profit),
+            comment=comment,
+            expiration=expiration,
+        )
+        self._pending[order.ticket] = order
+        self._next_ticket += 1
+        logger.info(
+            "[paper] Pending {} {} vol={} @ {:.5f} ticket={}",
+            symbol,
+            side.value,
+            volume,
+            price,
+            order.ticket,
+        )
+        return order
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        removed = self._pending.pop(int(ticket), None)
+        if removed is None:
+            return False
+        logger.info("[paper] Cancelled pending ticket={}", ticket)
+        return True
+
+    def get_pending_orders(
+        self, symbol: str | None = None, comment_prefix: str | None = None
+    ) -> list[PendingOrder]:
+        orders = list(self._pending.values())
+        if symbol:
+            orders = [o for o in orders if o.symbol == symbol]
+        if comment_prefix:
+            orders = [o for o in orders if (o.comment or "").startswith(comment_prefix)]
+        return orders
+
+    def _maybe_fill_pendings(self, symbol: str) -> None:
+        """Convert stop pendings into positions when the quote crosses the trigger."""
+        quote = self.get_quote(symbol)
+        if quote is None:
+            return
+        for ticket, order in list(self._pending.items()):
+            if order.symbol != symbol:
+                continue
+            filled = False
+            direction = SignalType.BUY
+            fill_price = order.price
+            if order.side == PendingOrderSide.BUY_STOP and quote.ask >= order.price:
+                filled = True
+                direction = SignalType.BUY
+                fill_price = max(order.price, quote.ask)
+            elif order.side == PendingOrderSide.SELL_STOP and quote.bid <= order.price:
+                filled = True
+                direction = SignalType.SELL
+                fill_price = min(order.price, quote.bid)
+            if not filled:
+                continue
+            self._pending.pop(ticket, None)
+            position = Position(
+                ticket=self._next_ticket,
+                symbol=symbol,
+                direction=direction,
+                volume=order.volume,
+                entry_price=fill_price,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
+                open_time=datetime.now(tz=UTC),
+                initial_volume=order.volume,
+                initial_stop_loss=order.stop_loss,
+            )
+            self._positions[position.ticket] = position
+            self._next_ticket += 1
+            logger.info(
+                "[paper] Pending filled {} {} @ {:.5f} (was order {})",
+                symbol,
+                direction.value,
+                fill_price,
+                ticket,
+            )
 
     def place_order(
         self, signal: Signal, volume: float, fill_price: float | None = None

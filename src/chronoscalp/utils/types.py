@@ -63,6 +63,13 @@ class SignalType(StrEnum):
     NONE = "none"
 
 
+class PendingOrderSide(StrEnum):
+    """Stop-entry pending sides (news straddle BUY_STOP / SELL_STOP)."""
+
+    BUY_STOP = "buy_stop"
+    SELL_STOP = "sell_stop"
+
+
 @dataclass(frozen=True)
 class Signal:
     """A validated, actionable trade signal produced by the strategy layer.
@@ -124,3 +131,36 @@ class TradeResult:
     pnl: float
     r_multiple: float = 0.0
     exit_reason: str = ""
+
+
+@dataclass(frozen=True)
+class Quote:
+    """Best bid/ask snapshot used by pending-order / spread-shield logic."""
+
+    symbol: str
+    bid: float
+    ask: float
+    time: datetime | None = None
+
+    @property
+    def mid(self) -> float:
+        return (self.bid + self.ask) / 2.0
+
+    @property
+    def spread(self) -> float:
+        return max(0.0, self.ask - self.bid)
+
+
+@dataclass(frozen=True)
+class PendingOrder:
+    """A working pending stop order tracked through the Broker interface."""
+
+    ticket: int
+    symbol: str
+    side: PendingOrderSide
+    volume: float
+    price: float
+    stop_loss: float
+    take_profit: float
+    comment: str = ""
+    expiration: datetime | None = None

@@ -111,6 +111,7 @@ UI = {
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
         "strategy_scalp": "معامله اسکلپ فوق‌سریع (S15 / Ultra Scalp)",
+        "strategy_news": "استرادل خبری ATR (NFP/CPI/FOMC + OCO)",
         "hours_label": "ساعات معامله",
         "hours_hint": "لندن+نیویورک = فقط سشن‌های نقدشوندگی | ۲۴ ساعته = همیشه فعال",
         "hours_london_ny": "فقط سشن لندن و آمریکا",
@@ -196,6 +197,7 @@ UI = {
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "Liquidity + Volume",
         "strategy_scalp": "Ultra Scalp (S15 burst / high frequency)",
+        "strategy_news": "News ATR Straddle (NFP/CPI/FOMC + OCO)",
         "hours_label": "Trading hours",
         "hours_hint": "London+NY = session windows only | 24h = always allow entries",
         "hours_london_ny": "London & New York sessions only",
@@ -445,8 +447,9 @@ def page_control(settings) -> None:
         "smc_confluence": _t("strategy_smc"),
         "liquidity_volume": _t("strategy_liq"),
         "ultra_scalp": _t("strategy_scalp"),
+        "news_straddle": _t("strategy_news"),
     }
-    use_smc, use_liq, use_scalp = resolve_enabled_strategies(settings.strategy)
+    use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(settings.strategy)
     default_strats: list[str] = []
     if use_smc:
         default_strats.append("smc_confluence")
@@ -454,8 +457,10 @@ def page_control(settings) -> None:
         default_strats.append("liquidity_volume")
     if use_scalp:
         default_strats.append("ultra_scalp")
+    if use_news:
+        default_strats.append("news_straddle")
     if not default_strats:
-        default_strats = list(KNOWN_STRATEGIES)
+        default_strats = [s for s in KNOWN_STRATEGIES if s != "news_straddle"]
 
     st.markdown(f"#### {_t('strategies_label')}")
     st.caption(_t("strategies_hint"))

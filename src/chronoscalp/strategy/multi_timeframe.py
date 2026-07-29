@@ -86,8 +86,8 @@ def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> boo
     return liquidity_volume_confirms(row, direction)
 
 
-def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool]:
-    """Return ``(use_smc, use_liquidity_volume, use_ultra_scalp)`` from config.
+def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool, bool]:
+    """Return ``(use_smc, use_liquidity_volume, use_ultra_scalp, use_news_straddle)``.
 
     Prefers ``enabled_strategies`` list when present; otherwise falls back to
     the boolean flags. Empty list means no confluence filter (MACD/trend only).
@@ -99,11 +99,13 @@ def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool]:
             "smc_confluence" in names,
             "liquidity_volume" in names,
             "ultra_scalp" in names,
+            "news_straddle" in names,
         )
     return (
         bool(strategy_cfg.get("use_smc_confluence", True)),
         bool(strategy_cfg.get("use_liquidity_volume", False)),
         bool(strategy_cfg.get("use_ultra_scalp", False)),
+        bool(strategy_cfg.get("use_news_straddle", False)),
     )
 
 
@@ -400,7 +402,7 @@ class MultiTimeframeStrategy:
         in one call, :func:`pick_best_signal` picks the strongest — scalp
         never blocks institutional just because it ran first.
         """
-        use_smc, use_liq, use_scalp = resolve_enabled_strategies(self.strategy_cfg)
+        use_smc, use_liq, use_scalp, _use_news = resolve_enabled_strategies(self.strategy_cfg)
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))

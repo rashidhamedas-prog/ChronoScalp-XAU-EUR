@@ -116,7 +116,7 @@ HELP_TEXT = (
     "کنترل:\n"
     "/config — همه تنظیمات\n"
     "/symbols XAUUSD,EURUSD\n"
-    "/strategies smc_confluence,liquidity_volume,ultra_scalp\n"
+    "/strategies smc_confluence,liquidity_volume,ultra_scalp,news_straddle\n"
     "/hours london_ny|always_on_24h\n"
     "/risk 0.5|1|1.5\n\n"
     "منو: /settings\n"
