@@ -139,7 +139,14 @@ class PaperBroker:
         return orders
 
     def _maybe_fill_pendings(self, symbol: str) -> None:
-        """Convert stop pendings into positions when the quote crosses the trigger."""
+        """Convert at most one stop pending into a position per quote update.
+
+        News straddles are OCO: filling both BUY_STOP and SELL_STOP on the same
+        spike would leave a hedged orphan. If a position is already open on the
+        symbol, leave remaining stops for the engine to cancel.
+        """
+        if any(p.symbol == symbol for p in self._positions.values()):
+            return
         quote = self.get_quote(symbol)
         if quote is None:
             return
@@ -181,6 +188,8 @@ class PaperBroker:
                 fill_price,
                 ticket,
             )
+            # One fill per quote — remaining stop is left for OCO cancel.
+            return
 
     def place_order(
         self, signal: Signal, volume: float, fill_price: float | None = None

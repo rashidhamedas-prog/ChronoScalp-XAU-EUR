@@ -532,6 +532,142 @@ class TradingBot:
                 self.spread_ma_guard.observe(symbol, spread_pips)
 
                 self._manage_open_position(symbol, now)
+
+                use_smc, use_liq, use_scalp, use_news_straddle = resolve_enabled_strategies(
+                    self.settings.strategy
+                )
+                currency = self._news_currency(symbol)
+
+                # News straddle management (OCO / expiry / abort) must run even when
+                # kill switch / daily loss blocks *new* entries — otherwise pending
+                # brackets are left unmanaged.
+                if use_news_straddle:
+                    session = self.news_straddle.sessions.get(symbol)
+                    needs_manage = session is not None and session.phase.value in (
+                        "pending",
+                        "filled",
+                    )
+                    at_capacity = len(self.open_tickets) >= self.max_concurrent
+                    three_paused = self.three_strikes_enabled and self.three_strikes.is_paused(
+                        symbol, at=now
+                    )
+                    in_session = self.session_filter.is_within_session(now, symbol=symbol)
+                    allow_place = (
+                        allow_new_entries
+                        and symbol not in self.open_tickets
+                        and not three_paused
+                        and not at_capacity
+                        and in_session
+                    )
+                    abort_pending = (
+                        not allow_new_entries
+                        and session is not None
+                        and session.phase.value == "pending"
+                    )
+                    run_straddle = needs_manage or allow_place
+                    if (
+                        not run_straddle
+                        and allow_new_entries
+                        and in_session
+                        and self.news_straddle.is_scalp_paused(now, currency)
+                    ):
+                        # Enter pause/place path even when not yet PENDING.
+                        run_straddle = True
+                        allow_place = (
+                            symbol not in self.open_tickets
+                            and not three_paused
+                            and not at_capacity
+                        )
+                    if run_straddle:
+                        m1_for_straddle = self.connector.fetch_ohlcv(
+                            symbol, Timeframe.M1, count=40
+                        )
+                        if m1_for_straddle is not None and not m1_for_straddle.empty:
+                            atr_period = int(
+                                (self.settings.strategy.get("news_straddle") or {}).get(
+                                    "atr_period", 14
+                                )
+                            )
+                            m1_for_straddle = enrich_with_indicators(
+                                m1_for_straddle,
+                                atr_period=atr_period,
+                            )
+                            if hasattr(self.broker, "set_quote"):
+                                mid = float(m1_for_straddle["close"].iloc[-1])
+                                pip_size = float(
+                                    self.settings.symbols_raw.get(symbol, {}).get(
+                                        "pip_size", 0.01
+                                    )
+                                    or 0.01
+                                )
+                                half = max(spread_pips, 0.0) * pip_size / 2.0
+                                self.broker.set_quote(symbol, mid - half, mid + half, now)
+                        else:
+                            m1_for_straddle = pd.DataFrame()
+
+                        straddle_res = self.news_straddle.tick(
+                            self.broker,
+                            symbol=symbol,
+                            moment=now,
+                            m1_df=m1_for_straddle,
+                            spread_pips=spread_pips,
+                            currency=currency,
+                            already_open=symbol in self.open_tickets,
+                            allow_place=allow_place,
+                            abort_pending=abort_pending,
+                        )
+                        if straddle_res.action in (
+                            "placed",
+                            "oco_filled",
+                            "filled",
+                            "oco_retry",
+                            "expired",
+                            "aborted",
+                        ):
+                            logger.info(
+                                "{} news_straddle action={} phase={}",
+                                symbol,
+                                straddle_res.action,
+                                straddle_res.phase.value,
+                            )
+                        if straddle_res.opened_position is not None:
+                            position = straddle_res.opened_position
+                            already = self.open_tickets.get(symbol) == position.ticket
+                            if not already:
+                                # Fill already happened at the broker — track it even
+                                # if we are at max_concurrent (exposure already exists).
+                                self.open_tickets[symbol] = position.ticket
+                                self._position_meta[position.ticket] = {
+                                    "initial_volume": position.volume,
+                                    "initial_stop_loss": position.stop_loss,
+                                    "partial_taken": False,
+                                    "breakeven_moved": False,
+                                }
+                                self.trade_journal.record_open(position)
+                                self._persist_state()
+                                self._last_trade_opened_at = now
+                                event_title = ""
+                                if straddle_res.session is not None:
+                                    event_title = straddle_res.session.event_title
+                                self.alerts.notify(
+                                    "News straddle filled",
+                                    (
+                                        f"{symbol} {position.direction.value} "
+                                        f"vol={position.volume:.2f} "
+                                        f"entry={position.entry_price:.5f} "
+                                        f"event={event_title}"
+                                    ),
+                                    AlertLevel.INFO,
+                                )
+                        if (
+                            self.news_straddle.is_scalp_paused(now, currency)
+                            or straddle_res.phase.value in ("paused", "pending")
+                            or straddle_res.action == "placed"
+                        ):
+                            if allow_new_entries:
+                                self._note_skip(f"{symbol}:news_straddle_{straddle_res.action}")
+                            continue
+
                 if not allow_new_entries:
                     continue
                 if symbol in self.open_tickets:
@@ -549,81 +685,6 @@ class TradingBot:
                 if not self.session_filter.is_within_session(now, symbol=symbol):
                     self._note_skip(f"{symbol}:outside_session")
                     continue
-
-                use_smc, use_liq, use_scalp, use_news_straddle = resolve_enabled_strategies(
-                    self.settings.strategy
-                )
-                currency = self._news_currency(symbol)
-
-                # News straddle: pause normal entries near high-impact releases and
-                # drive ATR pending brackets + OCO via the Broker interface.
-                if use_news_straddle:
-                    m1_for_straddle = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
-                    if m1_for_straddle is not None and not m1_for_straddle.empty:
-                        atr_period = int(
-                            (self.settings.strategy.get("news_straddle") or {}).get("atr_period", 14)
-                        )
-                        m1_for_straddle = enrich_with_indicators(
-                            m1_for_straddle,
-                            atr_period=atr_period,
-                        )
-                        # PaperBroker has no live ticks — seed bid/ask from last M1 close.
-                        if hasattr(self.broker, "set_quote"):
-                            mid = float(m1_for_straddle["close"].iloc[-1])
-                            pip_size = float(
-                                self.settings.symbols_raw.get(symbol, {}).get("pip_size", 0.01)
-                                or 0.01
-                            )
-                            half = max(spread_pips, 0.0) * pip_size / 2.0
-                            self.broker.set_quote(symbol, mid - half, mid + half, now)
-                    else:
-                        m1_for_straddle = pd.DataFrame()
-                    straddle_res = self.news_straddle.tick(
-                        self.broker,
-                        symbol=symbol,
-                        moment=now,
-                        m1_df=m1_for_straddle,
-                        spread_pips=spread_pips,
-                        currency=currency,
-                        already_open=symbol in self.open_tickets,
-                    )
-                    if straddle_res.action in ("placed", "oco_filled", "filled", "expired"):
-                        logger.info(
-                            "{} news_straddle action={} phase={}",
-                            symbol,
-                            straddle_res.action,
-                            straddle_res.phase.value,
-                        )
-                    if straddle_res.opened_position is not None:
-                        position = straddle_res.opened_position
-                        self.open_tickets[symbol] = position.ticket
-                        self._position_meta[position.ticket] = {
-                            "initial_volume": position.volume,
-                            "initial_stop_loss": position.stop_loss,
-                            "partial_taken": False,
-                            "breakeven_moved": False,
-                        }
-                        self.trade_journal.record_open(position)
-                        self._persist_state()
-                        self._last_trade_opened_at = now
-                        event_title = ""
-                        if straddle_res.session is not None:
-                            event_title = straddle_res.session.event_title
-                        self.alerts.notify(
-                            "News straddle filled",
-                            (
-                                f"{symbol} {position.direction.value} vol={position.volume:.2f} "
-                                f"entry={position.entry_price:.5f} event={event_title}"
-                            ),
-                            AlertLevel.INFO,
-                        )
-                        continue
-                    if self.news_straddle.is_scalp_paused(now, currency) or straddle_res.phase.value in (
-                        "paused",
-                        "pending",
-                    ):
-                        self._note_skip(f"{symbol}:news_straddle_{straddle_res.action}")
-                        continue
 
                 if self.news_filter.is_blackout(now, currency=currency):
                     self._note_skip(f"{symbol}:news_blackout")
