@@ -47,6 +47,8 @@ config/runtime_overrides.yaml
 *.csv
 *.parquet
 !config/*.yaml
+# Keep local/panel runtime overlay out of git (overrides the !config/*.yaml above).
+config/runtime_overrides.yaml
 
 # Logs
 logs/
