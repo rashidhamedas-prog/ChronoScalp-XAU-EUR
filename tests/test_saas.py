@@ -69,6 +69,18 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     assert data4["sessions"]["trade_outside_sessions"] is False
 
 
+def test_apply_active_symbols_preserves_broker_symbol_case(tmp_path: Path):
+    overrides = tmp_path / "runtime_overrides.yaml"
+    saved = apply_active_symbols(
+        ["xauusd_o", "eurusd_o", "XAUUSD_O"],
+        overrides_path=overrides,
+        allowed=["XAUUSD_o", "EURUSD_o", "USDJPY_o"],
+    )
+    assert saved == ["XAUUSD_o", "EURUSD_o"]
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["symbols"] == ["XAUUSD_o", "EURUSD_o"]
+
+
 def test_user_config_roundtrip(tmp_path: Path):
     store = UserConfigStore(tmp_path / "user_config.json")
     store.config.broker.provider = "oanda"

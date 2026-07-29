@@ -230,17 +230,23 @@ def apply_active_symbols(
     allowed: list[str] | None = None,
 ) -> list[str]:
     """Persist the active symbol list into runtime overrides. Returns cleaned list."""
-    cleaned = [str(s).strip().upper() for s in symbols if str(s).strip()]
+    allowed_lookup = (
+        {str(a).strip().upper(): str(a).strip() for a in allowed if str(a).strip()}
+        if allowed is not None
+        else None
+    )
+    cleaned = [str(s).strip() for s in symbols if str(s).strip()]
     # Preserve order, drop dupes
     seen: set[str] = set()
     ordered: list[str] = []
     for s in cleaned:
-        if s not in seen:
-            seen.add(s)
-            ordered.append(s)
-    if allowed is not None:
-        allowed_set = {str(a).strip().upper() for a in allowed}
-        ordered = [s for s in ordered if s in allowed_set]
+        key = s.upper()
+        canonical = allowed_lookup.get(key, s.upper()) if allowed_lookup is not None else s.upper()
+        if key not in seen:
+            seen.add(key)
+            ordered.append(canonical)
+    if allowed_lookup is not None:
+        ordered = [s for s in ordered if s.upper() in allowed_lookup]
     if not ordered:
         raise ValueError("At least one symbol must remain selected")
 

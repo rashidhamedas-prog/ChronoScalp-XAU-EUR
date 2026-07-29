@@ -91,12 +91,15 @@ class Settings:
         """Active symbols, with optional broker-name aliases applied."""
         raw = [str(s) for s in self.raw.get("symbols", [])]
         aliases = self.raw.get("broker_symbol_aliases") or {}
-        if not isinstance(aliases, dict) or not aliases:
-            return raw
+        alias_map = aliases if isinstance(aliases, dict) else {}
+        # Normalize user/runtime symbol casing back to the exact contract-spec key
+        # so MT5 broker names like XAUUSD_o are not broken into XAUUSD_O.
+        catalog = {str(name).upper(): str(name) for name in self.symbols_raw}
         mapped: list[str] = []
         seen: set[str] = set()
         for symbol in raw:
-            resolved = str(aliases.get(symbol, aliases.get(symbol.upper(), symbol)))
+            resolved = str(alias_map.get(symbol, alias_map.get(symbol.upper(), symbol)))
+            resolved = catalog.get(resolved.upper(), resolved)
             if resolved not in seen:
                 seen.add(resolved)
                 mapped.append(resolved)

@@ -37,3 +37,36 @@ def test_broker_symbol_aliases_resolve_litefinance_suffix(monkeypatch, tmp_path)
     monkeypatch.setattr("chronoscalp.config.CONFIG_DIR", tmp_path)
     settings = Settings()
     assert settings.symbols == ["BTCUSD", "XAUUSD_o", "EURUSD_o"]
+
+
+def test_symbol_casing_normalizes_to_symbols_yaml_key(monkeypatch, tmp_path):
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "symbols:",
+                "  - XAUUSD_O",
+                "  - EURUSD_O",
+                "broker_symbol_aliases: {}",
+                "strategy: {}",
+                "risk: {}",
+                "sessions: {}",
+                "news_filter: {}",
+                "indicators: {}",
+                "timeframes: {}",
+                "spread_filter: {}",
+                "execution: {}",
+                "backtest: {}",
+                "resilience: {}",
+                "ml: {}",
+                "alerting: {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    symbols_yaml = tmp_path / "symbols.yaml"
+    symbols_yaml.write_text("XAUUSD_o: {}\nEURUSD_o: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr("chronoscalp.config.CONFIG_DIR", tmp_path)
+    settings = Settings()
+    assert settings.symbols == ["XAUUSD_o", "EURUSD_o"]
