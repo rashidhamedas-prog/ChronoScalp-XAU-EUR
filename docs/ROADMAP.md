@@ -79,6 +79,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **News straddle safety:** OCO/expiry run even when kill/daily-loss blocks new entries; abort pendings on halt; dual-fill orphan close; cancel-fail → `oco_retry`; paper fills ≤1 stop/symbol; place gated by `max_concurrent`
 - [x] **Full bot debug pass:** circuit breaker auto-untrips on clean tick; breakeven never widens after ATR trail; MT5 drops forming bar so bar-close gate = strategy `iloc[-1]`; daily loss seeded from live equity; `position_meta` persisted; bar gate not consumed on soft `place_order` failures; `bot_stdout.log` rotates at 50MB; `scripts/debug_healthcheck.py`
 - [x] **Strategy attribution + Control API reports:** journal/MT5 comment strategy tags (`utils/strategy_tags.py`); API `/journal` `/positions` `/strategy-stats` `/kill` `/settings/*` for panel/Telegram ops
+- [x] **Persian HTML performance report:** `scripts/generate_performance_report.py` + `reports/performance_report.py` — strategy/session/hour/symbol breakdown, recommendations; optional `--import-mt5` on Windows VPS
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand
 - [ ] **User action — rotate exposed tokens:** if any API/MT5 password was ever pasted into scripts or chat, rotate `CHRONOSCALP_API_TOKEN` / MT5 demo password on the VPS `.env`
