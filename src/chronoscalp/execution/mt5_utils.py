@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from chronoscalp.data.mt5_connector import _require_windows
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.strategy_tags import mt5_comment_for_strategy, resolve_strategy_tag
 
 CHRONOSCALP_MAGIC = 20260711
 
@@ -25,6 +26,15 @@ def sanitize_mt5_comment(text: str, *, max_len: int = _MT5_COMMENT_MAX) -> str:
     cleaned = "".join(ch if (ch.isascii() and (ch.isalnum() or ch in "._-")) else "_" for ch in raw)
     cleaned = cleaned.strip("._-") or "ChronoScalp"
     return cleaned[:max_len]
+
+
+def order_comment_for_signal(signal: object) -> str:
+    """Build MT5 comment from signal strategy/reason."""
+    strategy = resolve_strategy_tag(
+        explicit=str(getattr(signal, "strategy", "") or ""),
+        reason=str(getattr(signal, "reason", "") or ""),
+    )
+    return sanitize_mt5_comment(mt5_comment_for_strategy(strategy))
 
 
 def scale_volume_to_free_margin(

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import (
     PendingOrder,
     PendingOrderSide,
@@ -211,6 +212,9 @@ class PaperBroker:
             open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
             initial_volume=volume,
             initial_stop_loss=signal.stop_loss,
+            strategy=resolve_strategy_tag(
+                explicit=signal.strategy, reason=signal.reason
+            ),
         )
         self._positions[position.ticket] = position
         self._next_ticket += 1

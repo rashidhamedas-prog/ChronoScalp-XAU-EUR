@@ -12,6 +12,7 @@ from chronoscalp.execution.mt5_utils import (
     StaleStopsError,
     fetch_closed_position_pnl,
     find_managed_position_ticket,
+    order_comment_for_signal,
     resolve_order_filling_mode,
     sanitize_mt5_comment,
     scale_volume_to_free_margin,
@@ -21,6 +22,7 @@ from chronoscalp.execution.mt5_utils import (
     validate_stops_vs_fill_price,
 )
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.strategy_tags import resolve_strategy_tag, strategy_from_comment
 from chronoscalp.utils.types import (
     PendingOrder,
     PendingOrderSide,
@@ -105,6 +107,7 @@ class MT5Broker:
                     stop_loss=p.sl,
                     take_profit=p.tp,
                     open_time=datetime.fromtimestamp(p.time, tz=UTC),
+                    strategy=strategy_from_comment(str(getattr(p, "comment", "") or "")),
                 )
             )
         return positions
@@ -150,6 +153,7 @@ class MT5Broker:
                     "profit": float(getattr(p, "profit", 0.0) or 0.0),
                     "magic": int(getattr(p, "magic", 0) or 0),
                     "comment": str(getattr(p, "comment", "") or ""),
+                    "strategy": strategy_from_comment(str(getattr(p, "comment", "") or "")),
                     "open_time": datetime.fromtimestamp(p.time, tz=UTC).isoformat(),
                 }
             )
@@ -385,7 +389,7 @@ class MT5Broker:
             "tp": signal.take_profit,
             "deviation": 10,
             "magic": self._magic,
-            "comment": sanitize_mt5_comment("ChronoScalp"),
+            "comment": order_comment_for_signal(signal),
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": resolve_order_filling_mode(signal.symbol),
         }
@@ -423,6 +427,9 @@ class MT5Broker:
             open_time=datetime.now(tz=UTC),
             initial_volume=volume,
             initial_stop_loss=signal.stop_loss,
+            strategy=resolve_strategy_tag(
+                explicit=signal.strategy, reason=signal.reason
+            ),
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:

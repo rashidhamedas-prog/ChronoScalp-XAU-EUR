@@ -87,6 +87,7 @@ class Signal:
     confidence: float = 0.0
     reason: str = ""
     timeframe: Timeframe = Timeframe.M1
+    strategy: str = ""
 
     @property
     def risk_reward_ratio(self) -> float:
@@ -115,6 +116,7 @@ class Position:
     partial_taken: bool = False
     initial_volume: float | None = None
     initial_stop_loss: float | None = None
+    strategy: str = ""
 
 
 @dataclass
@@ -131,6 +133,7 @@ class TradeResult:
     pnl: float
     r_multiple: float = 0.0
     exit_reason: str = ""
+    strategy: str = ""
 
 
 @dataclass(frozen=True)

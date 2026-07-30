@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.strategy_tags import (
+    STRATEGY_REPORT_ORDER,
+    STRATEGY_UNKNOWN,
+    normalize_strategy_tag,
+    resolve_strategy_tag,
+)
 from chronoscalp.utils.types import Position, SignalType, TradeResult
 
 
@@ -39,12 +45,18 @@ class OpenTradeRecord:
     take_profit: float
     open_time: str
     mode: str = "paper"
+    strategy: str = ""
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OpenTradeRecord:
+        strategy = resolve_strategy_tag(
+            explicit=str(data.get("strategy") or ""),
+            reason=str(data.get("reason") or ""),
+        )
         return cls(
             ticket=int(data["ticket"]),
             symbol=str(data["symbol"]),
@@ -55,6 +67,8 @@ class OpenTradeRecord:
             take_profit=float(data.get("take_profit") or 0),
             open_time=str(data.get("open_time") or ""),
             mode=str(data.get("mode") or "paper"),
+            strategy=strategy,
+            reason=str(data.get("reason") or ""),
         )
 
     @classmethod
@@ -64,6 +78,7 @@ class OpenTradeRecord:
             if isinstance(position.direction, SignalType)
             else str(position.direction)
         )
+        strategy = resolve_strategy_tag(explicit=getattr(position, "strategy", "") or "")
         return cls(
             ticket=position.ticket,
             symbol=position.symbol,
@@ -74,6 +89,8 @@ class OpenTradeRecord:
             take_profit=float(position.take_profit),
             open_time=_dt_to_iso(position.open_time),
             mode=mode,
+            strategy=strategy,
+            reason="",
         )
 
 
@@ -93,12 +110,18 @@ class ClosedTradeRecord:
     r_multiple: float = 0.0
     exit_reason: str = ""
     mode: str = "paper"
+    strategy: str = ""
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ClosedTradeRecord:
+        strategy = resolve_strategy_tag(
+            explicit=str(data.get("strategy") or ""),
+            reason=str(data.get("reason") or data.get("exit_reason") or ""),
+        )
         return cls(
             ticket=int(data.get("ticket") or 0),
             symbol=str(data.get("symbol") or ""),
@@ -112,6 +135,8 @@ class ClosedTradeRecord:
             r_multiple=float(data.get("r_multiple") or 0),
             exit_reason=str(data.get("exit_reason") or ""),
             mode=str(data.get("mode") or "paper"),
+            strategy=strategy,
+            reason=str(data.get("reason") or ""),
         )
 
 
@@ -154,6 +179,83 @@ class TradingStats:
 
 
 @dataclass
+class StrategyStats:
+    """Per-strategy P&L breakdown for the desktop / API report."""
+
+    strategy: str
+    trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    win_rate_pct: float = 0.0
+    net_pnl: float = 0.0
+    gross_profit: float = 0.0
+    gross_loss: float = 0.0
+    avg_pnl: float = 0.0
+    profit_share_pct: float = 0.0
+    loss_share_pct: float = 0.0
+    pnl_pct_of_equity: float = 0.0
+    open_trades: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def compute_strategy_stats(
+    closed: list[ClosedTradeRecord],
+    open_trades: list[OpenTradeRecord] | None = None,
+    *,
+    reference_equity: float | None = None,
+) -> list[StrategyStats]:
+    """Aggregate closed (and open counts) by strategy tag."""
+    open_trades = open_trades or []
+    by_tag: dict[str, list[ClosedTradeRecord]] = {}
+    for trade in closed:
+        tag = normalize_strategy_tag(trade.strategy) or STRATEGY_UNKNOWN
+        by_tag.setdefault(tag, []).append(trade)
+
+    open_counts: dict[str, int] = {}
+    for trade in open_trades:
+        tag = normalize_strategy_tag(trade.strategy) or STRATEGY_UNKNOWN
+        open_counts[tag] = open_counts.get(tag, 0) + 1
+
+    total_profit = sum(t.pnl for t in closed if t.pnl > 0) or 0.0
+    total_loss_abs = abs(sum(t.pnl for t in closed if t.pnl < 0)) or 0.0
+    equity = float(reference_equity) if reference_equity and reference_equity > 0 else 0.0
+
+    tags = set(by_tag) | set(open_counts)
+    ordered = [t for t in STRATEGY_REPORT_ORDER if t in tags]
+    ordered.extend(sorted(t for t in tags if t not in STRATEGY_REPORT_ORDER))
+
+    rows: list[StrategyStats] = []
+    for tag in ordered:
+        group = by_tag.get(tag, [])
+        wins = [t for t in group if t.pnl > 0]
+        losses = [t for t in group if t.pnl < 0]
+        net = sum(t.pnl for t in group)
+        gp = sum(t.pnl for t in wins)
+        gl = abs(sum(t.pnl for t in losses))
+        n = len(group)
+        rows.append(
+            StrategyStats(
+                strategy=tag,
+                trades=n,
+                wins=len(wins),
+                losses=len(losses),
+                win_rate_pct=round(len(wins) / n * 100, 2) if n else 0.0,
+                net_pnl=round(net, 2),
+                gross_profit=round(gp, 2),
+                gross_loss=round(gl, 2),
+                avg_pnl=round(net / n, 2) if n else 0.0,
+                profit_share_pct=round(gp / total_profit * 100, 2) if total_profit else 0.0,
+                loss_share_pct=round(gl / total_loss_abs * 100, 2) if total_loss_abs else 0.0,
+                pnl_pct_of_equity=round(net / equity * 100, 4) if equity else 0.0,
+                open_trades=int(open_counts.get(tag, 0)),
+            )
+        )
+    return rows
+
+
+@dataclass
 class JournalSnapshot:
     """Full journal payload consumed by the dashboard."""
 
@@ -161,6 +263,7 @@ class JournalSnapshot:
     open_trades: list[OpenTradeRecord] = field(default_factory=list)
     closed_trades: list[ClosedTradeRecord] = field(default_factory=list)
     stats: TradingStats = field(default_factory=TradingStats)
+    strategy_stats: list[StrategyStats] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -168,6 +271,7 @@ class JournalSnapshot:
             "open_trades": [t.to_dict() for t in self.open_trades],
             "closed_trades": [t.to_dict() for t in self.closed_trades],
             "stats": self.stats.to_dict(),
+            "strategy_stats": [s.to_dict() for s in self.strategy_stats],
         }
 
 
@@ -297,8 +401,22 @@ class TradeJournal:
         with self.path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-    def record_open(self, position: Position) -> OpenTradeRecord:
+    def record_open(
+        self,
+        position: Position,
+        *,
+        strategy: str | None = None,
+        reason: str | None = None,
+    ) -> OpenTradeRecord:
         record = OpenTradeRecord.from_position(position, self.mode)
+        if strategy is not None and str(strategy).strip():
+            record.strategy = resolve_strategy_tag(explicit=strategy, reason=reason)
+        elif reason:
+            record.strategy = resolve_strategy_tag(
+                explicit=record.strategy, reason=reason
+            )
+        if reason is not None:
+            record.reason = str(reason)
         self.open_trades[record.ticket] = record
         self.save()
         return record
@@ -319,6 +437,10 @@ class TradeJournal:
             if isinstance(trade.direction, SignalType)
             else str(trade.direction)
         )
+        strategy = resolve_strategy_tag(
+            explicit=getattr(trade, "strategy", "") or (open_rec.strategy if open_rec else ""),
+            reason=(open_rec.reason if open_rec else ""),
+        )
         record = ClosedTradeRecord(
             ticket=resolved_ticket or (open_rec.ticket if open_rec else 0),
             symbol=trade.symbol,
@@ -332,6 +454,8 @@ class TradeJournal:
             r_multiple=float(trade.r_multiple or 0),
             exit_reason=str(trade.exit_reason or ""),
             mode=self.mode,
+            strategy=strategy,
+            reason=open_rec.reason if open_rec else "",
         )
         self.closed_trades.append(record)
         self.save()
@@ -368,6 +492,11 @@ class TradeJournal:
             r_multiple=r_multiple,
             exit_reason="external" if pnl is not None else "external_unknown_pnl",
             mode=self.mode,
+            strategy=resolve_strategy_tag(
+                explicit=open_rec.strategy if open_rec else "",
+                reason=open_rec.reason if open_rec else "",
+            ),
+            reason=open_rec.reason if open_rec else "",
         )
         self.closed_trades.append(record)
         self.save()
@@ -421,11 +550,15 @@ class TradeJournal:
         stats = compute_trading_stats(
             self.closed_trades, open_list, reference_equity=reference_equity
         )
+        strategy_stats = compute_strategy_stats(
+            self.closed_trades, open_list, reference_equity=reference_equity
+        )
         return JournalSnapshot(
             mode=self.mode,
             open_trades=open_list,
             closed_trades=list(self.closed_trades),
             stats=stats,
+            strategy_stats=strategy_stats,
         )
 
 

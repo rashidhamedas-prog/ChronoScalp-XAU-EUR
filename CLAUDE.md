@@ -81,6 +81,7 @@ for ChronoScalp. Mirrored in `.cursor/rules/auto-commit-push.mdc` and
 | Change position sizing / breakeven / trailing | `src/chronoscalp/risk/position_sizing.py` |
 | Add a news source | `src/chronoscalp/filters/news_filter.py` |
 | Control via Telegram | `src/chronoscalp/telegram/control_bot.py`, `scripts/telegram_control_bot.py` |
+| Windows desktop manager (SSH API) | `scripts/desktop_client.py` + Control API `src/chronoscalp/saas/api.py` |
 | News ATR straddle | `filters/news_calendar.py`, `strategy/news_straddle_engine.py`, Broker pending APIs |
 | Add a broker | `src/chronoscalp/execution/broker.py` (interface) + new impl file |
 | Change backtest fill/slippage assumptions | `src/chronoscalp/backtest/engine.py` |

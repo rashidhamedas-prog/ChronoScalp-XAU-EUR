@@ -70,6 +70,7 @@ from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, resolve_enabled_strategies
 from chronoscalp.strategy.news_straddle_engine import DynamicNewsStraddleEngine
+from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import SignalType, Timeframe
 
 STANDARD_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10, Timeframe.M15]
@@ -374,6 +375,7 @@ class TradingBot:
                             "profit": 0.0,
                             "magic": 0,
                             "comment": "",
+                            "strategy": str(getattr(p, "strategy", "") or ""),
                             "open_time": p.open_time.isoformat() if p.open_time else "",
                         }
                     )
@@ -389,6 +391,25 @@ class TradingBot:
                     }
                 except Exception:  # noqa: BLE001
                     account = {}
+            # Prefer journal strategy attribution when broker comment is blank/legacy.
+            for row in rows:
+                ticket = int(row.get("ticket") or 0)
+                journal_open = self.trade_journal.open_trades.get(ticket)
+                meta = self._position_meta.get(ticket) or {}
+                row["strategy"] = resolve_strategy_tag(
+                    explicit=str(
+                        row.get("strategy")
+                        or (journal_open.strategy if journal_open else "")
+                        or meta.get("strategy")
+                        or ""
+                    ),
+                    reason=str(
+                        (journal_open.reason if journal_open else "")
+                        or meta.get("reason")
+                        or ""
+                    ),
+                    comment=str(row.get("comment") or ""),
+                )
             payload = {
                 "mode": self.mode,
                 "updated_at": datetime.now(tz=UTC).isoformat(),
@@ -682,8 +703,16 @@ class TradingBot:
                                     "initial_stop_loss": position.stop_loss,
                                     "partial_taken": False,
                                     "breakeven_moved": False,
+                                    "strategy": "news_straddle",
+                                    "reason": "news_straddle",
                                 }
-                                self.trade_journal.record_open(position)
+                                if not getattr(position, "strategy", ""):
+                                    position.strategy = "news_straddle"
+                                self.trade_journal.record_open(
+                                    position,
+                                    strategy="news_straddle",
+                                    reason="news_straddle",
+                                )
                                 self._persist_state()
                                 self._last_trade_opened_at = now
                                 event_title = ""
@@ -962,13 +991,22 @@ class TradingBot:
                     inst_bar=inst_bar,
                 )
                 self.open_tickets[symbol] = position.ticket
+                strategy_tag = resolve_strategy_tag(
+                    explicit=getattr(position, "strategy", "") or signal.strategy,
+                    reason=signal.reason,
+                )
+                position.strategy = strategy_tag
                 self._position_meta[position.ticket] = {
                     "initial_volume": position.volume,
                     "initial_stop_loss": position.stop_loss,
                     "partial_taken": False,
                     "breakeven_moved": False,
+                    "strategy": strategy_tag,
+                    "reason": signal.reason or "",
                 }
-                self.trade_journal.record_open(position)
+                self.trade_journal.record_open(
+                    position, strategy=strategy_tag, reason=signal.reason or ""
+                )
                 self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
                 self._persist_state()
@@ -978,7 +1016,7 @@ class TradingBot:
                     (
                         f"{symbol} {signal.signal_type.value} vol={volume:.2f} "
                         f"entry={position.entry_price:.5f} sl={position.stop_loss:.5f} "
-                        f"tp={position.take_profit:.5f}"
+                        f"tp={position.take_profit:.5f} strategy={strategy_tag}"
                     ),
                     AlertLevel.INFO,
                 )

@@ -36,6 +36,7 @@ Default branch is **`main`**. Keep feature work on short-lived `cursor/*` branch
 
 - `src/chronoscalp/` — library code
 - `scripts/` — CLI / panel / VPS helpers
+- `scripts/desktop_client.py` — Windows desktop ops manager (SSH → Control API)
 - `config/*.yaml` — strategy & risk parameters
 - `tests/` — mirrors package layout
 - News ATR straddle: `filters/news_calendar.py` + `strategy/news_straddle_engine.py` (enable via `news_straddle` in panel/Telegram)

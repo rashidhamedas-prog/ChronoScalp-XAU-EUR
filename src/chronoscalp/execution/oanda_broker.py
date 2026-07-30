@@ -18,6 +18,7 @@ from chronoscalp.execution.oanda_utils import (
     to_instrument,
 )
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import (
     PendingOrder,
     PendingOrderSide,
@@ -224,6 +225,9 @@ class OANDABroker:
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
+            strategy=resolve_strategy_tag(
+                explicit=signal.strategy, reason=signal.reason
+            ),
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:
