@@ -96,15 +96,21 @@ class SshApiClient:
             + f"$uri='http://127.0.0.1:8510{path}'; "
             + (
                 f"$r=Invoke-WebRequest -Uri $uri -Method {method} -Headers $h "
-                f"-Body $bytes -UseBasicParsing -TimeoutSec 45; "
+                f"-Body $bytes -UseBasicParsing -TimeoutSec 60; "
                 if body is not None
                 else f"$r=Invoke-WebRequest -Uri $uri -Method {method} -Headers $h "
-                f"-UseBasicParsing -TimeoutSec 45; "
+                f"-UseBasicParsing -TimeoutSec 60; "
             )
             + "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
             "Write-Output $r.Content"
         )
+        return self._ssh_json(ps, timeout_sec=120)
 
+    def snapshot(self) -> dict:
+        """Fetch the full desktop payload in a single SSH + HTTP round-trip."""
+        return self.call("GET", "/desktop/snapshot?closed_limit=150&log_lines=120")
+
+    def _ssh_json(self, ps: str, *, timeout_sec: int = 120) -> dict:
         cmd = [
             "ssh",
             "-i",
@@ -114,7 +120,11 @@ class SshApiClient:
             "-o",
             "BatchMode=yes",
             "-o",
-            "ConnectTimeout=20",
+            "ConnectTimeout=25",
+            "-o",
+            "ServerAliveInterval=10",
+            "-o",
+            "ServerAliveCountMax=3",
             f"{self.user}@{self.host}",
             "powershell",
             "-NoProfile",
@@ -128,11 +138,13 @@ class SshApiClient:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=60,
+                timeout=timeout_sec,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("SSH timed out — check VPS/OpenSSH") from exc
+            raise RuntimeError(
+                f"SSH timed out after {timeout_sec}s — check VPS/OpenSSH/VPN, then Retry"
+            ) from exc
         except FileNotFoundError as exc:
             raise RuntimeError("ssh.exe not found — install OpenSSH Client") from exc
 
@@ -170,6 +182,7 @@ class App(tk.Tk):
         self.cfg = load_cfg()
         self._last_error = ""
         self._status_cache: dict[str, Any] = {}
+        self._refreshing = False
 
         root = ttk.Frame(self, padding=8)
         root.pack(fill=tk.BOTH, expand=True)
@@ -203,7 +216,7 @@ class App(tk.Tk):
 
         save_cfg(self._current_cfg())
         self.after(400, lambda: self.refresh_all(quiet=True))
-        self.after(8000, self._auto_refresh)
+        self.after(15000, self._auto_refresh)
 
     def _build_connection_bar(self, parent: ttk.Frame) -> None:
         frm = ttk.LabelFrame(parent, text="Connection (SSH → VPS API :8510)", padding=8)
@@ -479,7 +492,7 @@ class App(tk.Tk):
 
     def _auto_refresh(self) -> None:
         self.refresh_all(quiet=True)
-        self.after(8000, self._auto_refresh)
+        self.after(15000, self._auto_refresh)
 
     def _run(self, fn: Callable[[], None], *, quiet: bool) -> None:
         def worker() -> None:
@@ -499,17 +512,24 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def refresh_all(self, quiet: bool = False) -> None:
+        if self._refreshing:
+            return
+        self._refreshing = True
+
         def work() -> None:
-            client = self.client()
-            status = client.call("GET", "/status")
-            positions = client.call("GET", "/positions")
-            journal = client.call("GET", "/journal?closed_limit=150")
-            strategy = client.call("GET", "/strategy-stats")
-            logs = client.call("GET", "/logs?lines=120")
-            self.after(
-                0,
-                lambda: self._apply_all(status, positions, journal, strategy, logs),
-            )
+            try:
+                bundle = self.client().snapshot()
+                status = bundle.get("status") or {}
+                positions = bundle.get("positions") or {}
+                journal = bundle.get("journal") or {}
+                strategy = bundle.get("strategy") or {}
+                logs = bundle.get("logs") or {}
+                self.after(
+                    0,
+                    lambda: self._apply_all(status, positions, journal, strategy, logs),
+                )
+            finally:
+                self._refreshing = False
 
         self._run(work, quiet=quiet)
 
