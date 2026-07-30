@@ -89,11 +89,3 @@ def test_journal_and_strategy_stats_endpoints(tmp_path: Path, monkeypatch):
     positions = client.get("/positions")
     assert positions.status_code == 200
     assert positions.json()["account"]["equity"] == 10000
-
-    snap = client.get("/desktop/snapshot")
-    assert snap.status_code == 200
-    body = snap.json()
-    assert body["status"]["mode"] == "paper"
-    assert body["journal"]["closed_trades"][0]["strategy"] == "ultra_scalp"
-    assert "by_strategy" in body["strategy"]
-    assert isinstance(body["logs"]["lines"], list)

@@ -53,7 +53,7 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] Ultra-scalp scoped 1:1 R:R exception (`strategy.ultra_scalp.min_reward_risk_ratio`); global floor stays 1.5
 - [x] Ultra-scalp crypto fixes: skip SMC on S15 unless `require_confluence`, primary M5 trend mode, tunable impulse/RVOL, tick-count volume when MT5 volume=0, granular skip reasons
 - [x] MT5 reconnect + data-starvation alerts + skip heartbeat (avoids silent no-trade stalls)
-- [x] Control API + Windows desktop client with proxy (`scripts/run_api.py`, `scripts/desktop_client.py`)
+- [x] Control API for remote monitoring (`scripts/run_api.py`, `src/chronoscalp/saas/api.py`)
 - [x] Windows launcher: `scripts/start.bat` + `scripts/stop.bat`
 - [x] VPS setup script: `scripts/vps-setup.sh`
 - [x] Windows VPS one-shot setup: `scripts/windows_vps_setup.ps1` (MT5 + paper path)
@@ -71,14 +71,14 @@ Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ n
 - [x] **Multi-strategy OR + trading hours modes:** ultra-scalp no longer blocks SMC/liquidity; panel/Telegram `london_ny` vs `always_on_24h` (`sessions.trading_hours_mode`)
 - [x] **Parallel strategy engines:** S15 ultra-scalp and M1 institutional/SMC/liquidity evaluate independently on their own bar closes (not sequential fallback); strongest viable R:R wins if both fire
 - [x] **Independent symbol entries:** `risk.independent_symbol_entries` + correlation off + `max_concurrent_positions` ≥ active symbols so each pair can hold its own ticket without cross-pair correlation/`max_concurrent` blocking (1% risk / R:R unchanged; still one position per symbol)
-- [x] **Git hygiene:** secrets stripped from desktop/VPS helpers; ephemeral `_vps_skip_audit*` gitignored; durable `_vps_api_status.ps1` + `docs/VPS_TROUBLESHOOTING_FA.md` + `AGENTS.md`; finished work lands on `main`
+- [x] **Git hygiene:** secrets stripped from VPS helpers; ephemeral `_vps_skip_audit*` gitignored; durable `_vps_api_status.ps1` + `docs/VPS_TROUBLESHOOTING_FA.md` + `AGENTS.md`; finished work lands on `main`
 - [x] **News ATR straddle:** selectable `news_straddle` strategy — pause scalp 2m before high-impact (NFP/CPI/FOMC), place ATR BUY_STOP/SELL_STOP ~30s prior with spread shield, OCO cancel of the twin pending, 120s expiry; Broker pending APIs on MT5/paper (OANDA not supported); panel + Telegram toggles; volume via 1% risk sizing (R:R 2.25)
 - [x] **Telegram settings menu-only:** symbols/strategies/hours/risk/live-confirm chosen via reply-keyboard toggles (no typing); credential wizards remain for MT5/OANDA secrets only
 - [x] **Daily loss lock toggle:** `risk.daily_loss_limit_enabled` in settings + runtime overrides; Telegram/panel on/off + unlock-today restart (`broker_wizard.apply_daily_loss_limit_enabled`, `write_daily_reset_marker`)
 - [x] **One-shot VPS deploy from laptop:** `scripts/deploy_vps_from_local.ps1` → SSH → `_vps_full_deploy.ps1` (pull `main`, restart panel/API/live bot/Telegram, clear sticky kill marker)
 - [x] **News straddle safety:** OCO/expiry run even when kill/daily-loss blocks new entries; abort pendings on halt; dual-fill orphan close; cancel-fail → `oco_retry`; paper fills ≤1 stop/symbol; place gated by `max_concurrent`
 - [x] **Full bot debug pass:** circuit breaker auto-untrips on clean tick; breakeven never widens after ATR trail; MT5 drops forming bar so bar-close gate = strategy `iloc[-1]`; daily loss seeded from live equity; `position_meta` persisted; bar gate not consumed on soft `place_order` failures; `bot_stdout.log` rotates at 50MB; `scripts/debug_healthcheck.py`
-- [x] **Windows desktop manager:** full ops panel (`scripts/desktop_client.py`) over SSH Control API — start/stop/kill, live positions with strategy tag, journal, per-strategy P&L shares, settings (symbols/strategies/hours/risk/daily-loss unlock); journal+MT5 comment strategy attribution (`utils/strategy_tags.py`); API `/journal` `/positions` `/strategy-stats` `/kill` `/settings/*`
+- [x] **Strategy attribution + Control API reports:** journal/MT5 comment strategy tags (`utils/strategy_tags.py`); API `/journal` `/positions` `/strategy-stats` `/kill` `/settings/*` for panel/Telegram ops
 - [ ] **User action — live path:** Windows VPS + MT5 demo (Iran) *or* Netherlands Linux + OANDA; fill `.env`, run paper then gated live
 - [ ] **User action — VPS disk:** prefer ≥40GB on Windows (20GB fills with OS+MT5); migrate if host cannot expand
 - [ ] **User action — rotate exposed tokens:** if any API/MT5 password was ever pasted into scripts or chat, rotate `CHRONOSCALP_API_TOKEN` / MT5 demo password on the VPS `.env`

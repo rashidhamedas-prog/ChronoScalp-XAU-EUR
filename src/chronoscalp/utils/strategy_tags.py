@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# Canonical tags used in journal / desktop reports (stable IDs).
+# Canonical tags used in journal / reporting (stable IDs).
 STRATEGY_ULTRA_SCALP = "ultra_scalp"
 STRATEGY_INSTITUTIONAL = "institutional"
 STRATEGY_NEWS_STRADDLE = "news_straddle"

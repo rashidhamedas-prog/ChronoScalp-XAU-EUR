@@ -180,7 +180,7 @@ class TradingStats:
 
 @dataclass
 class StrategyStats:
-    """Per-strategy P&L breakdown for the desktop / API report."""
+    """Per-strategy P&L breakdown for API / dashboard reports."""
 
     strategy: str
     trades: int = 0

@@ -1,7 +1,6 @@
-"""Lightweight FastAPI control plane for remote desktop/mobile clients.
+"""Lightweight FastAPI control plane for remote monitoring and bot control.
 
-Replaces slow Streamlit-over-WAN for day-to-day monitoring. Auth via
-``CHRONOSCALP_API_TOKEN`` (Bearer). Bind to localhost or LAN as needed.
+Auth via ``CHRONOSCALP_API_TOKEN`` (Bearer). Bind to localhost or LAN as needed.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ class StartRequest(BaseModel):
 
 class KillRequest(BaseModel):
     active: bool = True
-    reason: str = "desktop"
+    reason: str = "api"
 
 
 class SymbolsRequest(BaseModel):
@@ -260,7 +259,7 @@ def create_app() -> FastAPI:
     def kill(body: KillRequest) -> dict[str, Any]:
         ks = _kill_switch()
         if body.active:
-            ks.activate(reason=body.reason or "desktop")
+            ks.activate(reason=body.reason or "api")
         else:
             ks.deactivate()
         return {
@@ -335,95 +334,6 @@ def create_app() -> FastAPI:
     @app.get("/logs", dependencies=[Depends(_require_token)])
     def logs(lines: int = 80) -> dict[str, Any]:
         return {"lines": _tail_log(max(1, min(lines, 500)))}
-
-    @app.get("/desktop/snapshot", dependencies=[Depends(_require_token)])
-    def desktop_snapshot(
-        closed_limit: int = 150,
-        log_lines: int = 120,
-    ) -> dict[str, Any]:
-        """Single-roundtrip payload for the Windows desktop manager.
-
-        Avoids 4–5 sequential SSH hops (each ~5–15s) that caused client timeouts.
-        """
-        settings = get_settings()
-        user = UserConfigStore().config
-        running = bot_is_running(PID_FILE)
-        pid = None
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-            except ValueError:
-                pid = None
-        ks = _kill_switch()
-        mode = _detect_mode()
-        state = _state_dir()
-        snap = load_journal_snapshot(state, mode)
-        pos_snap = _read_positions_snapshot(mode)
-        by_ticket = {t.ticket: t for t in snap.open_trades}
-        enriched_positions: list[dict[str, Any]] = []
-        for row in pos_snap.get("positions") or []:
-            item = dict(row)
-            ticket = int(item.get("ticket") or 0)
-            j = by_ticket.get(ticket)
-            if j is not None:
-                item.setdefault("strategy", j.strategy)
-                item["journal_strategy"] = j.strategy
-                item["reason"] = j.reason
-            enriched_positions.append(item)
-        limit = max(1, min(int(closed_limit), 2000))
-        closed = list(reversed(snap.closed_trades))[:limit]
-        status_body = {
-            "running": running,
-            "pid": pid,
-            "mode": mode,
-            "broker": settings.execution.get("broker"),
-            "symbols": settings.symbols,
-            "strategies": settings.strategy.get("enabled_strategies"),
-            "known_strategies": list(KNOWN_STRATEGIES),
-            "trading_hours_mode": (settings.sessions or {}).get("trading_hours_mode"),
-            "daily_loss_limit_enabled": bool(
-                settings.risk.get("daily_loss_limit_enabled", True)
-            ),
-            "max_daily_loss_pct": float(settings.risk.get("max_daily_loss_pct", 3.0)),
-            "risk_per_trade_pct": float(settings.risk.get("risk_per_trade_pct", 1.0)),
-            "live_confirmed": settings.secrets.live_trading_confirmed,
-            "kill_switch": ks.is_active(),
-            "kill_reason": ks.reason(),
-            "stats": snap.stats.to_dict(),
-            "strategy_stats": [s.to_dict() for s in snap.strategy_stats],
-            "open_count": len(snap.open_trades),
-            "account": pos_snap.get("account") or {},
-            "positions_updated_at": pos_snap.get("updated_at"),
-            "log_tail": _tail_log(40),
-            "server_time": datetime.now(tz=UTC).isoformat(),
-            "user_broker": {
-                "provider": user.broker.provider,
-                "mode": user.broker.mode,
-            },
-        }
-        return {
-            "status": status_body,
-            "positions": {
-                "mode": mode,
-                "updated_at": pos_snap.get("updated_at"),
-                "account": pos_snap.get("account") or {},
-                "positions": enriched_positions,
-                "journal_open": [t.to_dict() for t in snap.open_trades],
-            },
-            "journal": {
-                "mode": mode,
-                "open_trades": [t.to_dict() for t in snap.open_trades],
-                "closed_trades": [t.to_dict() for t in closed],
-                "stats": snap.stats.to_dict(),
-                "strategy_stats": [s.to_dict() for s in snap.strategy_stats],
-            },
-            "strategy": {
-                "mode": mode,
-                "stats": snap.stats.to_dict(),
-                "by_strategy": [s.to_dict() for s in snap.strategy_stats],
-            },
-            "logs": {"lines": _tail_log(max(1, min(int(log_lines), 500)))},
-        }
 
     logger.info("ChronoScalp Control API ready")
     return app

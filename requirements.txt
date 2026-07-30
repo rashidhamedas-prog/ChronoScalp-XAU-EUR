@@ -31,7 +31,7 @@ xgboost>=2.0
 # Reporting
 matplotlib>=3.9
 streamlit>=1.35          # optional: scripts/dashboard.py
-fastapi>=0.111           # control API for desktop/mobile clients
+fastapi>=0.111           # control API for remote monitoring / bot control
 uvicorn>=0.30            # ASGI server for scripts/run_api.py
 httpx>=0.27              # TestClient + optional API clients
 
