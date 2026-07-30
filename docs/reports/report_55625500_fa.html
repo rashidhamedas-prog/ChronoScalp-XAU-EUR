@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>گزارش عملکرد ChronoScalp — حساب ۵۵,۶۲۵,۵۰۰</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0f1419;
+  --panel: #1a222d;
+  --panel-2: #243041;
+  --text: #e8eef6;
+  --muted: #9aadc2;
+  --accent: #3d9cf0;
+  --good: #3ecf8e;
+  --bad: #f07178;
+  --warn: #e6c07b;
+  --line: rgba(255,255,255,.08);
+  --shadow: 0 12px 40px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Vazirmatn", Tahoma, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 100% -10%, rgba(61,156,240,.18), transparent 55%),
+    radial-gradient(900px 500px at -10% 20%, rgba(62,207,142,.10), transparent 50%),
+    var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 28px 18px 64px; }
+header.hero {
+  background: linear-gradient(135deg, #1d2a3a 0%, #15202b 55%, #101820 100%);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 28px 28px 22px;
+  box-shadow: var(--shadow);
+  margin-bottom: 22px;
+}
+header.hero h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  font-weight: 800;
+}
+header.hero .sub { color: var(--muted); margin: 0 0 18px; }
+.meta {
+  display: flex; flex-wrap: wrap; gap: 10px;
+}
+.chip {
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: .92rem;
+  color: var(--muted);
+}
+.chip strong { color: var(--text); font-weight: 700; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+.kpi {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+.kpi .label { color: var(--muted); font-size: .86rem; margin-bottom: 4px; }
+.kpi .value { font-size: 1.35rem; font-weight: 800; }
+.kpi .value.pos, .pos { color: var(--good); }
+.kpi .value.neg, .neg { color: var(--bad); }
+.kpi .value.warn { color: var(--warn); }
+section.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px 22px;
+  margin-top: 16px;
+  box-shadow: var(--shadow);
+}
+section.card h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+  font-weight: 750;
+}
+section.card p.lead {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+.answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 800px) { .answers { grid-template-columns: 1fr; } }
+.answer {
+  background: var(--panel-2);
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+}
+.answer h3 { margin: 0 0 6px; font-size: 1rem; color: var(--accent); }
+.answer p { margin: 0; }
+.charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+.chart-box {
+  background: var(--panel-2);
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  min-height: 280px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .95rem;
+}
+th, td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+th { color: var(--muted); font-weight: 600; }
+tr:hover td { background: rgba(255,255,255,.02); }
+ul.fix {
+  margin: 8px 0 0;
+  padding: 0 18px 0 0;
+}
+ul.fix li { margin: 8px 0; }
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: .85rem;
+  font-weight: 700;
+}
+.badge.bad { background: rgba(240,113,120,.15); color: var(--bad); }
+.badge.good { background: rgba(62,207,142,.15); color: var(--good); }
+.badge.warn { background: rgba(230,192,123,.15); color: var(--warn); }
+footer {
+  margin-top: 28px;
+  color: var(--muted);
+  font-size: .85rem;
+  text-align: center;
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em;
+  color: #c6d6e8;
+}
+.callout {
+  background: rgba(230,192,123,.08);
+  border: 1px solid rgba(230,192,123,.25);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #f0e2c0;
+  margin-top: 12px;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <h1>گزارش عملکرد ربات ChronoScalp</h1>
+    <p class="sub">از زمان تغییر بروکر و ورود با حساب دمو — تحلیل ژورنال لایو روی VPS</p>
+    <div class="meta">
+      <span class="chip">لاگین: <strong>۵۵,۶۲۵,۵۰۰</strong></span>
+      <span class="chip">سرور: <strong>AUSCommercial-Demo</strong></span>
+      <span class="chip">بازه: <strong>۲۰۲۶-۰۷-۲۵ تا ۲۰۲۶-۰۷-۳۰</strong></span>
+      <span class="chip">حالت: <strong>لایو (live)</strong></span>
+      <span class="chip">تولید گزارش: <strong>۲۰۲۶-۰۷-۳۰ ۲۲:۳۸:۲۱ UTC</strong></span>
+    </div>
+    <div class="grid" style="margin-top:20px">
+      <div class="kpi"><div class="label">تعداد معاملات بسته‌شده</div><div class="value">۱۸۶</div></div>
+      <div class="kpi"><div class="label">نرخ موفقیت</div><div class="value neg">۲۷.۴٪</div></div>
+      <div class="kpi"><div class="label">سود/زیان خالص</div><div class="value neg">-۱۳,۸۹۰.۴۳</div></div>
+      <div class="kpi"><div class="label">موجودی فعلی</div><div class="value">۸۷,۵۰۸.۶۷</div></div>
+      <div class="kpi"><div class="label">ضریب سود (PF)</div><div class="value neg">۰.۷۹</div></div>
+      <div class="kpi"><div class="label">بازگشت تقریبی</div><div class="value neg">-۱۳.۷٪</div></div>
+      <div class="kpi"><div class="label">میانگین سود</div><div class="value pos">۱,۰۲۸.۸۲</div></div>
+      <div class="kpi"><div class="label">میانگین ضرر</div><div class="value neg">۵۱۴.۴۲</div></div>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>پاسخ مستقیم به سؤالات شما</h2>
+    <p class="lead">خلاصهٔ یافته‌ها بر اساس ژورنال لایو حساب ۵۵,۶۲۵,۵۰۰.</p>
+    <div class="answers">
+      <div class="answer">
+        <h3>۱) با هر استراتژی چند معامله باز شده؟</h3>
+        <p>• اولترا اسکالپ (S15): <strong>۱۶۲</strong> معامله<br/>• نامشخص / بدون تگ: <strong>۲۴</strong> معامله</p>
+        <p style="margin-top:8px;color:var(--muted);font-size:.9rem">توجه: بخشی از معاملات قدیمی بدون تگ استراتژی بودند؛ با تطبیق سیگنال S15 به اولترا اسکالپ نسبت داده شدند.</p>
+      </div>
+      <div class="answer">
+        <h3>۲) درصد موفقیت کدام استراتژی بیشتر بوده؟</h3>
+        <p><strong>اولترا اسکالپ (S15)</strong> با نرخ موفقیت <strong>۲۷.۸٪</strong> از ۱۶۲ معامله.</p>
+      </div>
+      <div class="answer">
+        <h3>۳) بهترین تایم معامله‌های برنده؟</h3>
+        <p>بهترین بازهٔ ۲ساعته (زمان بروکر UTC+۳): <strong>۱۲:۰۰–۱۴:۰۰</strong> با ۴۲.۴٪ موفقیت و PnL <span class='pos'>۲,۷۹۳.۰۳</span>.</p>
+        <p style="margin-top:8px">بهترین سشن معاملاتی: <strong>لندن</strong> (۴۲.۴٪، PnL ۲,۷۹۳.۰۳).</p>
+      </div>
+      <div class="answer">
+        <h3>۴) بیشترین معامله‌های برنده مال کدام نماد؟</h3>
+        <p><strong>طلا (XAUUSD)</strong> با <strong>۲۹</strong> معاملهٔ برنده از ۵۹ معامله (۴۹.۲٪).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>عملکرد کلی ربات</h2>
+    <p class="lead">
+      وضعیت کلی:
+      <span class="badge bad">ضعیف / زیان‌ده</span>
+      — از سرمایهٔ تقریبی ۱۰۱,۳۹۹.۱۰ به ۸۷,۵۰۸.۶۷ رسیده
+      (حدود ۱۳.۷٪ کاهش).
+    </p>
+    <ul class="fix">
+      <li>از ۱۸۶ معاملهٔ معتبر، ۵۱ برنده و ۱۲۹ بازنده ثبت شده است.</li>
+      <li>میانگین سود برنده (۱,۰۲۸.۸۲) از میانگین ضرر (۵۱۴.۴۲) بزرگ‌تر است، اما به‌خاطر تعداد زیاد بازنده‌ها و حجم‌های خیلی بزرگ، خالص منفی شده.</li>
+      <li>بیشینهٔ باخت‌های پشت‌سرهم: <strong>۵۲</strong> معامله.</li>
+      <li>معاملات با حجم ≥ ۱۰ لات: ۷۹ عدد با PnL <span class="neg">-۱۸,۱۳۶.۴۴</span> — در مقابل حجم‌های کوچک‌تر با PnL <span class="pos">۴,۲۴۶.۰۱</span>.</li>
+      <li>کریپتو (BTC/ETH): ۵۳ معامله، ۰ برنده، PnL <span class="neg">-۱,۱۵۷.۲۸</span>.</li>
+      <li>۳۴ ردیف به‌خاطر زمان بسته شدن قبل از باز شدن (ناسازگاری ساعت) از آمار حذف شد.</li>
+    </ul>
+    <div class="callout">
+      نکتهٔ داده: تقریباً همهٔ خروج‌ها در ژورنال به‌صورت <code>external</code> ثبت شده و قیمت ورود/خروج یکسان ذخیره شده؛
+      مبلغ PnL از بروکر آمده و برای این گزارش قابل اتکاست، اما R-multiple و قیمت خروج برای تحلیل دقیق‌تر نیاز به بهبود ثبت ژورنال دارد.
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>نمودارها</h2>
+    <div class="charts">
+      <div class="chart-box"><canvas id="chartStrategyCount"></canvas></div>
+      <div class="chart-box"><canvas id="chartStrategyWR"></canvas></div>
+      <div class="chart-box"><canvas id="chartSymbolWins"></canvas></div>
+      <div class="chart-box"><canvas id="chartHours"></canvas></div>
+      <div class="chart-box" style="grid-column:1/-1"><canvas id="chartDaily"></canvas></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>جدول استراتژی‌ها</h2>
+    <table>
+      <thead><tr><th>استراتژی</th><th>تعداد</th><th>برنده</th><th>بازنده</th><th>موفقیت</th><th>PnL</th><th>PF</th></tr></thead>
+      <tbody><tr>
+          <td>اولترا اسکالپ (S15)</td>
+          <td>۱۶۲</td>
+          <td>۴۵</td>
+          <td>۱۱۱</td>
+          <td>۲۷.۸٪</td>
+          <td class="neg">-۱۲,۷۰۲.۴۶</td>
+          <td>۰.۸۰</td>
+        </tr><tr>
+          <td>نامشخص / بدون تگ</td>
+          <td>۲۴</td>
+          <td>۶</td>
+          <td>۱۸</td>
+          <td>۲۵.۰٪</td>
+          <td class="neg">-۱,۱۸۷.۹۷</td>
+          <td>۰.۲۷</td>
+        </tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>جدول نمادها</h2>
+    <table>
+      <thead><tr><th>نماد</th><th>کد</th><th>تعداد</th><th>برنده</th><th>موفقیت</th><th>PnL</th></tr></thead>
+      <tbody><tr>
+          <td>طلا (XAUUSD)</td>
+          <td><code>XAUUSD</code></td>
+          <td>۵۹</td>
+          <td>۲۹</td>
+          <td>۴۹.۲٪</td>
+          <td class="pos">۱,۰۷۵.۹۲</td>
+        </tr><tr>
+          <td>یورو/دلار</td>
+          <td><code>EURUSD</code></td>
+          <td>۵۰</td>
+          <td>۱۸</td>
+          <td>۳۶.۰٪</td>
+          <td class="neg">-۱,۳۷۹.۱۶</td>
+        </tr><tr>
+          <td>دلار/ین</td>
+          <td><code>USDJPY</code></td>
+          <td>۲۴</td>
+          <td>۴</td>
+          <td>۱۶.۷٪</td>
+          <td class="neg">-۱۲,۴۲۹.۹۱</td>
+        </tr><tr>
+          <td>اتریوم</td>
+          <td><code>ETHUSD</code></td>
+          <td>۳۳</td>
+          <td>۰</td>
+          <td>۰.۰٪</td>
+          <td class="neg">-۵۷۴.۴۸</td>
+        </tr><tr>
+          <td>بیت‌کوین</td>
+          <td><code>BTCUSD</code></td>
+          <td>۲۰</td>
+          <td>۰</td>
+          <td>۰.۰٪</td>
+          <td class="neg">-۵۸۲.۸۰</td>
+        </tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>بازهٔ زمانی (ساعت بروکر UTC+۳)</h2>
+    <table>
+      <thead><tr><th>بازه</th><th>تعداد</th><th>برنده</th><th>موفقیت</th><th>PnL</th></tr></thead>
+      <tbody><tr>
+          <td>۱۲:۰۰–۱۴:۰۰</td>
+          <td>۳۳</td>
+          <td>۱۴</td>
+          <td>۴۲.۴٪</td>
+          <td class="pos">۲,۷۹۳.۰۳</td>
+        </tr><tr>
+          <td>۰۲:۰۰–۰۴:۰۰</td>
+          <td>۳۰</td>
+          <td>۱۲</td>
+          <td>۴۰.۰٪</td>
+          <td class="neg">-۳,۷۸۶.۴۴</td>
+        </tr><tr>
+          <td>۱۸:۰۰–۲۰:۰۰</td>
+          <td>۲۳</td>
+          <td>۷</td>
+          <td>۳۰.۴٪</td>
+          <td class="neg">-۱,۲۲۸.۳۶</td>
+        </tr><tr>
+          <td>۱۶:۰۰–۱۸:۰۰</td>
+          <td>۴۴</td>
+          <td>۱۳</td>
+          <td>۲۹.۵٪</td>
+          <td class="pos">۱,۰۲۶.۳۰</td>
+        </tr><tr>
+          <td>۰۰:۰۰–۰۲:۰۰</td>
+          <td>۱۲</td>
+          <td>۱</td>
+          <td>۸.۳٪</td>
+          <td class="neg">-۷,۶۵۷.۴۴</td>
+        </tr><tr>
+          <td>۱۴:۰۰–۱۶:۰۰</td>
+          <td>۴۰</td>
+          <td>۳</td>
+          <td>۷.۵٪</td>
+          <td class="neg">-۳,۹۳۷.۱۰</td>
+        </tr><tr>
+          <td>۲۰:۰۰–۲۲:۰۰</td>
+          <td>۲</td>
+          <td>۰</td>
+          <td>۰.۰٪</td>
+          <td class="neg">-۱۹۱.۳۴</td>
+        </tr><tr>
+          <td>۰۴:۰۰–۰۶:۰۰</td>
+          <td>۱</td>
+          <td>۰</td>
+          <td>۰.۰٪</td>
+          <td class="neg">-۹۵۹.۱۰</td>
+        </tr></tbody>
+    </table>
+    <h2 style="margin-top:22px">سشن معاملاتی</h2>
+    <table>
+      <thead><tr><th>سشن</th><th>تعداد</th><th>برنده</th><th>موفقیت</th><th>PnL</th></tr></thead>
+      <tbody><tr>
+          <td>لندن</td>
+          <td>۳۳</td>
+          <td>۱۴</td>
+          <td>۴۲.۴٪</td>
+          <td class="pos">۲,۷۹۳.۰۳</td>
+        </tr><tr>
+          <td>آسیا / شب</td>
+          <td>۴۳</td>
+          <td>۱۳</td>
+          <td>۳۰.۲٪</td>
+          <td class="neg">-۱۲,۴۰۲.۹۸</td>
+        </tr><tr>
+          <td>نیویورک</td>
+          <td>۶۷</td>
+          <td>۲۰</td>
+          <td>۲۹.۹٪</td>
+          <td class="neg">-۲۰۲.۰۶</td>
+        </tr><tr>
+          <td>سایر ساعات</td>
+          <td>۴۲</td>
+          <td>۳</td>
+          <td>۷.۱٪</td>
+          <td class="neg">-۴,۱۲۸.۴۴</td>
+        </tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>عملکرد روزانه</h2>
+    <table>
+      <thead><tr><th>تاریخ (بروکر)</th><th>معاملات</th><th>برنده</th><th>PnL</th></tr></thead>
+      <tbody><tr>
+          <td>۲۰۲۶-۰۷-۲۵</td>
+          <td>۴۶</td>
+          <td>۰</td>
+          <td class="neg">-۲۱۱.۱۳</td>
+        </tr><tr>
+          <td>۲۰۲۶-۰۷-۲۷</td>
+          <td>۱</td>
+          <td>۰</td>
+          <td class="neg">-۴۳۴.۵۹</td>
+        </tr><tr>
+          <td>۲۰۲۶-۰۷-۲۸</td>
+          <td>۳</td>
+          <td>۰</td>
+          <td class="neg">-۲۵۵.۸۲</td>
+        </tr><tr>
+          <td>۲۰۲۶-۰۷-۲۹</td>
+          <td>۱۸</td>
+          <td>۵</td>
+          <td class="neg">-۴۳۷.۲۷</td>
+        </tr><tr>
+          <td>۲۰۲۶-۰۷-۳۰</td>
+          <td>۱۱۲</td>
+          <td>۴۵</td>
+          <td class="neg">-۷,۴۱۵.۵۳</td>
+        </tr><tr>
+          <td>۲۰۲۶-۰۷-۳۱</td>
+          <td>۵</td>
+          <td>۰</td>
+          <td class="neg">-۵,۱۸۶.۱۱</td>
+        </tr><tr>
+          <td>?</td>
+          <td>۱</td>
+          <td>۱</td>
+          <td class="pos">۵۰.۰۲</td>
+        </tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>نقص‌ها و پیشنهاد برای عملکرد بهتر</h2>
+    <p class="lead">این‌ها بر اساس دادهٔ واقعی همین حساب اولویت‌بندی شده‌اند — بدون شل کردن سقف ریسک ۱٪ یا کف R:R.</p>
+    <ul class="fix">
+      <li><strong>حجم‌های غیرعادی بزرگ (مهم‌ترین نقص):</strong> ده‌ها معامله با حجم ۱۰ تا ۵۰ لات روی EURUSD/USDJPY/XAUUSD ثبت شده و بخش عمدهٔ زیان از همین‌هاست.
+      حجم‌های زیر ۱۰ لات در همین دوره در مجموع مثبت بوده‌اند. باید سقف لات سخت‌گیرانه، چک <code>volume_max</code> و صحت <code>pip_value_per_lot</code>/مارجین قبل از <code>order_send</code> اعمال شود.</li>
+      <li><strong>کریپتو (BTCUSD/ETHUSD) فعلاً صفر برنده:</strong> کارمزد/اسپرد اولترا اسکالپ روی این نمادها را می‌بلعد. پیشنهاد: تا اصلاح هندسهٔ اقتصادی، کریپتو را خاموش کنید یا فقط در سشن نقدشوندگی بالا با فیلتر اسپرد/کمیسیون سخت‌تر معامله شود.</li>
+      <li><strong>معامله در آسیا/شب زیان‌ده است:</strong> سشن آسیا حدود -۱۲,۴۰۲.۹۸ ضرر داشته. حالت <code>london_ny</code> به‌جای <code>always_on_24h</code> برای فارکس/طلا منطقی‌تر است.</li>
+      <li><strong>بازه ۱۴:۰۰–۱۶:۰۰ (بروکر) ضعیف است:</strong> نرخ موفقیت بسیار پایین؛ بهتر است در پنل/تلگرام برای این پنجره فیلتر زمانی یا کاهش ریسک اعمال شود.</li>
+      <li><strong>USDJPY بدترین نماد از نظر PnL:</strong> با وجود تعداد کمتر، زیان سنگین داشته. موقتاً حذف از لیست نمادها یا کاهش ریسک جداگانه توصیه می‌شود.</li>
+      <li><strong>ثبت استراتژی و قیمت خروج ناقص است:</strong> ۱۴۶ معامله ابتدا <code>unknown</code> بودند و تقریباً همهٔ خروج‌ها <code>external</code> با قیمت ورود=خروج. باید تگ استراتژی هنگام <code>record_open</code> اجباری شود و در reconcile قیمت/دلیل واقعی از deal history بروکر نوشته شود — وگرنه گزارش‌گیری و بهینه‌سازی گمراه‌کننده می‌ماند.</li>
+      <li><strong>استریک باخت بلند:</strong> ۵۲ باخت پشت‌سرهم نشان می‌دهد circuit breaker / daily loss / سه-ضربه باید زودتر فعال شود یا حساسیت‌شان برای اولترا اسکالپ جدا تنظیم شود.</li>
+      <li><strong>XAUUSD نسبتاً امیدوارکننده است:</strong> بیشترین تعداد برد و تنها نماد با PnL مثبت معنادار در این نمونه؛ تمرکز روی طلا + سشن لندن منطقی‌ترین مسیر بهبود کوتاه‌مدت است.</li>
+    </ul>
+  </section>
+
+  <footer>
+    منبع داده: <code>trade_journal_live.json</code> روی VPS —
+    حساب ۵۵,۶۲۵,۵۰۰ / AUSCommercial-Demo.
+    این گزارش برای تصمیم‌گیری عملیاتی است و تضمین سود آینده نیست.
+  </footer>
+</div>
+<script>
+const DATA = {"strategies": {"labels": ["اولترا اسکالپ (S15)", "نامشخص / بدون تگ"], "counts": [162, 24], "win_rates": [27.8, 25.0], "pnl": [-12702.46, -1187.97]}, "symbols": {"labels": ["XAUUSD", "EURUSD", "USDJPY", "ETHUSD", "BTCUSD"], "wins": [29, 18, 4, 0, 0], "pnl": [1075.92, -1379.16, -12429.91, -574.48, -582.8]}, "hours": {"labels": ["00:00–02:00", "02:00–04:00", "04:00–06:00", "12:00–14:00", "14:00–16:00", "16:00–18:00", "18:00–20:00", "20:00–22:00"], "win_rates": [8.3, 40.0, 0.0, 42.4, 7.5, 29.5, 30.4, 0.0], "pnl": [-7657.44, -3786.44, -959.1, 2793.03, -3937.1, 1026.3, -1228.36, -191.34]}, "days": {"labels": ["2026-07-25", "2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "?"], "pnl": [-211.13, -434.59, -255.82, -437.27, -7415.53, -5186.11, 50.02]}};
+const gridColor = 'rgba(255,255,255,0.08)';
+const textColor = '#9aadc2';
+Chart.defaults.color = textColor;
+Chart.defaults.font.family = 'Vazirmatn, Tahoma, sans-serif';
+Chart.defaults.borderColor = gridColor;
+
+new Chart(document.getElementById('chartStrategyCount'), {
+  type: 'bar',
+  data: {
+    labels: DATA.strategies.labels,
+    datasets: [{
+      label: 'تعداد معاملات',
+      data: DATA.strategies.counts,
+      backgroundColor: '#3d9cf0'
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { title: { display: true, text: 'تعداد معامله به تفکیک استراتژی', color: '#e8eef6' } },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+  }
+});
+
+new Chart(document.getElementById('chartStrategyWR'), {
+  type: 'bar',
+  data: {
+    labels: DATA.strategies.labels,
+    datasets: [{
+      label: 'نرخ موفقیت ٪',
+      data: DATA.strategies.win_rates,
+      backgroundColor: '#3ecf8e'
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { title: { display: true, text: 'نرخ موفقیت استراتژی‌ها', color: '#e8eef6' } },
+    scales: { y: { beginAtZero: true, max: 100 } }
+  }
+});
+
+new Chart(document.getElementById('chartSymbolWins'), {
+  type: 'bar',
+  data: {
+    labels: DATA.symbols.labels,
+    datasets: [
+      { label: 'تعداد برد', data: DATA.symbols.wins, backgroundColor: '#3ecf8e' },
+      { label: 'PnL', data: DATA.symbols.pnl, backgroundColor: '#e6c07b', yAxisID: 'y1' }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { title: { display: true, text: 'برد و PnL به تفکیک نماد', color: '#e8eef6' } },
+    scales: {
+      y: { beginAtZero: true, position: 'right', ticks: { precision: 0 } },
+      y1: { beginAtZero: false, position: 'left', grid: { drawOnChartArea: false } }
+    }
+  }
+});
+
+new Chart(document.getElementById('chartHours'), {
+  type: 'line',
+  data: {
+    labels: DATA.hours.labels,
+    datasets: [{
+      label: 'نرخ موفقیت ٪',
+      data: DATA.hours.win_rates,
+      borderColor: '#3d9cf0',
+      backgroundColor: 'rgba(61,156,240,.2)',
+      fill: true,
+      tension: .3
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { title: { display: true, text: 'نرخ موفقیت در بازه‌های ۲ساعته (UTC+۳)', color: '#e8eef6' } },
+    scales: { y: { beginAtZero: true, max: 100 } }
+  }
+});
+
+new Chart(document.getElementById('chartDaily'), {
+  type: 'bar',
+  data: {
+    labels: DATA.days.labels,
+    datasets: [{
+      label: 'PnL روزانه',
+      data: DATA.days.pnl,
+      backgroundColor: DATA.days.pnl.map(v => v >= 0 ? '#3ecf8e' : '#f07178')
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { title: { display: true, text: 'سود و زیان روزانه', color: '#e8eef6' } }
+  }
+});
+</script>
+</body>
+</html>

@@ -85,6 +85,7 @@ for ChronoScalp. Mirrored in `.cursor/rules/auto-commit-push.mdc` and
 | Add a broker | `src/chronoscalp/execution/broker.py` (interface) + new impl file |
 | Change backtest fill/slippage assumptions | `src/chronoscalp/backtest/engine.py` |
 | Tune session windows, risk %, spread caps | `config/settings.yaml` (no code change needed) |
+| Generate Persian HTML P&amp;L report from journal | `scripts/generate_account_report_fa.py`, `reporting/account_report_fa.py` |
 
 This file intentionally mirrors `.cursor/rules/project.mdc` — if you update
 one, update the other so Claude Code and Cursor stay aligned.
