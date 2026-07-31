@@ -49,6 +49,7 @@ strategy:
   enabled_strategies:
     - smc_confluence
     - liquidity_volume
+    - delta
     # ultra_scalp — re-enable via Telegram only after symbol allowlist review;
     # FX majors are blocked in ultra_scalp.disabled_symbols (journal bleed).
   use_smc_confluence: true
@@ -57,6 +58,20 @@ strategy:
   use_news_straddle: false
   liquidity_rvol_min: 1.5
   entry_rvol_min: 1.5
+  delta:
+    # Delta is structure-first and intentionally limited to gold / EURUSD.
+    allowed_symbols: [XAUUSD, EURUSD]
+    structure_lookback: 12
+    slope_bars: 3
+    rvol_min: 1.15
+    min_body_fraction: 0.45
+    min_atr_close_ratio: 0.00004
+    max_atr_close_ratio: 0.004
+    stop_buffer_atr: 0.20
+    min_stop_atr: 0.80
+    max_stop_atr: 2.50
+    min_stop_spread_multiple: 2.0
+    reward_risk_ratio: 1.80
   atr_stop_multiple: 1.5
   atr_target_multiple: 2.25
   min_signal_confidence: 0.55

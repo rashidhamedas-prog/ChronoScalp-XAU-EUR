@@ -75,6 +75,7 @@ Thumbs.db
 
 # Testing / tooling caches
 .pytest_cache/
+.test-tmp/
 .coverage
 htmlcov/
 .mypy_cache/

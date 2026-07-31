@@ -1,5 +1,13 @@
 # Roadmap
 
+## Strategy Delta — implemented, validation pending
+
+- [x] Explainable M15/M5 regime + M1 sweep/retest entry engine
+- [x] Structure/ATR/spread-aware stop geometry and >=1.5R target floor
+- [x] XAUUSD/EURUSD allowlist, unit tests, and operator documentation
+- [ ] Broker-native two-year walk-forward backtest for each symbol
+- [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
+
 Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ not started
 
 ## Phase 1 — Data pipeline ✅

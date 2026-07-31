@@ -430,6 +430,11 @@ class MultiTimeframeStrategy:
         never blocks institutional just because it ran first.
         """
         use_smc, use_liq, use_scalp, _use_news = resolve_enabled_strategies(self.strategy_cfg)
+        enabled_names = {
+            str(name).strip().lower()
+            for name in (self.strategy_cfg.get("enabled_strategies") or [])
+        }
+        use_delta = "delta" in enabled_names
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
@@ -438,6 +443,7 @@ class MultiTimeframeStrategy:
         # Institutional / SMC / liquidity path when those modes are on — even
         # alongside ultra-scalp — or when scalp is off (legacy single path).
         want_institutional = bool(run_institutional) and (use_smc or use_liq or (not use_scalp))
+        want_delta = bool(run_institutional and use_delta)
 
         higher_frames = [
             data_by_timeframe[tf] for tf in higher_timeframes if tf in data_by_timeframe
@@ -582,6 +588,29 @@ class MultiTimeframeStrategy:
                     candidates.append(inst_signal)
                 else:
                     skip_reasons.append(f"inst:{inst_signal.reason or 'no_signal'}")
+
+        if want_delta:
+            delta_tf = Timeframe.M1 if Timeframe.M1 in data_by_timeframe else trigger_timeframe
+            delta_df = data_by_timeframe.get(delta_tf)
+            if delta_df is None:
+                skip_reasons.append("delta:no_trigger_data")
+            else:
+                from chronoscalp.strategy.delta import generate_delta_signal
+
+                delta_signal = generate_delta_signal(
+                    symbol,
+                    delta_df,
+                    higher_frames,
+                    config=dict(self.strategy_cfg.get("delta") or {}),
+                    symbol_spec=self.symbols_cfg.get(symbol),
+                    spread_pips=spread_pips,
+                    ema_period=int(self.indicators_cfg.get("ema_period_trend", 50)),
+                )
+                delta_signal = _apply_confidence(delta_signal)
+                if delta_signal.is_actionable:
+                    candidates.append(delta_signal)
+                else:
+                    skip_reasons.append(delta_signal.reason or "delta:no_signal")
 
         best = pick_best_signal(candidates)
         if best is not None:

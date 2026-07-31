@@ -8,6 +8,7 @@ STRATEGY_INSTITUTIONAL = "institutional"
 STRATEGY_NEWS_STRADDLE = "news_straddle"
 STRATEGY_SMC = "smc_confluence"
 STRATEGY_LIQUIDITY = "liquidity_volume"
+STRATEGY_DELTA = "delta"
 STRATEGY_UNKNOWN = "unknown"
 
 # Display order for strategy P&L tables.
@@ -17,6 +18,7 @@ STRATEGY_REPORT_ORDER: tuple[str, ...] = (
     STRATEGY_NEWS_STRADDLE,
     STRATEGY_SMC,
     STRATEGY_LIQUIDITY,
+    STRATEGY_DELTA,
     STRATEGY_UNKNOWN,
 )
 
@@ -39,6 +41,7 @@ def normalize_strategy_tag(raw: str | None) -> str:
         (STRATEGY_INSTITUTIONAL, ("institutional_entry", "institutional")),
         (STRATEGY_SMC, ("smc_confluence", "smc")),
         (STRATEGY_LIQUIDITY, ("liquidity_volume", "liquidity_sweep", "liquidity")),
+        (STRATEGY_DELTA, ("delta",)),
     )
     blob = f"{head}|{text}"
     for canonical, needles in checks:
@@ -51,6 +54,7 @@ def normalize_strategy_tag(raw: str | None) -> str:
         STRATEGY_NEWS_STRADDLE,
         STRATEGY_SMC,
         STRATEGY_LIQUIDITY,
+        STRATEGY_DELTA,
     }:
         return head
     return STRATEGY_UNKNOWN

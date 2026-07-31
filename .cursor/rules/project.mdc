@@ -3,6 +3,10 @@ description: ChronoScalp XAU/EUR project rules — always apply
 alwaysApply: true
 ---
 
+Strategy Delta lives in `src/chronoscalp/strategy/delta.py`; its specification
+and required validation gates are in `docs/STRATEGY_DELTA.md`. Never describe
+it as guaranteed or live-ready before those gates pass.
+
 # ChronoScalp XAU/EUR — Cursor Project Rules
 
 Multi-timeframe algorithmic scalping bot for XAUUSD / EURUSD. Full context
