@@ -32,6 +32,58 @@ def test_round_to_lot_step_respects_bounds():
     assert round_to_lot_step(1.234, 0.01, 50, 0.01) == pytest.approx(1.23)
 
 
+def test_floor_volume_never_rounds_up_past_min_lot():
+    from chronoscalp.risk.position_sizing import floor_volume_to_step
+
+    assert floor_volume_to_step(0.003, volume_min=0.01, volume_max=50, volume_step=0.01) == 0.0
+    assert floor_volume_to_step(0.019, volume_min=0.01, volume_max=50, volume_step=0.01) == pytest.approx(
+        0.01
+    )
+    assert floor_volume_to_step(50.05, volume_min=0.01, volume_max=50, volume_step=0.01) == pytest.approx(
+        50.0
+    )
+
+
+def test_calculate_position_size_rejects_when_min_lot_exceeds_budget():
+    """Tight stop + tiny equity must not round up to min_lot and overshoot 1%."""
+    micro = {
+        "pip_size": 0.0001,
+        "pip_value_per_lot": 10.0,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 50,
+        "contract_size": 100_000,
+    }
+    # 1% of $200 = $2; 5-pip stop → loss/lot = 50 → raw vol = 0.04 → floor 0.04
+    # (lot_step flooring may yield 0.03 depending on Decimal representation)
+    ok = calculate_position_size(200, 1.0, 1.10, 1.0995, micro)
+    assert 0.03 <= ok <= 0.04
+    # Below min with small equity: 20-pip stop, $50 equity → risk=$0.5, loss/lot=200 → raw=0.0025
+    assert calculate_position_size(50, 1.0, 1.10, 1.0980, micro) == 0.0
+
+
+def test_calculate_position_size_does_not_overshoot_via_max_lot():
+    """Tight stop must not clamp to max_lot when that would exceed the risk budget."""
+    fx = {
+        "pip_size": 0.0001,
+        "pip_value_per_lot": 10.0,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 50.0,
+        "contract_size": 100_000,
+    }
+    # 1% of 100k = 1000; 2-pip stop → loss/lot=20 → raw=50 exactly at max
+    vol = calculate_position_size(100_000, 1.0, 1.10, 1.0998, fx)
+    assert vol == pytest.approx(50.0)
+    # 1-pip stop → loss/lot=10 → raw=100 → floored to max_lot=50 → risk=500 <= 1000
+    vol2 = calculate_position_size(100_000, 1.0, 1.10, 1.0999, fx)
+    assert vol2 == pytest.approx(50.0)
+    assert vol2 * 10.0 <= 1000.0 * 1.001
+    # Wider stop keeps actual risk within budget after flooring
+    vol3 = calculate_position_size(100_000, 1.0, 1.10, 1.0970, fx)
+    assert vol3 * 300 <= 1000.0 * 1.001
+
+
 def test_calculate_position_size_risks_expected_amount():
     equity = 10_000
     risk_pct = 1.0
@@ -115,7 +167,8 @@ def test_resolve_active_risk_pct_default_and_presets():
     )
 
 
-def test_risk_manager_accepts_scalp_one_to_one_override():
+def test_risk_manager_rejects_scalp_below_hard_rr_floor():
+    """Ultra may not bypass the hard 1.5 gross R:R floor via scoped override."""
     rm = RiskManager(
         risk_cfg={
             "min_reward_risk_ratio": 1.5,
@@ -138,7 +191,19 @@ def test_risk_manager_accepts_scalp_one_to_one_override():
     )
     assert signal.risk_reward_ratio == pytest.approx(1.0)
     assert not rm.validate_signal(signal, current_spread_pips=1.0)
-    assert rm.validate_signal(signal, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+    assert not rm.validate_signal(signal, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+    ok = Signal(
+        symbol="XAUUSD",
+        signal_type=SignalType.BUY,
+        timestamp=datetime.now(tz=UTC),
+        entry_price=2000,
+        stop_loss=1990,
+        take_profit=2015,  # 1.5R
+        timeframe=Timeframe.S15,
+        reason="ultra_scalp,trend=bullish",
+    )
+    assert ok.risk_reward_ratio == pytest.approx(1.5)
+    assert rm.validate_signal(ok, current_spread_pips=1.0, min_reward_risk_ratio=1.5)
 
 
 def test_btcusd_position_size_positive():
@@ -204,19 +269,19 @@ def test_validate_signal_rejects_commission_uneconomic_scalp():
         take_profit=64_660.0,  # 1:1, 25 points
         timeframe=Timeframe.S15,
     )
-    assert not rm.validate_signal(doomed, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+    assert not rm.validate_signal(doomed, current_spread_pips=1.0, min_reward_risk_ratio=1.5)
 
-    # Commission-free gold with the same geometry still passes.
+    # Commission-free gold with 1.5R geometry still passes.
     gold = Signal(
         symbol="XAUUSD",
         signal_type=SignalType.BUY,
         timestamp=datetime.now(tz=UTC),
         entry_price=2000.0,
         stop_loss=1990.0,
-        take_profit=2010.0,
+        take_profit=2015.0,
         timeframe=Timeframe.S15,
     )
-    assert rm.validate_signal(gold, current_spread_pips=1.0, min_reward_risk_ratio=1.0)
+    assert rm.validate_signal(gold, current_spread_pips=1.0, min_reward_risk_ratio=1.5)
 
 
 def test_validate_signal_rejects_spread_burning_scalp():
@@ -248,7 +313,7 @@ def test_validate_signal_rejects_spread_burning_scalp():
         take_profit=186.1843,
         timeframe=Timeframe.S15,
     )
-    assert not rm.validate_signal(micro, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+    assert not rm.validate_signal(micro, current_spread_pips=0.3, min_reward_risk_ratio=1.5)
 
     # Sub-spread stop distance is floored out even when live spread is ~0.
     floored_spec = dict(eurjpy_spec, typical_spread_pips=1.5)
@@ -272,7 +337,7 @@ def test_validate_signal_rejects_spread_burning_scalp():
         timeframe=Timeframe.S15,
     )
     assert not rm_floor.validate_signal(
-        sub_pip, current_spread_pips=0.01, min_reward_risk_ratio=1.0
+        sub_pip, current_spread_pips=0.01, min_reward_risk_ratio=1.5
     )
 
     # A 5-pip stop / 8-pip target clears the 0.3-pip spread comfortably.
@@ -285,7 +350,7 @@ def test_validate_signal_rejects_spread_burning_scalp():
         take_profit=186.112,
         timeframe=Timeframe.S15,
     )
-    assert rm.validate_signal(healthy, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+    assert rm.validate_signal(healthy, current_spread_pips=0.3, min_reward_risk_ratio=1.5)
 
 
 def test_fit_economic_scalp_widens_eurjpy_sub_spread_stop():
@@ -307,8 +372,8 @@ def test_fit_economic_scalp_widens_eurjpy_sub_spread_stop():
         atr_target_multiple=1.0,
         symbol_spec=eurjpy,
         spread_pips=0.3,
-        min_reward_risk_ratio=1.0,
-        net_rr_floor=1.0,
+        min_reward_risk_ratio=1.5,
+        net_rr_floor=1.25,
     )
     assert geometry is not None
     stop, tp = geometry
@@ -334,11 +399,16 @@ def test_fit_economic_scalp_widens_eurjpy_sub_spread_stop():
         timeframe=Timeframe.S15,
         reason="ultra_scalp_v3",
     )
-    assert rm.validate_signal(signal, current_spread_pips=0.3, min_reward_risk_ratio=1.0)
+    assert signal.risk_reward_ratio >= 1.5 - 1e-9
+    assert rm.validate_signal(signal, current_spread_pips=0.3, min_reward_risk_ratio=1.5)
 
 
 def test_fit_economic_scalp_clears_btc_commission():
-    """1:1 micro ATR BTC scalp must expand TP past LiteFinance commission."""
+    """With hard 1.5R + LiteFinance commission, micro ATR geometry is uneconomic.
+
+    Live demo showed commission-blind S15 scalps; refusing None here is the
+    correct containment behavior (prefer no trade over guaranteed negative EV).
+    """
     from chronoscalp.risk.position_sizing import fit_economic_scalp_geometry
 
     entry = 65_000.0
@@ -350,12 +420,30 @@ def test_fit_economic_scalp_clears_btc_commission():
         atr_target_multiple=1.0,
         symbol_spec=BTC_LITEFINANCE_SPEC,
         spread_pips=20.0,
-        min_reward_risk_ratio=1.0,
-        net_rr_floor=1.0,
+        min_reward_risk_ratio=1.5,
+        net_rr_floor=1.25,
+        max_stop_atr_multiple=2.0,
+        max_target_atr_multiple=2.0,
     )
-    assert geometry is not None
-    stop, tp = geometry
-    assert abs(entry - stop) >= 40.0  # 2x typical_spread_pips=20
+    assert geometry is None
+
+    # Wider ATR budget can clear costs at 1.5R.
+    geometry_ok = fit_economic_scalp_geometry(
+        entry=entry,
+        is_buy=True,
+        atr=200.0,
+        atr_stop_multiple=1.0,
+        atr_target_multiple=1.5,
+        symbol_spec=BTC_LITEFINANCE_SPEC,
+        spread_pips=20.0,
+        min_reward_risk_ratio=1.5,
+        net_rr_floor=1.25,
+        max_stop_atr_multiple=8.0,
+        max_target_atr_multiple=12.0,
+    )
+    assert geometry_ok is not None
+    stop, tp = geometry_ok
+    assert abs(entry - stop) >= 40.0
     rm = RiskManager(
         risk_cfg={
             "min_reward_risk_ratio": 1.5,
@@ -376,7 +464,8 @@ def test_fit_economic_scalp_clears_btc_commission():
         timeframe=Timeframe.S15,
         reason="ultra_scalp_v3",
     )
-    assert rm.validate_signal(signal, current_spread_pips=20.0, min_reward_risk_ratio=1.0)
+    assert signal.risk_reward_ratio >= 1.5 - 1e-9
+    assert rm.validate_signal(signal, current_spread_pips=20.0, min_reward_risk_ratio=1.5)
 
 
 def test_fit_economic_scalp_returns_none_when_caps_too_tight():

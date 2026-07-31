@@ -483,10 +483,14 @@ class TradingBot:
             ensure()
 
     def _min_rr_for_signal(self, signal) -> float:
+        from chronoscalp.risk.position_sizing import HARD_MIN_GROSS_RR
+
         if "ultra_scalp" in (signal.reason or ""):
             scalp = self.settings.strategy.get("ultra_scalp") or {}
-            return max(1.0, float(scalp.get("min_reward_risk_ratio", 1.0)))
-        return max(1.0, float(self.settings.risk.get("min_reward_risk_ratio", 1.5)))
+            requested = float(scalp.get("min_reward_risk_ratio", HARD_MIN_GROSS_RR))
+        else:
+            requested = float(self.settings.risk.get("min_reward_risk_ratio", HARD_MIN_GROSS_RR))
+        return max(HARD_MIN_GROSS_RR, requested)
 
     def _persist_state(self) -> None:
         self.state_store.state.open_tickets = dict(self.open_tickets)

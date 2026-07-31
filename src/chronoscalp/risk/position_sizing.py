@@ -12,11 +12,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from decimal import ROUND_FLOOR, Decimal
 
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.types import Position, Signal
 
 HARD_MAX_RISK_PCT = 1.0
+HARD_MIN_GROSS_RR = 1.5
 
 
 def resolve_active_risk_pct(risk_cfg: dict) -> float:
@@ -42,12 +44,39 @@ def resolve_active_risk_pct(risk_cfg: dict) -> float:
 
 
 def round_to_lot_step(volume: float, min_lot: float, max_lot: float, lot_step: float) -> float:
+    """Legacy nearest-step rounding (may round up). Prefer :func:`floor_volume_to_step`."""
     if lot_step <= 0:
         return max(min_lot, min(volume, max_lot))
     steps = round(volume / lot_step)
     rounded = steps * lot_step
     return max(min_lot, min(round(rounded, 8), max_lot))
 
+
+def floor_volume_to_step(
+    raw_volume: float,
+    *,
+    volume_min: float,
+    volume_max: float,
+    volume_step: float,
+) -> float:
+    """Floor volume to the broker step; never round upward past the risk budget.
+
+    Returns ``0.0`` when ``raw_volume`` is below ``volume_min`` (refuse the trade
+    instead of inflating risk by rounding up to min lot).
+    """
+    if raw_volume <= 0 or volume_min <= 0 or volume_max < volume_min:
+        return 0.0
+    if raw_volume + 1e-12 < volume_min:
+        return 0.0
+    step = Decimal(str(volume_step))
+    if step <= 0:
+        return 0.0
+    raw = min(Decimal(str(raw_volume)), Decimal(str(volume_max)))
+    steps = (raw / step).to_integral_value(rounding=ROUND_FLOOR)
+    result = steps * step
+    if result < Decimal(str(volume_min)):
+        return 0.0
+    return float(result)
 
 def commission_per_lot(symbol_spec: dict, entry_price: float) -> float:
     """Estimated round-turn commission (account currency) for 1.0 lot.
@@ -140,7 +169,12 @@ def calculate_position_size(
     symbol_spec: dict,
 ) -> float:
     """Position size (in lots) such that a stop-loss hit loses at most
-    `risk_pct`% of `equity` **including** estimated round-turn commission."""
+    `risk_pct`% of `equity` **including** estimated round-turn commission.
+
+    Never rounds volume upward. If the affordable size is below ``min_lot``,
+    or clamping to ``max_lot`` would still exceed the risk budget, returns 0
+    (skip the trade) instead of oversizing.
+    """
     if equity <= 0:
         raise ValueError("equity must be positive")
 
@@ -156,13 +190,32 @@ def calculate_position_size(
         raise ValueError("computed risk_pips must be positive")
 
     loss_per_lot = risk_pips * pip_value_per_lot + commission_per_lot(symbol_spec, entry_price)
+    if loss_per_lot <= 0:
+        return 0.0
     raw_volume = risk_amount / loss_per_lot
-    return round_to_lot_step(
+    volume = floor_volume_to_step(
         raw_volume,
-        min_lot=symbol_spec["min_lot"],
-        max_lot=symbol_spec["max_lot"],
-        lot_step=symbol_spec["lot_step"],
+        volume_min=float(symbol_spec["min_lot"]),
+        volume_max=float(symbol_spec["max_lot"]),
+        volume_step=float(symbol_spec["lot_step"]),
     )
+    if volume <= 0:
+        logger.debug(
+            "Position size rejected: raw_volume={:.6f} below min_lot={} (no upward round)",
+            raw_volume,
+            symbol_spec["min_lot"],
+        )
+        return 0.0
+    actual_risk = volume * loss_per_lot
+    if actual_risk > risk_amount * 1.001:
+        logger.warning(
+            "Position size rejected: floored volume={:.4f} risks {:.2f} > budget {:.2f}",
+            volume,
+            actual_risk,
+            risk_amount,
+        )
+        return 0.0
+    return volume
 
 
 def kelly_fraction(win_rate: float, reward_risk_ratio: float, cap_pct: float) -> float:
@@ -269,15 +322,21 @@ class RiskManager:
         if self.daily_tracker.daily_loss_limit_hit():
             return False
 
-        # Default hard floor remains 1.5; callers may pass a scoped override
-        # (e.g. ultra_scalp min 1.0) without lowering the global risk config.
-        min_rr = (
+        # Hard floor is non-negotiable — scoped callers (e.g. ultra_scalp) may
+        # request a higher floor, never a lower one (CLAUDE.md / remediation).
+        requested = (
             float(min_reward_risk_ratio)
             if min_reward_risk_ratio is not None
-            else float(self.risk_cfg.get("min_reward_risk_ratio", 1.5))
+            else float(self.risk_cfg.get("min_reward_risk_ratio", HARD_MIN_GROSS_RR))
         )
-        if min_rr < 1.0:
-            min_rr = 1.0
+        min_rr = max(requested, HARD_MIN_GROSS_RR)
+        if requested + 1e-12 < HARD_MIN_GROSS_RR:
+            logger.warning(
+                "Requested min R:R {:.2f} below hard floor {:.2f} — enforcing {:.2f}",
+                requested,
+                HARD_MIN_GROSS_RR,
+                min_rr,
+            )
         if not passes_reward_risk_filter(signal, min_rr):
             logger.debug(
                 "Signal rejected: R:R {:.2f} < min {:.2f}", signal.risk_reward_ratio, min_rr

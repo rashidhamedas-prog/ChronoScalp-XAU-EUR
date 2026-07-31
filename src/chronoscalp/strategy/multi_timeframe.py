@@ -109,6 +109,33 @@ def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool, bo
     )
 
 
+def _canonical_symbol_root(symbol: str) -> str:
+    """``EURUSD_o`` / ``EURUSD`` → ``EURUSD`` for allow/deny matching."""
+    return str(symbol or "").strip().upper().split("_", 1)[0]
+
+
+def ultra_scalp_allowed_for_symbol(symbol: str, scalp_cfg: dict) -> bool:
+    """Gate ultra-scalp by optional allow/deny lists (live demo FX bleed fix).
+
+    Rules (first match wins conceptually):
+    - If ``allowed_symbols`` is a list (including empty), only those roots trade.
+    - Else if ``disabled_symbols`` is a list, those roots are blocked.
+    - Else all symbols are allowed (legacy).
+    """
+    root = _canonical_symbol_root(symbol)
+    if not root:
+        return False
+    allowed = scalp_cfg.get("allowed_symbols")
+    if isinstance(allowed, list):
+        allowed_roots = {_canonical_symbol_root(s) for s in allowed if str(s).strip()}
+        return root in allowed_roots
+    disabled = scalp_cfg.get("disabled_symbols")
+    if isinstance(disabled, list):
+        disabled_roots = {_canonical_symbol_root(s) for s in disabled if str(s).strip()}
+        return root not in disabled_roots
+    return True
+
+
 def _confluence_ok(
     row: pd.Series,
     direction: TrendDirection,
@@ -406,7 +433,8 @@ class MultiTimeframeStrategy:
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
-        want_scalp = bool(use_scalp and run_scalp)
+        symbol_allows_scalp = ultra_scalp_allowed_for_symbol(symbol, scalp_cfg)
+        want_scalp = bool(use_scalp and run_scalp and symbol_allows_scalp)
         # Institutional / SMC / liquidity path when those modes are on — even
         # alongside ultra-scalp — or when scalp is off (legacy single path).
         want_institutional = bool(run_institutional) and (use_smc or use_liq or (not use_scalp))
@@ -470,6 +498,9 @@ class MultiTimeframeStrategy:
         skip_reasons: list[str] = []
         candidates: list[Signal] = []
 
+        if use_scalp and run_scalp and not symbol_allows_scalp:
+            skip_reasons.append("scalp:symbol_blocked")
+
         if want_scalp:
             scalp_tf = trigger_timeframe
             scalp_df = data_by_timeframe.get(scalp_tf)
@@ -483,7 +514,9 @@ class MultiTimeframeStrategy:
                     trigger_df=scalp_df,
                     trend=_trend(for_scalp=True),
                     timeframe=scalp_tf,
-                    min_reward_risk_ratio=float(scalp_cfg.get("min_reward_risk_ratio", 1.0)),
+                    min_reward_risk_ratio=max(
+                        1.5, float(scalp_cfg.get("min_reward_risk_ratio", 1.5))
+                    ),
                     atr_stop_multiple=float(scalp_cfg.get("atr_stop_multiple", 2.5)),
                     atr_target_multiple=float(scalp_cfg.get("atr_target_multiple", 4.0)),
                     rvol_min=float(scalp_cfg.get("rvol_min", 1.2)),
@@ -495,7 +528,9 @@ class MultiTimeframeStrategy:
                     spread_pips=spread_pips,
                     cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
                     min_stop_spread_multiple=float(scalp_cfg.get("min_stop_spread_multiple", 2.0)),
-                    net_rr_after_costs=float(scalp_cfg.get("net_rr_after_costs", 1.0)),
+                    net_rr_after_costs=max(
+                        1.25, float(scalp_cfg.get("net_rr_after_costs", 1.25))
+                    ),
                     max_stop_atr_multiple=float(scalp_cfg.get("max_stop_atr_multiple", 8.0)),
                     max_target_atr_multiple=float(scalp_cfg.get("max_target_atr_multiple", 12.0)),
                 )

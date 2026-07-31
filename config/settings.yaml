@@ -49,11 +49,11 @@ strategy:
   enabled_strategies:
     - smc_confluence
     - liquidity_volume
-    - ultra_scalp
-    # news_straddle — enable via panel/Telegram when trading NFP/CPI/FOMC straddles
+    # ultra_scalp — re-enable via Telegram only after symbol allowlist review;
+    # FX majors are blocked in ultra_scalp.disabled_symbols (journal bleed).
   use_smc_confluence: true
   use_liquidity_volume: true
-  use_ultra_scalp: true
+  use_ultra_scalp: false
   use_news_straddle: false
   liquidity_rvol_min: 1.5
   entry_rvol_min: 1.5
@@ -65,16 +65,34 @@ strategy:
     # LiteFinance commission without raising the 1% equity risk ceiling.
     atr_stop_multiple: 2.5
     atr_target_multiple: 4.0
-    min_reward_risk_ratio: 1.0
+    # Hard floor 1.5 — live demo showed FX ultra with 1.0 RR + huge lots destroyed expectancy.
+    min_reward_risk_ratio: 1.5
     rvol_min: 1.2
     impulse_body_atr_multiple: 0.35
     trend_mode: primary
     require_confluence: false
     cost_aware_geometry: true
     min_stop_spread_multiple: 2.0
-    net_rr_after_costs: 1.0
+    net_rr_after_costs: 1.25
     max_stop_atr_multiple: 8.0
     max_target_atr_multiple: 12.0
+    # Block FX/gold majors where S15 ultra-scalp produced large clustered losses
+    # (EURUSD/USDJPY especially). Crypto must be listed explicitly to opt back in.
+    disabled_symbols:
+      - EURUSD
+      - USDJPY
+      - XAUUSD
+      - EURJPY
+      - XAUEUR
+      - GBPUSD
+      - AUDUSD
+      - USDCAD
+      - USDCHF
+      - NZDUSD
+      - EURGBP
+      - GBPJPY
+      - BTCUSD
+      - ETHUSD
   news_straddle:
     # Dynamic ATR BUY_STOP + SELL_STOP around high-impact releases (MT5/paper).
     atr_period: 14
