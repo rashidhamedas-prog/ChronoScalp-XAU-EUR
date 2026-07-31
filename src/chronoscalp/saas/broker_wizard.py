@@ -175,20 +175,12 @@ def apply_risk_preset(
     from chronoscalp.risk.position_sizing import HARD_MAX_RISK_PCT, resolve_active_risk_pct
 
     ceiling = min(float(hard_ceiling_pct), HARD_MAX_RISK_PCT)
-    payload: dict = {}
-    if overrides_path.exists():
-        payload = yaml.safe_load(overrides_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(payload, dict):
-            payload = {}
+    payload = _load_overrides(overrides_path)
     risk = dict(payload.get("risk") or {})
     risk["active_risk_per_trade_pct"] = float(selected_pct)
     risk["max_risk_per_trade_pct"] = ceiling
     payload["risk"] = risk
-    overrides_path.parent.mkdir(parents=True, exist_ok=True)
-    overrides_path.write_text(
-        yaml.safe_dump(payload, default_flow_style=False, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
+    _write_overrides(overrides_path, payload)
     effective = resolve_active_risk_pct(risk)
     logger.info(
         "Risk preset saved: selected={:.2f}% effective={:.2f}% (ceiling={:.2f}%)",
@@ -217,9 +209,12 @@ def _load_overrides(overrides_path: Path) -> dict:
 
 
 def _write_overrides(overrides_path: Path, payload: dict) -> None:
+    from chronoscalp.config_overrides import validate_runtime_overrides
+
+    validated = validate_runtime_overrides(payload if isinstance(payload, dict) else {})
     overrides_path.parent.mkdir(parents=True, exist_ok=True)
     overrides_path.write_text(
-        yaml.safe_dump(payload, default_flow_style=False, allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(validated, default_flow_style=False, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
 

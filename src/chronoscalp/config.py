@@ -15,6 +15,8 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from chronoscalp.config_overrides import validate_runtime_overrides
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT_DIR / "config"
 
@@ -81,6 +83,7 @@ class Settings:
             with overrides_path.open(encoding="utf-8") as f:
                 overlay = yaml.safe_load(f) or {}
             if isinstance(overlay, dict):
+                overlay = validate_runtime_overrides(overlay)
                 self.raw = _deep_merge(self.raw, overlay)
         self.symbols_raw: dict[str, Any] = _load_yaml("symbols.yaml")
         self.secrets = Secrets()

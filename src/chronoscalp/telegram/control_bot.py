@@ -1085,18 +1085,30 @@ class TelegramControlBot:
 
     def _cmd_risk(self, chat_id: int, text: str = "") -> None:
         args = self._args(text)
+        presets = self._risk_presets()
         if not args:
-            self.send(chat_id, "استفاده: /risk 0.5|1|1.5")
+            shown = " | ".join(str(p).rstrip("0").rstrip(".") if isinstance(p, float) else str(p) for p in presets)
+            self.send(chat_id, f"استفاده: /risk {{{shown}}}")
             return
         try:
             pct = float(args[0].replace("%", "").replace("٫", ".").replace(",", "."))
         except ValueError:
             self.send(chat_id, "❌ عدد نامعتبر")
             return
-        if pct not in (0.5, 1.0, 1.5):
-            self.send(chat_id, "فقط presetهای 0.5 / 1 / 1.5 مجاز است.")
+        if not any(abs(pct - p) < 1e-9 for p in presets):
+            shown = " / ".join(str(p) for p in presets)
+            self.send(chat_id, f"فقط presetهای {shown} مجاز است.")
             return
         self._set_risk(chat_id, pct)
+
+    def _risk_presets(self) -> list[float]:
+        """Configured risk presets; always keep legacy 0.5/1.0/1.5 available."""
+        raw = self.settings.risk.get("risk_presets_pct") or [0.5, 1.0, 1.5]
+        values = [float(p) for p in raw]
+        for legacy in (0.5, 1.0, 1.5):
+            if not any(abs(legacy - p) < 1e-9 for p in values):
+                values.append(legacy)
+        return values
 
     def _set_daily_loss_enabled(self, chat_id: int, enabled: bool) -> None:
         apply_daily_loss_limit_enabled(enabled)
