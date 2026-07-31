@@ -192,6 +192,7 @@ def apply_risk_preset(
 
 
 KNOWN_STRATEGIES: tuple[str, ...] = (
+    "delta",
     "smc_confluence",
     "liquidity_volume",
     "ultra_scalp",
@@ -294,6 +295,7 @@ def apply_enabled_strategies(
     strategy["use_liquidity_volume"] = "liquidity_volume" in seen
     strategy["use_ultra_scalp"] = "ultra_scalp" in seen
     strategy["use_news_straddle"] = "news_straddle" in seen
+    strategy["use_delta"] = "delta" in seen
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)
     logger.info("Enabled strategies saved: {}", ",".join(cleaned) or "(none)")

@@ -5,6 +5,7 @@
 - [x] Explainable M15/M5 regime + M1 sweep/retest entry engine
 - [x] Structure/ATR/spread-aware stop geometry and >=1.5R target floor
 - [x] XAUUSD/EURUSD allowlist, unit tests, and operator documentation
+- [x] Telegram menu toggle, runtime persistence, and status visibility
 - [ ] Broker-native two-year walk-forward backtest for each symbol
 - [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
 

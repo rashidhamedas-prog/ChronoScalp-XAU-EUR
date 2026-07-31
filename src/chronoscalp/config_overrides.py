@@ -13,7 +13,7 @@ from chronoscalp.risk.position_sizing import HARD_MAX_RISK_PCT
 
 HARD_MIN_GROSS_RR = 1.5
 KNOWN_STRATEGIES = frozenset(
-    {"smc_confluence", "liquidity_volume", "ultra_scalp", "news_straddle"}
+    {"smc_confluence", "liquidity_volume", "ultra_scalp", "news_straddle", "delta"}
 )
 KNOWN_BROKERS = frozenset({"paper", "mt5", "oanda"})
 KNOWN_HOURS = frozenset({"london_ny", "always_on_24h"})
@@ -93,6 +93,7 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
             "use_liquidity_volume",
             "use_ultra_scalp",
             "use_news_straddle",
+            "use_delta",
         ):
             if flag in strategy:
                 strategy[flag] = _as_bool(strategy[flag], f"strategy.{flag}")

@@ -50,3 +50,11 @@ def test_preserves_legacy_risk_preset_list() -> None:
         }
     )
     assert out["risk"]["risk_presets_pct"][-1] == 1.5
+
+
+def test_delta_is_a_valid_runtime_strategy() -> None:
+    out = validate_runtime_overrides(
+        {"strategy": {"enabled_strategies": ["delta"], "use_delta": True}}
+    )
+    assert out["strategy"]["enabled_strategies"] == ["delta"]
+    assert out["strategy"]["use_delta"] is True

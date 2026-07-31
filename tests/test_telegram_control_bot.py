@@ -269,6 +269,36 @@ def test_strategies_menu_toggle_news_straddle(
     assert saved and "news_straddle" in saved[-1] and "smc_confluence" in saved[-1]
 
 
+def test_strategies_menu_controls_and_persists_delta(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_enabled_strategies",
+        lambda parts: saved.append(list(parts)) or list(parts),
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+
+    bot.handle(42, "استراتژی‌ها")
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    assert any(
+        "دلتا" in (button.get("text") or "") for row in kb["keyboard"] for button in row
+    )
+
+    bot.handle(42, "⬜ دلتا (طلا/یورو)")
+    assert "delta" in bot._pending[42]["selected"]
+    bot.handle(42, "ذخیره استراتژی‌ها")
+    assert saved and "delta" in saved[-1]
+
+
+def test_status_reports_delta_when_enabled(bot: TelegramControlBot) -> None:
+    bot.settings.strategy["enabled_strategies"] = ["delta", "smc_confluence"]
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "delta" in text
+
+
 def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     bot.handle(42, "تنظیمات")
     kb = bot.send.call_args.kwargs["reply_markup"]

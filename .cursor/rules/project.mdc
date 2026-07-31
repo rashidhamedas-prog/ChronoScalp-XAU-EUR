@@ -6,6 +6,8 @@ alwaysApply: true
 Strategy Delta lives in `src/chronoscalp/strategy/delta.py`; its specification
 and required validation gates are in `docs/STRATEGY_DELTA.md`. Never describe
 it as guaranteed or live-ready before those gates pass.
+Telegram exposes Delta through Settings -> Strategies. Preserve its
+runtime-override persistence, status visibility, and live/risk gates.
 
 # ChronoScalp XAU/EUR — Cursor Project Rules
 

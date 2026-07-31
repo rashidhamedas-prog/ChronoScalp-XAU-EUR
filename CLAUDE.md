@@ -11,6 +11,8 @@ Multi-timeframe algorithmic scalping bot for XAUUSD / EURUSD (and broker-native 
 Strategy Delta is implemented in `strategy/delta.py` for XAUUSD/EURUSD. Treat
 `docs/STRATEGY_DELTA.md` as its specification. Do not enable it for live money
 until the validation checklist there is complete.
+Its Telegram control is `Settings -> Strategies -> Delta`; changes persist via
+`runtime_overrides.yaml` and require restarting the running bot process.
 
 Phases 1–4 of the roadmap are scaffolded with real (not placeholder) logic:
 data pipeline, indicators, SMC structure detection, session/news filters, risk

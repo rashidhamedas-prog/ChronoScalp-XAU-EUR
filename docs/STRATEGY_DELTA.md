@@ -42,6 +42,14 @@ signal-quality parameters. Do not optimize the 1% risk ceiling or 1.5R floor.
 Tune XAUUSD and EURUSD separately; never select parameters on the same period
 used to report performance.
 
+## Telegram control
+
+Open `تنظیمات → استراتژی‌ها`, toggle `دلتا (طلا/یورو)`, then tap
+`ذخیره استراتژی‌ها`. The choice is persisted in
+`config/runtime_overrides.yaml` and appears in `/status` and the settings
+summary. Restart a running trading process after changing strategy selection;
+Telegram never bypasses the live-confirmation or risk gates.
+
 ## Required validation before live use
 
 1. Import at least two years of broker-native M1 data including spread.

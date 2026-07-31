@@ -302,6 +302,7 @@ class TelegramControlBot:
         reason = self.kill.reason() if self.kill.is_active() else "—"
         broker = self.settings.execution.get("broker", "?")
         symbols = ", ".join(self.settings.symbols) if self.settings.symbols else "—"
+        strategies = ", ".join(self._current_strategies()) or "(MACD/trend only)"
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
         user = UserConfigStore().config
         lines = [
@@ -311,6 +312,7 @@ class TelegramControlBot:
             f"پروفایل: provider={user.broker.provider} mode={user.broker.mode}",
             f"بروکر اجرا: {broker}",
             f"نمادها: {symbols}",
+            f"استراتژی‌ها: {strategies}",
             f"kill_switch: {ks}",
             f"دلیل: {reason}",
             f"تأیید Live (.env): {live_ok}",
@@ -564,18 +566,7 @@ class TelegramControlBot:
     def _cmd_config(self, chat_id: int, _text: str = "") -> None:
         self._reload_settings()
         from chronoscalp.risk.position_sizing import resolve_active_risk_pct
-        from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
-
-        use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(self.settings.strategy)
-        strats = []
-        if use_smc:
-            strats.append("smc_confluence")
-        if use_liq:
-            strats.append("liquidity_volume")
-        if use_scalp:
-            strats.append("ultra_scalp")
-        if use_news:
-            strats.append("news_straddle")
+        strats = self._current_strategies()
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
         hours = self._trading_hours_label()
@@ -810,6 +801,14 @@ class TelegramControlBot:
             out.append("ultra_scalp")
         if use_news:
             out.append("news_straddle")
+        enabled = self.settings.strategy.get("enabled_strategies")
+        delta_enabled = (
+            "delta" in {str(name).strip().lower() for name in enabled}
+            if isinstance(enabled, list)
+            else bool(self.settings.strategy.get("use_delta", False))
+        )
+        if delta_enabled:
+            out.insert(0, "delta")
         return out
 
     def _symbols_menu_state(self, chat_id: int) -> list[str]:
@@ -852,7 +851,7 @@ class TelegramControlBot:
         active = ", ".join(labels) if labels else "(فقط MACD/trend)"
         msg = (
             "استراتژی‌ها — روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره استراتژی‌ها».\n"
-            f"SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبری\n"
+            f"دلتا (طلا/یورو) · SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبری\n"
             f"انتخاب فعلی: {active}"
         )
         if note:
