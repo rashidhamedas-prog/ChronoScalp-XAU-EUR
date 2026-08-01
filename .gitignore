@@ -43,6 +43,7 @@ data/models/
 data/reports/
 data/user/
 data/licenses/
+data/_analysis/
 config/runtime_overrides.yaml
 *.csv
 *.parquet
