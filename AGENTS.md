@@ -39,3 +39,11 @@ Default branch is **`main`**. Keep feature work on short-lived `cursor/*` branch
 - `config/*.yaml` — strategy & risk parameters
 - `tests/` — mirrors package layout
 - News ATR straddle: `filters/news_calendar.py` + `strategy/news_straddle_engine.py` (enable via `news_straddle` in panel/Telegram)
+- Strategy Delta (XAUUSD/EURUSD): `strategy/delta.py` + `docs/STRATEGY_DELTA.md` — toggle via Telegram `تنظیمات → استراتژی‌ها → دلتا` or the Streamlit panel; persists in `runtime_overrides.yaml`. Not live-ready until validation gates pass.
+
+## Imported Claude Cowork project instructions
+
+تمامی اقدامات ضروری در انتهای اجرای هر دستور انجام شود 
+push
+commit
+ذخیره در حافظه برای cursor

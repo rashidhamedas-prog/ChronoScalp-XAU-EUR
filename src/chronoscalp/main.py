@@ -89,7 +89,9 @@ class TradingBot:
 
         self.settings = settings
         self.mode = mode
-        _, _, use_ultra_scalp, use_news_straddle = resolve_enabled_strategies(settings.strategy)
+        _, _, use_ultra_scalp, use_news_straddle, _use_delta = resolve_enabled_strategies(
+            settings.strategy
+        )
         self.use_ultra_scalp = use_ultra_scalp
         self.use_news_straddle = use_news_straddle
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
@@ -604,8 +606,8 @@ class TradingBot:
 
                 self._manage_open_position(symbol, now)
 
-                use_smc, use_liq, use_scalp, use_news_straddle = resolve_enabled_strategies(
-                    self.settings.strategy
+                use_smc, use_liq, use_scalp, use_news_straddle, _use_delta = (
+                    resolve_enabled_strategies(self.settings.strategy)
                 )
                 currency = self._news_currency(symbol)
 

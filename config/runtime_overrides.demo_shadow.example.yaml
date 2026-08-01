@@ -9,15 +9,26 @@ symbols:
 
 strategy:
   enabled_strategies:
+    - delta
     - liquidity_volume
+  use_delta: true
   use_smc_confluence: false
   use_liquidity_volume: true
   use_ultra_scalp: false
   use_news_straddle: false
   min_reward_risk_ratio: 1.5
+  delta:
+    allowed_symbols: [XAUUSD, EURUSD]
   ultra_scalp:
     min_reward_risk_ratio: 1.5
     net_rr_after_costs: 1.25
+    disabled_symbols:
+      - EURUSD
+      - USDJPY
+      - XAUUSD
+      - EURJPY
+      - BTCUSD
+      - ETHUSD
 
 sessions:
   trading_hours_mode: london_ny

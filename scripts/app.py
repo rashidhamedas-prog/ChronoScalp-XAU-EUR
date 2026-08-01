@@ -118,6 +118,7 @@ UI = {
         "strategies_label": "استراتژی‌های فعال",
         "strategies_hint": "یک یا چند استراتژی را همزمان انتخاب کنید (OR). پیش‌فرض: همه.",
         "strategies_save": "اعمال استراتژی‌ها",
+        "strategy_delta": "دلتا (طلا / یورو — ساختار M15/M5 + ورود M1)",
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "نقدینگی + حجم (Liquidity Volume)",
         "strategy_scalp": "معامله اسکلپ فوق‌سریع (S15 / Ultra Scalp)",
@@ -209,6 +210,7 @@ UI = {
         "strategies_label": "Active strategies",
         "strategies_hint": "Select one or more strategies together (OR). Default: all.",
         "strategies_save": "Apply strategies",
+        "strategy_delta": "Delta (XAU/EUR — M15/M5 structure + M1 entry)",
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
         "strategy_liq": "Liquidity + Volume",
         "strategy_scalp": "Ultra Scalp (S15 burst / high frequency)",
@@ -459,13 +461,18 @@ def page_control(settings) -> None:
             st.error(str(exc))
 
     strategy_labels = {
+        "delta": _t("strategy_delta"),
         "smc_confluence": _t("strategy_smc"),
         "liquidity_volume": _t("strategy_liq"),
         "ultra_scalp": _t("strategy_scalp"),
         "news_straddle": _t("strategy_news"),
     }
-    use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(settings.strategy)
+    use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(
+        settings.strategy
+    )
     default_strats: list[str] = []
+    if use_delta:
+        default_strats.append("delta")
     if use_smc:
         default_strats.append("smc_confluence")
     if use_liq:

@@ -127,3 +127,52 @@ def test_delta_is_wired_into_multi_timeframe_strategy():
     )
     assert signal.signal_type == SignalType.BUY
     assert signal.strategy == "delta"
+
+
+def test_delta_only_does_not_run_institutional_path():
+    """Selecting only Delta must not also fire SMC/liquidity institutional entries."""
+    strategy = MultiTimeframeStrategy(
+        {
+            "enabled_strategies": ["delta"],
+            "delta": {"max_atr_close_ratio": 0.01},
+            "entry_engine": "institutional",
+            "use_smc_confluence": False,
+            "use_liquidity_volume": False,
+        },
+        {"ema_period_trend": 50},
+        {"XAUUSD_o": {"pip_size": 0.01, "typical_spread_pips": 20}},
+    )
+    # Neutral M1 (no sweep) — Delta should stay silent; institutional must not sneak in.
+    n = 17
+    index = pd.date_range("2026-01-02", periods=n, freq="min", tz="UTC")
+    flat = pd.DataFrame(
+        {
+            "open": np.full(n, 100.2),
+            "high": np.full(n, 100.5),
+            "low": np.full(n, 100.0),
+            "close": np.full(n, 100.3),
+            "atr": np.full(n, 0.5),
+            "rvol": np.full(n, 1.4),
+            "macd": np.zeros(n),
+            "macd_signal": np.zeros(n),
+            "macd_hist": np.zeros(n),
+            "bb_upper": np.full(n, 101.0),
+            "bb_lower": np.full(n, 99.0),
+            "bb_mid": np.full(n, 100.0),
+        },
+        index=index,
+    )
+    signal = strategy.evaluate(
+        "XAUUSD_o",
+        {
+            Timeframe.M15: _higher("up"),
+            Timeframe.M5: _higher("up"),
+            Timeframe.M1: flat,
+        },
+        higher_timeframes=[Timeframe.M15, Timeframe.M5],
+        trigger_timeframe=Timeframe.M1,
+        ignore_confidence_gate=True,
+        spread_pips=20,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert "delta:" in (signal.reason or "")

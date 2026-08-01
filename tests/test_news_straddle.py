@@ -88,11 +88,13 @@ def _engine(events: list[NewsEvent], **cfg) -> DynamicNewsStraddleEngine:
 
 
 def test_resolve_enabled_strategies_includes_news_straddle():
-    smc, liq, scalp, news = resolve_enabled_strategies(
+    smc, liq, scalp, news, delta = resolve_enabled_strategies(
         {"enabled_strategies": ["ultra_scalp", "news_straddle"]}
     )
-    assert not smc and not liq and scalp and news
-    *_, news2 = resolve_enabled_strategies({"use_news_straddle": True, "use_ultra_scalp": False})
+    assert not smc and not liq and scalp and news and not delta
+    _, _, _, news2, _ = resolve_enabled_strategies(
+        {"use_news_straddle": True, "use_ultra_scalp": False}
+    )
     assert news2 is True
 
 

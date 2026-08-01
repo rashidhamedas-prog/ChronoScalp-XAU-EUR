@@ -86,8 +86,10 @@ def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> boo
     return liquidity_volume_confirms(row, direction)
 
 
-def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool, bool]:
-    """Return ``(use_smc, use_liquidity_volume, use_ultra_scalp, use_news_straddle)``.
+def resolve_enabled_strategies(
+    strategy_cfg: dict,
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Return ``(smc, liquidity, ultra_scalp, news_straddle, delta)``.
 
     Prefers ``enabled_strategies`` list when present; otherwise falls back to
     the boolean flags. Empty list means no confluence filter (MACD/trend only).
@@ -100,12 +102,14 @@ def resolve_enabled_strategies(strategy_cfg: dict) -> tuple[bool, bool, bool, bo
             "liquidity_volume" in names,
             "ultra_scalp" in names,
             "news_straddle" in names,
+            "delta" in names,
         )
     return (
         bool(strategy_cfg.get("use_smc_confluence", True)),
         bool(strategy_cfg.get("use_liquidity_volume", False)),
         bool(strategy_cfg.get("use_ultra_scalp", False)),
         bool(strategy_cfg.get("use_news_straddle", False)),
+        bool(strategy_cfg.get("use_delta", False)),
     )
 
 
@@ -429,20 +433,20 @@ class MultiTimeframeStrategy:
         in one call, :func:`pick_best_signal` picks the strongest — scalp
         never blocks institutional just because it ran first.
         """
-        use_smc, use_liq, use_scalp, _use_news = resolve_enabled_strategies(self.strategy_cfg)
-        enabled_names = {
-            str(name).strip().lower()
-            for name in (self.strategy_cfg.get("enabled_strategies") or [])
-        }
-        use_delta = "delta" in enabled_names
+        use_smc, use_liq, use_scalp, _use_news, use_delta = resolve_enabled_strategies(
+            self.strategy_cfg
+        )
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
         symbol_allows_scalp = ultra_scalp_allowed_for_symbol(symbol, scalp_cfg)
         want_scalp = bool(use_scalp and run_scalp and symbol_allows_scalp)
-        # Institutional / SMC / liquidity path when those modes are on — even
-        # alongside ultra-scalp — or when scalp is off (legacy single path).
-        want_institutional = bool(run_institutional) and (use_smc or use_liq or (not use_scalp))
+        # Institutional / SMC / liquidity when those modes are on — or the
+        # legacy MACD path when nothing (including Delta) is selected.
+        # Delta-only must not also fire the institutional engine.
+        want_institutional = bool(run_institutional) and (
+            use_smc or use_liq or (not use_scalp and not use_delta)
+        )
         want_delta = bool(run_institutional and use_delta)
 
         higher_frames = [

@@ -791,8 +791,12 @@ class TelegramControlBot:
     def _current_strategies(self) -> list[str]:
         from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-        use_smc, use_liq, use_scalp, use_news = resolve_enabled_strategies(self.settings.strategy)
+        use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(
+            self.settings.strategy
+        )
         out: list[str] = []
+        if use_delta:
+            out.append("delta")
         if use_smc:
             out.append("smc_confluence")
         if use_liq:
@@ -801,14 +805,6 @@ class TelegramControlBot:
             out.append("ultra_scalp")
         if use_news:
             out.append("news_straddle")
-        enabled = self.settings.strategy.get("enabled_strategies")
-        delta_enabled = (
-            "delta" in {str(name).strip().lower() for name in enabled}
-            if isinstance(enabled, list)
-            else bool(self.settings.strategy.get("use_delta", False))
-        )
-        if delta_enabled:
-            out.insert(0, "delta")
         return out
 
     def _symbols_menu_state(self, chat_id: int) -> list[str]:
