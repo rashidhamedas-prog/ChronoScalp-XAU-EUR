@@ -16,3 +16,25 @@ are skipped (`mistake_memory` skip reason).
 
 Configured under `risk.mistake_memory` in `config/settings.yaml`. This gate does
 not loosen risk ceilings and does not authorize live trading by itself.
+
+## Next: broker-native data
+
+`data/history/` is gitignored and currently absent in this worktree — no synthetic
+history should be invented. Pull broker-native OHLCV from the logged-in MT5
+terminal (Windows only) via `scripts/fetch_history.py`. `--symbol` is a free
+string, so LiteFinance-style names (`XAUUSD_o`, `EURUSD_o`) are supported when
+they exist in Market Watch. Output layout: `data/history/<symbol>/<TF>.csv`.
+
+Operator commands (repo root, venv active, MT5 running and logged in; `.env`
+credentials already configured). M1 only, two years — does **not** start live:
+
+```powershell
+$env:PYTHONPATH="src"
+python scripts/fetch_history.py --symbol XAUUSD_o --timeframes M1 --years 2
+python scripts/fetch_history.py --symbol EURUSD_o --timeframes M1 --years 2
+```
+
+Optional fuller set (script default TFs if `--timeframes` omitted): `M1 M3 M5 M10`.
+
+After CSVs exist, walk-forward / OOS / 1.5× cost-stress backtests can proceed.
+Fetching history alone does not enable live trading.
