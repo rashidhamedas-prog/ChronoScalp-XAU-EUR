@@ -8,7 +8,9 @@ and intact 1% per-trade / 3% daily risk ceilings.
 
 Deterministic “learn from mistakes” veto (not ML). Losing setups are fingerprinted
 as `{symbol}|{strategy}|{session}|{direction}|{setup_reason_bucket}` and stored
-under `state_dir/lessons_{mode}.json`. When the same fingerprint repeats within
+under `state_dir/lessons_{mode}.json`. The setup bucket prefers the **second**
+comma-token of the journal reason (e.g. `delta,bullish_bos,...` → `bullish_bos`)
+so strategy tags alone do not over-block. When the same fingerprint repeats within
 `cooldown_minutes` at least `max_repeats` times, new entries with that fingerprint
 are skipped (`mistake_memory` skip reason).
 

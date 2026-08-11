@@ -20,12 +20,23 @@ def canonical_symbol(symbol: str) -> str:
     return str(symbol or "").strip().upper().split("_", 1)[0]
 
 
-def setup_reason_bucket(reason: str | None) -> str:
-    """First comma-token of reason, lowercased and lightly normalized."""
+def setup_reason_bucket(reason: str | None, *, strategy: str | None = None) -> str:
+    """Setup subtype from reason; prefer 2nd comma-token when present.
+
+    Live reasons are often ``{strategy},{setup},...`` (e.g.
+    ``ultra_scalp_v3,trend=bullish,rvol=1.00`` or ``delta,bullish_bos,...``).
+    Using only the first token collapsed the fingerprint to strategy×session×
+    direction and over-blocked. Prefer the second token as the setup bucket;
+    fall back to the first token, then to ``strategy``.
+    """
     text = str(reason or "").strip().lower().replace(" ", "_").replace("-", "_")
-    if not text:
-        return ""
-    return text.split(",")[0].strip("._ ")
+    parts = [p.strip("._ ") for p in text.split(",") if p.strip("._ ")]
+    if len(parts) >= 2:
+        return parts[1]
+    if parts:
+        return parts[0]
+    fallback = str(strategy or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return fallback.strip("._ ")
 
 
 def _parse_iso(value: str | datetime | None) -> datetime | None:
@@ -152,7 +163,7 @@ class MistakeMemory:
         else:
             sess = "any"
         direction_norm = str(direction or "").strip().lower()
-        bucket = setup_reason_bucket(reason)
+        bucket = setup_reason_bucket(reason, strategy=strat)
         parts = [sym, strat, sess, direction_norm, bucket]
         if self.config.match_exit_type:
             parts.append(str(exit_type or "").strip().lower())
@@ -176,7 +187,10 @@ class MistakeMemory:
             return True
         if not str(direction or "").strip():
             return True
-        return not bool(setup_reason_bucket(reason))
+        # Empty reason is incomplete even if strategy could fill the bucket.
+        if not str(reason or "").strip():
+            return True
+        return not bool(setup_reason_bucket(reason, strategy=strategy))
 
     def record_loss(
         self,
@@ -202,6 +216,12 @@ class MistakeMemory:
             pnl=pnl,
             r_multiple=r_multiple,
         ):
+            logger.debug(
+                "MistakeMemory: skip incomplete lesson symbol={} strategy={} direction={}",
+                symbol,
+                strategy,
+                direction,
+            )
             return None
         if float(pnl) >= 0:
             return None
@@ -230,7 +250,7 @@ class MistakeMemory:
                 else "any"
             ),
             direction=str(direction or "").strip().lower(),
-            setup_reason_bucket=setup_reason_bucket(reason),
+            setup_reason_bucket=setup_reason_bucket(reason, strategy=strategy),
             pnl=float(pnl),
             r_multiple=float(r_multiple),
             exit_type=str(exit_type or "").strip().lower(),
@@ -296,9 +316,7 @@ class MistakeMemory:
         if not fp:
             return False
         moment = now or datetime.now(tz=UTC)
-        moment = (
-            moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
-        )
+        moment = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
         window = timedelta(minutes=max(0, int(self.config.cooldown_minutes)))
         cutoff = moment - window
         count = 0

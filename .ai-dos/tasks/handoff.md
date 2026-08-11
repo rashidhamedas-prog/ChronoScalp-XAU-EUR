@@ -2,6 +2,31 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-11 forensic fixes + MistakeMemory integration
+
+- Time (UTC): 2026-08-11T16:54:38Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / orchestrator (hard review of parallel lanes)
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/claud/porje/ChronoScalp s3 / pending product commit after 5f62ac9
+- Objective and acceptance criteria: close accounting root causes with regression tests; ship learn-from-mistakes; keep live frozen and 1%/3% intact.
+- Verified context and decisions:
+  - Independent review blocked commit until `TradeJournal(..., symbols_cfg=settings.symbols_raw)` was wired in `main.py` (done).
+  - MistakeMemory setup bucket now prefers 2nd reason token to avoid strategy-wide over-block; empty reason still incomplete.
+  - `record_close` recomputes dollar-risk R when broker omits `r_multiple`.
+  - `operational_max_lot`: XAU 2.0, FX majors 5.0, BTC 1.0, ETH 2.0.
+- Files changed (and why):
+  - `trade_journal.py` / `paper_broker.py` / `test_trade_journal.py` / `test_backtest_engine.py` — R units, orphan reject, timestamp adjust, initial SL, session-fixture docs
+  - `position_sizing.py` / `symbols.yaml` / `test_risk.py` — operational lot caps
+  - `mistake_memory.py` / `test_mistake_memory.py` / `main.py` / `STRATEGY_RESEARCH.md` — fingerprint refinement + journal symbols_cfg wiring
+  - `.ai-dos/project/status.md` — status refresh
+- Tests/gates run with exact results:
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task001_full5` → FULL_EXIT=0 (all tests passed)
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts` → RUFF_EXIT=0
+  - `black --check` on TASK-001 touched product files → BLACK_TASK_EXIT=0 (repo-wide black still fails on pre-existing files)
+- Review/security findings and dispositions: blocker (unwired symbols_cfg) fixed; high (coarse fingerprint) mitigated; independent reviewer/security still required before merge/live.
+- Known failures, risks, and assumptions: no broker-native history; historical journal not rewritten; live still disabled.
+- File claims released or retained: TASK-001 claims retained.
+- Exact next action: obtain broker-native XAUUSD/EURUSD M1 data; run walk-forward + 1.5x cost stress before any strategy live enablement.
+
 ## 2026-08-11 MistakeMemory implemented
 
 - Time (UTC): 2026-08-11T16:35:00Z

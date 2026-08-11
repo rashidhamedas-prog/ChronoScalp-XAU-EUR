@@ -78,6 +78,7 @@ def floor_volume_to_step(
         return 0.0
     return float(result)
 
+
 def commission_per_lot(symbol_spec: dict, entry_price: float) -> float:
     """Estimated round-turn commission (account currency) for 1.0 lot.
 
@@ -161,6 +162,19 @@ def fit_economic_scalp_geometry(
     return entry + stop_dist, entry - target_dist
 
 
+def _effective_volume_max(symbol_spec: dict) -> float:
+    """Broker ``max_lot`` capped by optional ``operational_max_lot`` when set.
+
+    ``operational_max_lot`` is a bot-side ceiling below the exchange/broker
+    hard limit. It never raises the allowed volume above ``max_lot``.
+    """
+    broker_max = float(symbol_spec["max_lot"])
+    operational = symbol_spec.get("operational_max_lot")
+    if operational is None:
+        return broker_max
+    return min(broker_max, float(operational))
+
+
 def calculate_position_size(
     equity: float,
     risk_pct: float,
@@ -171,8 +185,10 @@ def calculate_position_size(
     """Position size (in lots) such that a stop-loss hit loses at most
     `risk_pct`% of `equity` **including** estimated round-turn commission.
 
-    Never rounds volume upward. If the affordable size is below ``min_lot``,
-    or clamping to ``max_lot`` would still exceed the risk budget, returns 0
+    Never rounds volume upward. Effective volume ceiling is
+    ``min(max_lot, operational_max_lot)`` when ``operational_max_lot`` is set;
+    otherwise ``max_lot`` alone. If the affordable size is below ``min_lot``,
+    or clamping to that ceiling would still exceed the risk budget, returns 0
     (skip the trade) instead of oversizing.
     """
     if equity <= 0:
@@ -193,10 +209,11 @@ def calculate_position_size(
     if loss_per_lot <= 0:
         return 0.0
     raw_volume = risk_amount / loss_per_lot
+    volume_max = _effective_volume_max(symbol_spec)
     volume = floor_volume_to_step(
         raw_volume,
         volume_min=float(symbol_spec["min_lot"]),
-        volume_max=float(symbol_spec["max_lot"]),
+        volume_max=volume_max,
         volume_step=float(symbol_spec["lot_step"]),
     )
     if volume <= 0:

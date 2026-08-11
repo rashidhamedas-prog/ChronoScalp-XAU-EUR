@@ -1,6 +1,10 @@
 # Per-symbol contract specifications used by risk sizing, backtesting, and
 # the paper broker's fill simulation. Adjust to match your actual broker's
 # contract specs (check your broker's symbol specification sheet).
+#
+# operational_max_lot: bot-side ceiling below broker max_lot. Caps insane
+# volumes from large equity + tight stops while never raising risk above 1%.
+# Keep max_lot as the hard exchange/broker ceiling.
 
 XAUUSD:
   pip_size: 0.01          # 1 pip = $0.01 move for most gold quote conventions
@@ -8,6 +12,7 @@ XAUUSD:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 50
+  operational_max_lot: 2.0
   typical_spread_pips: 20
   pip_value_per_lot: 1.0  # USD value of 1 pip move for 1.0 lot (broker-dependent, verify)
   news_currency: USD      # for news blackout filter (XAUUSD → USD events)
@@ -19,6 +24,7 @@ XAUUSD_o:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 50
+  operational_max_lot: 2.0
   typical_spread_pips: 20
   pip_value_per_lot: 1.0
   news_currency: USD
@@ -29,6 +35,7 @@ EURUSD:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 1.0
   pip_value_per_lot: 10.0
   news_currency: EUR
@@ -39,6 +46,7 @@ EURUSD_o:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 1.0
   pip_value_per_lot: 10.0
   news_currency: EUR
@@ -49,6 +57,7 @@ EURJPY:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 2.0
   # ~¥1000 per pip per lot ≈ $6.5–7 at ~150 USDJPY — verify on your broker
   pip_value_per_lot: 6.5
@@ -60,6 +69,7 @@ EURJPY_o:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 2.0
   pip_value_per_lot: 6.5
   news_currency: EUR
@@ -70,6 +80,7 @@ USDJPY:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 1.5
   pip_value_per_lot: 6.5
   news_currency: USD
@@ -80,6 +91,7 @@ USDJPY_o:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 100
+  operational_max_lot: 5.0
   typical_spread_pips: 1.5
   pip_value_per_lot: 6.5
   news_currency: USD
@@ -90,6 +102,7 @@ XAUEUR:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 50
+  operational_max_lot: 2.0
   typical_spread_pips: 30
   pip_value_per_lot: 1.0
 
@@ -103,6 +116,8 @@ BTCUSD:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 10
+  # Conservative CFD notional cap (1 BTC-lot equivalent); below broker max_lot.
+  operational_max_lot: 1.0
   typical_spread_pips: 20
   pip_value_per_lot: 1.0
   commission_pct_notional: 0.0012
@@ -117,6 +132,8 @@ ETHUSD:
   min_lot: 0.01
   lot_step: 0.01
   max_lot: 50
+  # Conservative CFD notional cap; below broker max_lot.
+  operational_max_lot: 2.0
   typical_spread_pips: 25
   pip_value_per_lot: 0.01
   commission_pct_notional: 0.0012

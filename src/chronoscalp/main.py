@@ -206,7 +206,11 @@ class TradingBot:
             except (TypeError, ValueError):
                 logger.warning("Skipping invalid position_meta key {!r}", ticket_key)
 
-        self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
+        self.trade_journal = TradeJournal(
+            journal_path_for(self.state_dir, mode),
+            mode=mode,
+            symbols_cfg=settings.symbols_raw,
+        )
         self.trade_journal.load()
 
         # Re-seed today's realized P&L so restarts can't bypass the daily stop.
@@ -410,9 +414,7 @@ class TradingBot:
                         or ""
                     ),
                     reason=str(
-                        (journal_open.reason if journal_open else "")
-                        or meta.get("reason")
-                        or ""
+                        (journal_open.reason if journal_open else "") or meta.get("reason") or ""
                     ),
                     comment=str(row.get("comment") or ""),
                 )

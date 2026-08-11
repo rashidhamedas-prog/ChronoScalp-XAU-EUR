@@ -46,11 +46,21 @@ def test_fingerprint_stability(tmp_path: Path) -> None:
         strategy="ultra_scalp",
         session="London",
         direction="buy",
-        reason="ultra_scalp, other_noise",
+        reason="ultra_scalp,ema_pullback,rvol=1.0",
     )
-    assert a == "XAUUSD|ultra_scalp|london|buy|ultra_scalp"
+    assert a == "XAUUSD|ultra_scalp|london|buy|ema_pullback"
     assert a == b
-    assert setup_reason_bucket("SMC Confluence,extra") == "smc_confluence"
+    # Different setup subtypes must not collapse to the same fingerprint.
+    other = mem.fingerprint(
+        symbol="XAUUSD_o",
+        strategy="ultra_scalp",
+        session="london",
+        direction="buy",
+        reason="ultra_scalp,other_noise",
+    )
+    assert other != a
+    assert setup_reason_bucket("SMC Confluence,extra") == "extra"
+    assert setup_reason_bucket("delta,bullish_bos,rvol=1.2") == "bullish_bos"
 
     mem_any = _memory(tmp_path, match_session=False)
     fp_any = mem_any.fingerprint(
@@ -60,7 +70,7 @@ def test_fingerprint_stability(tmp_path: Path) -> None:
         direction="sell",
         reason="delta,breakout",
     )
-    assert fp_any == "EURUSD|delta|any|sell|delta"
+    assert fp_any == "EURUSD|delta|any|sell|breakout"
 
 
 def test_wins_and_incomplete_create_no_lesson(tmp_path: Path) -> None:
