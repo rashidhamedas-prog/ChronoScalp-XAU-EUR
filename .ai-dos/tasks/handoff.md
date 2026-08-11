@@ -2,6 +2,19 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-11 merge + VPS deploy complete
+
+- Time (UTC): 2026-08-11T17:15:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / orchestrator
+- Branch / worktree / commit: main @ `1c3f5aa` (merge `61164ae` + roadmap); task branch synced
+- Objective: merge successful forensic/MistakeMemory/Telegram work; deploy VPS; verify Telegram.
+- Verified context and decisions:
+  - Merged `ai/TASK-001-strategy-audit-redesign` → `main` and pushed.
+  - VPS deploy via `scripts/deploy_vps_from_local.ps1` finished at HEAD `1c3f5aa`; Telegram control bot restarted (`TG_KEYBOARD_RESTORED`); trading bot restarted by deploy script.
+  - Local telegram suite: `tests/test_telegram_control_bot.py` TG_EXIT=0; smoke import OK.
+  - Did not commit dirty `.env.example` / `AGENTS.md` churn.
+- Exact next action: operator fetch broker-native M1 (`XAUUSD_o` / `EURUSD_o`) then walk-forward; keep live risk gates intact.
+
 ## 2026-08-11 Telegram MistakeMemory + merge/deploy
 
 - Time (UTC): 2026-08-11T17:15:00Z
