@@ -143,7 +143,11 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
         for flag in ("enabled", "high_impact_only", "fail_closed_when_stale"):
             if flag in news:
                 news[flag] = _as_bool(news[flag], f"news_filter.{flag}")
-        for key in ("blackout_minutes_before", "blackout_minutes_after", "max_calendar_age_minutes"):
+        for key in (
+            "blackout_minutes_before",
+            "blackout_minutes_after",
+            "max_calendar_age_minutes",
+        ):
             if key in news:
                 news[key] = _as_float(news[key], f"news_filter.{key}")
                 if news[key] < 0:
@@ -183,7 +187,9 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
         if "risk_presets_pct" in risk:
             presets = risk["risk_presets_pct"]
             if not isinstance(presets, list) or not presets:
-                raise RuntimeOverridesValidationError("risk.risk_presets_pct must be a non-empty list")
+                raise RuntimeOverridesValidationError(
+                    "risk.risk_presets_pct must be a non-empty list"
+                )
             cleaned_presets = [_as_float(p, "risk.risk_presets_pct[]") for p in presets]
             if any(p <= 0 for p in cleaned_presets):
                 raise RuntimeOverridesValidationError("risk.risk_presets_pct entries must be > 0")
@@ -199,18 +205,46 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
                 risk[key] = _as_float(risk[key], f"risk.{key}")
                 if risk[key] < 0:
                     raise RuntimeOverridesValidationError(f"risk.{key} must be >= 0")
-        if "max_portfolio_heat_pct" in risk and risk["max_portfolio_heat_pct"] > HARD_MAX_RISK_PCT + 1e-12:
+        if (
+            "max_portfolio_heat_pct" in risk
+            and risk["max_portfolio_heat_pct"] > HARD_MAX_RISK_PCT + 1e-12
+        ):
             raise RuntimeOverridesValidationError(
                 "risk.max_portfolio_heat_pct cannot exceed hard 1% portfolio heat ceiling"
             )
-        for key in ("max_concurrent_positions", "max_trades_per_symbol_day", "max_trades_portfolio_day"):
+        for key in (
+            "max_concurrent_positions",
+            "max_trades_per_symbol_day",
+            "max_trades_portfolio_day",
+        ):
             if key in risk:
                 risk[key] = _as_int(risk[key], f"risk.{key}")
                 if risk[key] < 1:
                     raise RuntimeOverridesValidationError(f"risk.{key} must be >= 1")
-        for flag in ("independent_symbol_entries", "daily_loss_limit_enabled", "daily_drawdown_close_all"):
+        for flag in (
+            "independent_symbol_entries",
+            "daily_loss_limit_enabled",
+            "daily_drawdown_close_all",
+        ):
             if flag in risk:
                 risk[flag] = _as_bool(risk[flag], f"risk.{flag}")
+        mm = _require_mapping(risk.get("mistake_memory"), "risk.mistake_memory")
+        if mm:
+            if "enabled" in mm:
+                mm["enabled"] = _as_bool(mm["enabled"], "risk.mistake_memory.enabled")
+            for key in ("cooldown_minutes", "max_repeats"):
+                if key in mm:
+                    mm[key] = _as_int(mm[key], f"risk.mistake_memory.{key}")
+                    if mm[key] < 1:
+                        raise RuntimeOverridesValidationError(
+                            f"risk.mistake_memory.{key} must be >= 1"
+                        )
+            if "min_loss_r" in mm:
+                mm["min_loss_r"] = _as_float(mm["min_loss_r"], "risk.mistake_memory.min_loss_r")
+            for flag in ("match_session", "match_exit_type", "persist"):
+                if flag in mm:
+                    mm[flag] = _as_bool(mm[flag], f"risk.mistake_memory.{flag}")
+            risk["mistake_memory"] = mm
         out["risk"] = risk
 
     ml = _require_mapping(out.get("ml"), "ml")

@@ -28,6 +28,7 @@ from chronoscalp.saas.broker_wizard import (
     apply_broker_to_settings_yaml,
     apply_daily_loss_limit_enabled,
     apply_enabled_strategies,
+    apply_mistake_memory_enabled,
     apply_risk_preset,
     apply_trading_hours_mode,
     disable_live_confirm,
@@ -271,20 +272,43 @@ class TelegramControlBot:
     def _daily_loss_enabled(self) -> bool:
         return bool(self.settings.risk.get("daily_loss_limit_enabled", True))
 
+    def _mistake_memory_enabled(self) -> bool:
+        mm = self.settings.risk.get("mistake_memory") or {}
+        if not isinstance(mm, dict):
+            return True
+        return bool(mm.get("enabled", True))
+
+    def _mistake_memory_cooldown_minutes(self) -> int:
+        mm = self.settings.risk.get("mistake_memory") or {}
+        if not isinstance(mm, dict):
+            return 240
+        try:
+            return int(mm.get("cooldown_minutes", 240))
+        except (TypeError, ValueError):
+            return 240
+
     def _risk_keyboard(self) -> dict:
-        return risk_keyboard(daily_loss_enabled=self._daily_loss_enabled())
+        return risk_keyboard(
+            daily_loss_enabled=self._daily_loss_enabled(),
+            mistake_memory_enabled=self._mistake_memory_enabled(),
+        )
 
     def _cmd_risk_menu(self, chat_id: int, _text: str = "") -> None:
         self._pending.pop(chat_id, None)
         self._reload_settings()
         enabled = self._daily_loss_enabled()
         status = "روشن ✅" if enabled else "خاموش ⬜"
+        mm_enabled = self._mistake_memory_enabled()
+        mm_status = "روشن ✅" if mm_enabled else "خاموش ⬜"
+        cooldown = self._mistake_memory_cooldown_minutes()
         self.send(
             chat_id,
             "ریسک هر معامله را انتخاب کنید:\n"
             "۰٫۵٪ / ۱٪ / ۱٫۵٪ — سقف امن پروژه ۱٪ است (۱٫۵٪ → ۱٪).\n\n"
             f"قفل ضرر روزانه: {status}\n"
-            f"سقف ضرر روز: {float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%",
+            f"سقف ضرر روز: {float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%\n"
+            f"یادگیری از اشتباه: {mm_status}\n"
+            f"کول‌داون: {cooldown} دقیقه",
             reply_markup=self._risk_keyboard(),
         )
 
@@ -304,6 +328,7 @@ class TelegramControlBot:
         symbols = ", ".join(self.settings.symbols) if self.settings.symbols else "—"
         strategies = ", ".join(self._current_strategies()) or "(MACD/trend only)"
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
+        mm = "on" if self._mistake_memory_enabled() else "off"
         user = UserConfigStore().config
         lines = [
             "وضعیت ChronoScalp",
@@ -316,6 +341,7 @@ class TelegramControlBot:
             f"kill_switch: {ks}",
             f"دلیل: {reason}",
             f"تأیید Live (.env): {live_ok}",
+            f"mistake_memory={mm}",
         ]
         self.send(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
 
@@ -566,11 +592,13 @@ class TelegramControlBot:
     def _cmd_config(self, chat_id: int, _text: str = "") -> None:
         self._reload_settings()
         from chronoscalp.risk.position_sizing import resolve_active_risk_pct
+
         strats = self._current_strategies()
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
         hours = self._trading_hours_label()
         daily_loss = "on" if self._daily_loss_enabled() else "off"
+        mm = "on" if self._mistake_memory_enabled() else "off"
         text = (
             self._connection_summary()
             + "\n\nکنترل / Control\n"
@@ -579,7 +607,8 @@ class TelegramControlBot:
             + f"trading_hours={hours}\n"
             + f"risk_effective={risk}%\n"
             + f"daily_loss_limit={daily_loss}"
-            + f" ({float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%)"
+            + f" ({float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%)\n"
+            + f"mistake_memory={mm}"
         )
         self.send(chat_id, text, reply_markup=SETTINGS_KEYBOARD)
 
@@ -1082,7 +1111,9 @@ class TelegramControlBot:
         args = self._args(text)
         presets = self._risk_presets()
         if not args:
-            shown = " | ".join(str(p).rstrip("0").rstrip(".") if isinstance(p, float) else str(p) for p in presets)
+            shown = " | ".join(
+                str(p).rstrip("0").rstrip(".") if isinstance(p, float) else str(p) for p in presets
+            )
             self.send(chat_id, f"استفاده: /risk {{{shown}}}")
             return
         try:
@@ -1111,8 +1142,7 @@ class TelegramControlBot:
         label = "روشن ✅" if enabled else "خاموش ⬜"
         self.send(
             chat_id,
-            f"✅ قفل ضرر روزانه: {label}\n"
-            "ربات را Stop سپس Start کنید تا اعمال شود.",
+            f"✅ قفل ضرر روزانه: {label}\n" "ربات را Stop سپس Start کنید تا اعمال شود.",
             reply_markup=self._risk_keyboard(),
         )
 
@@ -1121,6 +1151,40 @@ class TelegramControlBot:
 
     def _cmd_daily_loss_off(self, chat_id: int, _text: str = "") -> None:
         self._set_daily_loss_enabled(chat_id, False)
+
+    def _set_mistake_memory_enabled(self, chat_id: int, enabled: bool) -> None:
+        apply_mistake_memory_enabled(enabled)
+        self._reload_settings()
+        label = "روشن ✅" if enabled else "خاموش ⬜"
+        self.send(
+            chat_id,
+            f"✅ یادگیری از اشتباه: {label}\n" "ربات را Stop سپس Start کنید تا اعمال شود.",
+            reply_markup=self._risk_keyboard(),
+        )
+
+    def _cmd_mistake_memory_on(self, chat_id: int, _text: str = "") -> None:
+        self._set_mistake_memory_enabled(chat_id, True)
+
+    def _cmd_mistake_memory_off(self, chat_id: int, _text: str = "") -> None:
+        self._set_mistake_memory_enabled(chat_id, False)
+
+    def _cmd_mistake_memory(self, chat_id: int, text: str = "") -> None:
+        args = self._args(text)
+        if not args:
+            self._cmd_risk_menu(chat_id)
+            return
+        key = args[0].strip().lower()
+        if key in ("on", "1", "yes", "enable", "روشن"):
+            self._cmd_mistake_memory_on(chat_id)
+            return
+        if key in ("off", "0", "no", "disable", "خاموش"):
+            self._cmd_mistake_memory_off(chat_id)
+            return
+        self.send(
+            chat_id,
+            "استفاده: /mistake_memory on|off",
+            reply_markup=self._risk_keyboard(),
+        )
 
     def _detect_run_mode(self) -> str:
         """Best-effort: user profile broker mode, else live if confirm, else paper."""
@@ -1320,6 +1384,9 @@ class TelegramControlBot:
             "daily_loss_off": self._cmd_daily_loss_off,
             "daily_loss_unlock": self._cmd_daily_loss_unlock,
             "daily_loss": self._cmd_daily_loss,
+            "mistake_memory_on": self._cmd_mistake_memory_on,
+            "mistake_memory_off": self._cmd_mistake_memory_off,
+            "mistake_memory": self._cmd_mistake_memory,
         }
         handlers[cmd](chat_id, text)
 

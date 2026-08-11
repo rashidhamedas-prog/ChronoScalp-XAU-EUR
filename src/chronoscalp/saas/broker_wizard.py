@@ -349,6 +349,27 @@ def apply_daily_loss_limit_enabled(
     return bool(enabled)
 
 
+def apply_mistake_memory_enabled(
+    enabled: bool,
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> bool:
+    """Persist ``risk.mistake_memory.enabled`` (repeat-loss cooldown gate).
+
+    Preserves any other ``mistake_memory`` keys already present in overrides.
+    Does not touch ``max_risk_per_trade_pct`` / ``max_daily_loss_pct``.
+    """
+    payload = _load_overrides(overrides_path)
+    risk = dict(payload.get("risk") or {})
+    mm = dict(risk.get("mistake_memory") or {})
+    mm["enabled"] = bool(enabled)
+    risk["mistake_memory"] = mm
+    payload["risk"] = risk
+    _write_overrides(overrides_path, payload)
+    logger.info("Mistake memory enabled={}", bool(enabled))
+    return bool(enabled)
+
+
 def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
     import os

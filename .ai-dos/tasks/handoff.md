@@ -2,6 +2,20 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-11 Telegram MistakeMemory + merge/deploy
+
+- Time (UTC): 2026-08-11T17:15:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / orchestrator
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/claud/porje/ChronoScalp s3 / pending telegram commit then merge to main
+- Objective: wire MistakeMemory into Telegram risk UI, verify telegram tests, merge successful work to main, attempt VPS deploy, start broker-native history next step (docs already at 02868b4).
+- Verified context and decisions:
+  - Telegram: risk menu toggles «یادگیری از اشتباه روشن/خاموش», status/config visibility, runtime_overrides persistence, restart required.
+  - Left unstaged: dirty `.env.example` / `AGENTS.md` (unrelated/bootstrap churn; preserve user copies).
+  - Live still frozen; 1%/3% untouched.
+- Files changed: broker_wizard, config_overrides, telegram control_bot/keyboards, TELEGRAM_BOT_FA.md, telegram/config_overrides tests, AI-DOS claims.
+- Tests/gates: full pytest FULL_EXIT=0 (`--basetemp .tmp_pytest_merge1`); ruff RUFF_EXIT=0; telegram+overrides 29 passed earlier.
+- Exact next action after merge: deploy VPS if SSH available; operator fetch `XAUUSD_o`/`EURUSD_o` M1 via `scripts/fetch_history.py`.
+
 ## 2026-08-11 forensic fixes + MistakeMemory integration
 
 - Time (UTC): 2026-08-11T16:54:38Z

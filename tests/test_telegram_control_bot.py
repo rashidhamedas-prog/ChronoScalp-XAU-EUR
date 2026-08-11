@@ -282,9 +282,7 @@ def test_strategies_menu_controls_and_persists_delta(
 
     bot.handle(42, "استراتژی‌ها")
     kb = bot.send.call_args.kwargs["reply_markup"]
-    assert any(
-        "دلتا" in (button.get("text") or "") for row in kb["keyboard"] for button in row
-    )
+    assert any("دلتا" in (button.get("text") or "") for row in kb["keyboard"] for button in row)
 
     bot.handle(42, "⬜ دلتا (طلا/یورو)")
     assert "delta" in bot._pending[42]["selected"]
@@ -309,6 +307,49 @@ def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     assert "ریسک معامله" in labels
     assert "اتصال" in labels
     assert "تأیید Live روشن" in labels
+
+
+def test_risk_menu_shows_mistake_memory(bot: TelegramControlBot) -> None:
+    bot.settings.risk["mistake_memory"] = {
+        "enabled": True,
+        "cooldown_minutes": 240,
+    }
+    bot.handle(42, "ریسک معامله")
+    text = bot.send.call_args.args[1]
+    assert "یادگیری از اشتباه" in text
+    assert "240" in text
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    labels = {b["text"] for row in kb["keyboard"] for b in row}
+    assert "یادگیری از اشتباه خاموش" in labels
+    assert "یادگیری از اشتباه روشن" not in labels
+
+
+def test_mistake_memory_toggle_persists(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[bool] = []
+
+    def _fake_apply(enabled: bool, **_kwargs: object) -> bool:
+        called.append(enabled)
+        return enabled
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_mistake_memory_enabled",
+        _fake_apply,
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+
+    bot.handle(42, "یادگیری از اشتباه خاموش")
+    assert called == [False]
+    text = bot.send.call_args.args[1]
+    assert "یادگیری از اشتباه" in text
+    assert "خاموش" in text
+    assert "Stop" in text and "Start" in text
+
+    bot.handle(42, "یادگیری از اشتباه روشن")
+    assert called == [False, True]
+    text_on = bot.send.call_args.args[1]
+    assert "روشن" in text_on
 
 
 def test_open_positions_from_fresh_broker_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:

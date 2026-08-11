@@ -58,3 +58,32 @@ def test_delta_is_a_valid_runtime_strategy() -> None:
     )
     assert out["strategy"]["enabled_strategies"] == ["delta"]
     assert out["strategy"]["use_delta"] is True
+
+
+def test_mistake_memory_nested_validation() -> None:
+    out = validate_runtime_overrides(
+        {
+            "risk": {
+                "mistake_memory": {
+                    "enabled": True,
+                    "cooldown_minutes": 60,
+                    "max_repeats": 2,
+                    "min_loss_r": 0.5,
+                    "match_session": True,
+                    "match_exit_type": False,
+                    "persist": True,
+                }
+            }
+        }
+    )
+    mm = out["risk"]["mistake_memory"]
+    assert mm["enabled"] is True
+    assert mm["cooldown_minutes"] == 60
+    assert mm["max_repeats"] == 2
+    assert mm["min_loss_r"] == 0.5
+    assert mm["match_exit_type"] is False
+
+
+def test_mistake_memory_rejects_cooldown_below_one() -> None:
+    with pytest.raises(RuntimeOverridesValidationError, match="cooldown_minutes"):
+        validate_runtime_overrides({"risk": {"mistake_memory": {"cooldown_minutes": 0}}})
