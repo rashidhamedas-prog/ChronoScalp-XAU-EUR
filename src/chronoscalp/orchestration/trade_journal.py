@@ -32,6 +32,56 @@ def _dt_to_iso(value: datetime | str | None) -> str:
     return str(value)
 
 
+def dollar_risk_amount(
+    *,
+    entry: float,
+    stop: float,
+    volume: float,
+    pip_size: float,
+    pip_value_per_lot: float,
+) -> float:
+    """Dollar risk at entry given stop distance, pip specs, and lot volume.
+
+    ``(abs(entry - stop) / pip_size) * pip_value_per_lot * volume``.
+    Returns 0.0 when pip_size is non-positive.
+    """
+    if pip_size <= 0:
+        return 0.0
+    return (
+        (abs(float(entry) - float(stop)) / float(pip_size))
+        * float(pip_value_per_lot)
+        * float(volume)
+    )
+
+
+def r_multiple_from_pnl(pnl: float, dollar_risk: float) -> float:
+    """Realized R as ``pnl / dollar_risk``, rounded to 3 decimals.
+
+    Returns 0.0 when ``dollar_risk`` is not positive (fail closed for analytics).
+    """
+    if dollar_risk <= 0:
+        return 0.0
+    return round(float(pnl) / float(dollar_risk), 3)
+
+
+def _join_data_quality(*flags: str) -> str:
+    parts = [f.strip() for f in flags if f and str(f).strip()]
+    return ",".join(parts)
+
+
+def _lookup_symbol_spec(symbols_cfg: dict[str, Any] | None, symbol: str) -> dict[str, Any] | None:
+    """Resolve symbol pip specs; try exact key, then strip a trailing ``_o`` suffix."""
+    if not symbols_cfg or not symbol:
+        return None
+    if symbol in symbols_cfg:
+        return symbols_cfg[symbol]
+    if symbol.endswith("_o"):
+        base = symbol[:-2]
+        if base in symbols_cfg:
+            return symbols_cfg[base]
+    return None
+
+
 @dataclass
 class OpenTradeRecord:
     """An open position as recorded when the bot places an order."""
@@ -47,6 +97,7 @@ class OpenTradeRecord:
     mode: str = "paper"
     strategy: str = ""
     reason: str = ""
+    initial_stop_loss: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,6 +107,10 @@ class OpenTradeRecord:
         strategy = resolve_strategy_tag(
             explicit=str(data.get("strategy") or ""),
             reason=str(data.get("reason") or ""),
+        )
+        raw_isl = data.get("initial_stop_loss")
+        initial_stop_loss: float | None = (
+            None if raw_isl is None or raw_isl == "" else float(raw_isl)
         )
         return cls(
             ticket=int(data["ticket"]),
@@ -69,6 +124,7 @@ class OpenTradeRecord:
             mode=str(data.get("mode") or "paper"),
             strategy=strategy,
             reason=str(data.get("reason") or ""),
+            initial_stop_loss=initial_stop_loss,
         )
 
     @classmethod
@@ -79,6 +135,11 @@ class OpenTradeRecord:
             else str(position.direction)
         )
         strategy = resolve_strategy_tag(explicit=getattr(position, "strategy", "") or "")
+        initial_sl = (
+            position.initial_stop_loss
+            if position.initial_stop_loss is not None
+            else position.stop_loss
+        )
         return cls(
             ticket=position.ticket,
             symbol=position.symbol,
@@ -91,6 +152,7 @@ class OpenTradeRecord:
             mode=mode,
             strategy=strategy,
             reason="",
+            initial_stop_loss=float(initial_sl) if initial_sl is not None else None,
         )
 
 
@@ -112,6 +174,7 @@ class ClosedTradeRecord:
     mode: str = "paper"
     strategy: str = ""
     reason: str = ""
+    data_quality: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -137,6 +200,7 @@ class ClosedTradeRecord:
             mode=str(data.get("mode") or "paper"),
             strategy=strategy,
             reason=str(data.get("reason") or ""),
+            data_quality=str(data.get("data_quality") or ""),
         )
 
 
@@ -361,9 +425,15 @@ def _max_streak(closed: list[ClosedTradeRecord], *, winning: bool) -> int:
 class TradeJournal:
     """JSON-backed journal of open + closed trades for one bot mode."""
 
-    def __init__(self, path: str | Path, mode: str = "paper") -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        mode: str = "paper",
+        symbols_cfg: dict[str, Any] | None = None,
+    ) -> None:
         self.path = Path(path)
         self.mode = mode
+        self.symbols_cfg = symbols_cfg
         self.open_trades: dict[int, OpenTradeRecord] = {}
         self.closed_trades: list[ClosedTradeRecord] = []
 
@@ -412,9 +482,7 @@ class TradeJournal:
         if strategy is not None and str(strategy).strip():
             record.strategy = resolve_strategy_tag(explicit=strategy, reason=reason)
         elif reason:
-            record.strategy = resolve_strategy_tag(
-                explicit=record.strategy, reason=reason
-            )
+            record.strategy = resolve_strategy_tag(explicit=record.strategy, reason=reason)
         if reason is not None:
             record.reason = str(reason)
         self.open_trades[record.ticket] = record
@@ -441,21 +509,54 @@ class TradeJournal:
             explicit=getattr(trade, "strategy", "") or (open_rec.strategy if open_rec else ""),
             reason=(open_rec.reason if open_rec else ""),
         )
+        volume = float(trade.volume or (open_rec.volume if open_rec else 0))
+        entry_price = float(trade.entry_price or (open_rec.entry_price if open_rec else 0))
+        pnl = float(trade.pnl)
+        quality_flags: list[str] = []
+        r_multiple = float(trade.r_multiple or 0)
+        # Broker adapters (e.g. MT5) often omit r_multiple; recompute from dollar risk.
+        if abs(r_multiple) < 1e-12 and open_rec is not None and self.symbols_cfg:
+            stop_for_risk = (
+                float(open_rec.initial_stop_loss)
+                if open_rec.initial_stop_loss is not None
+                else float(open_rec.stop_loss)
+            )
+            spec = _lookup_symbol_spec(self.symbols_cfg, trade.symbol or open_rec.symbol)
+            if spec is None:
+                quality_flags.append("missing_spec")
+            else:
+                dollar_risk = dollar_risk_amount(
+                    entry=entry_price,
+                    stop=stop_for_risk,
+                    volume=volume,
+                    pip_size=float(spec.get("pip_size") or 0),
+                    pip_value_per_lot=float(spec.get("pip_value_per_lot") or 0),
+                )
+                r_multiple = r_multiple_from_pnl(pnl, dollar_risk)
+                if abs(r_multiple) > 10:
+                    logger.warning(
+                        "Journal: implausible R={:.3f} ticket={} on record_close — clamping to 0",
+                        r_multiple,
+                        resolved_ticket,
+                    )
+                    r_multiple = 0.0
+                    quality_flags.append("implausible_r")
         record = ClosedTradeRecord(
             ticket=resolved_ticket or (open_rec.ticket if open_rec else 0),
             symbol=trade.symbol,
             direction=direction or (open_rec.direction if open_rec else ""),
-            volume=float(trade.volume or (open_rec.volume if open_rec else 0)),
-            entry_price=float(trade.entry_price or (open_rec.entry_price if open_rec else 0)),
+            volume=volume,
+            entry_price=entry_price,
             exit_price=float(trade.exit_price),
             open_time=_dt_to_iso(trade.open_time) or (open_rec.open_time if open_rec else ""),
             close_time=_dt_to_iso(trade.close_time) or _utc_now_iso(),
-            pnl=float(trade.pnl),
-            r_multiple=float(trade.r_multiple or 0),
+            pnl=pnl,
+            r_multiple=r_multiple,
             exit_reason=str(trade.exit_reason or ""),
             mode=self.mode,
             strategy=strategy,
             reason=open_rec.reason if open_rec else "",
+            data_quality=_join_data_quality(*quality_flags),
         )
         self.closed_trades.append(record)
         self.save()
@@ -469,34 +570,92 @@ class TradeJournal:
         *,
         at: datetime | None = None,
     ) -> ClosedTradeRecord | None:
+        """Record a broker-side close matched to a journal open row.
+
+        Fail-closed for orphans (no open row): returns ``None`` and does not
+        write a blank volume=0 closed trade. R is ``pnl / dollar_risk`` using
+        ``initial_stop_loss`` when available and symbol pip specs from
+        ``symbols_cfg``; missing specs or implausible |R|>10 yield ``r_multiple=0``
+        with a ``data_quality`` flag rather than a price-distance fallback.
+        """
         open_rec = self.open_trades.pop(ticket, None)
-        if open_rec is None and pnl is None:
-            self.save()
+        if open_rec is None:
+            logger.warning(
+                "Journal: orphan external close ticket={} symbol={} pnl={} — skipped",
+                ticket,
+                symbol,
+                pnl,
+            )
             return None
 
-        entry = open_rec.entry_price if open_rec else 0.0
-        risk = abs((open_rec.entry_price - open_rec.stop_loss) if open_rec else 0.0)
+        entry = float(open_rec.entry_price)
+        stop_for_risk = (
+            float(open_rec.initial_stop_loss)
+            if open_rec.initial_stop_loss is not None
+            else float(open_rec.stop_loss)
+        )
         realized = float(pnl) if pnl is not None else 0.0
-        r_multiple = round(realized / risk, 3) if risk and pnl is not None else 0.0
+        quality_flags: list[str] = []
+
+        resolved_symbol = symbol or open_rec.symbol
+        spec = _lookup_symbol_spec(self.symbols_cfg, resolved_symbol)
+        r_multiple = 0.0
+        if pnl is None:
+            r_multiple = 0.0
+        elif spec is None:
+            quality_flags.append("missing_spec")
+            r_multiple = 0.0
+        else:
+            pip_size = float(spec.get("pip_size") or 0)
+            pip_value = float(spec.get("pip_value_per_lot") or 0)
+            dollar_risk = dollar_risk_amount(
+                entry=entry,
+                stop=stop_for_risk,
+                volume=float(open_rec.volume),
+                pip_size=pip_size,
+                pip_value_per_lot=pip_value,
+            )
+            r_multiple = r_multiple_from_pnl(realized, dollar_risk)
+            if abs(r_multiple) > 10:
+                logger.warning(
+                    "Journal: implausible R={:.3f} ticket={} — clamping to 0",
+                    r_multiple,
+                    ticket,
+                )
+                r_multiple = 0.0
+                quality_flags.append("implausible_r")
+
+        open_time_str = open_rec.open_time or ""
+        close_time_str = _dt_to_iso(at) or _utc_now_iso()
+        opened_at = _parse_iso(open_time_str)
+        closed_at = _parse_iso(close_time_str)
+        if opened_at is not None and closed_at is not None and closed_at < opened_at:
+            close_time_str = open_time_str
+            quality_flags.append("timestamp_adjusted")
+            logger.warning(
+                "Journal: close_time before open_time ticket={} — adjusted close to open",
+                ticket,
+            )
 
         record = ClosedTradeRecord(
             ticket=ticket,
-            symbol=symbol or (open_rec.symbol if open_rec else ""),
-            direction=open_rec.direction if open_rec else "",
-            volume=open_rec.volume if open_rec else 0.0,
+            symbol=resolved_symbol,
+            direction=open_rec.direction,
+            volume=float(open_rec.volume),
             entry_price=entry,
             exit_price=entry,
-            open_time=open_rec.open_time if open_rec else "",
-            close_time=_dt_to_iso(at) or _utc_now_iso(),
+            open_time=open_time_str,
+            close_time=close_time_str,
             pnl=realized,
             r_multiple=r_multiple,
             exit_reason="external" if pnl is not None else "external_unknown_pnl",
             mode=self.mode,
             strategy=resolve_strategy_tag(
-                explicit=open_rec.strategy if open_rec else "",
-                reason=open_rec.reason if open_rec else "",
+                explicit=open_rec.strategy,
+                reason=open_rec.reason,
             ),
-            reason=open_rec.reason if open_rec else "",
+            reason=open_rec.reason,
+            data_quality=_join_data_quality(*quality_flags),
         )
         self.closed_trades.append(record)
         self.save()

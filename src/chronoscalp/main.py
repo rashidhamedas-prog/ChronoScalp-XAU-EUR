@@ -66,6 +66,7 @@ from chronoscalp.risk.institutional_guards import (
     effective_max_concurrent_positions,
     volatility_decision,
 )
+from chronoscalp.risk.mistake_memory import MistakeMemory
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, resolve_enabled_strategies
@@ -174,6 +175,9 @@ class TradingBot:
             pause_hours=int(strikes_cfg.get("pause_hours", 12)),
         )
         self.three_strikes_enabled = bool(strikes_cfg.get("enabled", True))
+        self.mistake_memory = MistakeMemory.from_settings(
+            risk_cfg, state_dir=self.state_dir, mode=self.mode
+        )
         spread_ma_cfg = risk_cfg.get("spread_ma_guard") or {}
         self.spread_ma_guard = SpreadMovingAverageGuard(
             window=int(spread_ma_cfg.get("window", 100)),
@@ -202,7 +206,11 @@ class TradingBot:
             except (TypeError, ValueError):
                 logger.warning("Skipping invalid position_meta key {!r}", ticket_key)
 
-        self.trade_journal = TradeJournal(journal_path_for(self.state_dir, mode), mode=mode)
+        self.trade_journal = TradeJournal(
+            journal_path_for(self.state_dir, mode),
+            mode=mode,
+            symbols_cfg=settings.symbols_raw,
+        )
         self.trade_journal.load()
 
         # Re-seed today's realized P&L so restarts can't bypass the daily stop.
@@ -406,9 +414,7 @@ class TradingBot:
                         or ""
                     ),
                     reason=str(
-                        (journal_open.reason if journal_open else "")
-                        or meta.get("reason")
-                        or ""
+                        (journal_open.reason if journal_open else "") or meta.get("reason") or ""
                     ),
                     comment=str(row.get("comment") or ""),
                 )
@@ -975,6 +981,28 @@ class TradingBot:
                         signal.reason.split(",")[0],
                         signal_tf.value,
                     )
+                strategy_tag = resolve_strategy_tag(
+                    explicit=getattr(signal, "strategy", "") or "",
+                    reason=signal.reason,
+                )
+                session_name = self.session_filter.active_session_name(now) or "none"
+                mm_fp = self.mistake_memory.fingerprint(
+                    symbol=symbol,
+                    strategy=strategy_tag,
+                    session=session_name,
+                    direction=signal.signal_type.value,
+                    reason=signal.reason,
+                )
+                if self.mistake_memory.blocks(mm_fp, now):
+                    self._mark_engine_bars_evaluated(
+                        symbol,
+                        run_scalp=run_scalp,
+                        scalp_bar=scalp_bar,
+                        run_institutional=run_institutional,
+                        inst_bar=inst_bar,
+                    )
+                    self._note_skip(f"{symbol}:mistake_memory")
+                    continue
                 equity = self.broker.get_balance()
                 volume = self.risk_manager.position_size_for(signal, equity)
                 if volume <= 0:
@@ -998,7 +1026,7 @@ class TradingBot:
                 )
                 self.open_tickets[symbol] = position.ticket
                 strategy_tag = resolve_strategy_tag(
-                    explicit=getattr(position, "strategy", "") or signal.strategy,
+                    explicit=getattr(position, "strategy", "") or signal.strategy or strategy_tag,
                     reason=signal.reason,
                 )
                 position.strategy = strategy_tag
@@ -1122,6 +1150,19 @@ class TradingBot:
                 continue
         return total
 
+    def _session_name_for_memory(self, now: datetime) -> str:
+        return self.session_filter.active_session_name(now) or "none"
+
+    def _record_mistake_memory(self, closed, *, at: datetime) -> None:
+        """Record a full-close loss fingerprint when journal fields allow."""
+        if closed is None:
+            return
+        self.mistake_memory.record_from_closed_trade(
+            closed,
+            session=self._session_name_for_memory(at),
+            at=at,
+        )
+
     def _close_all_positions(self, now: datetime, *, reason: str) -> None:
         for symbol, ticket in list(self.open_tickets.items()):
             try:
@@ -1129,7 +1170,8 @@ class TradingBot:
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 if self.three_strikes_enabled:
                     self.three_strikes.record_result(symbol, trade.pnl, at=now)
-                self.trade_journal.record_close(trade, ticket=ticket)
+                closed = self.trade_journal.record_close(trade, ticket=ticket)
+                self._record_mistake_memory(closed, at=now)
                 self._position_meta.pop(ticket, None)
                 self.open_tickets.pop(symbol, None)
                 logger.warning("Force-closed {} ticket={} reason={}", symbol, ticket, reason)
@@ -1174,7 +1216,8 @@ class TradingBot:
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 if self.three_strikes_enabled:
                     self.three_strikes.record_result(symbol, trade.pnl, at=now)
-                self.trade_journal.record_close(trade, ticket=ticket)
+                closed = self.trade_journal.record_close(trade, ticket=ticket)
+                self._record_mistake_memory(closed, at=now)
                 self.open_tickets.pop(symbol, None)
                 self._position_meta.pop(ticket, None)
                 self._persist_state()
@@ -1247,12 +1290,14 @@ class TradingBot:
         if self.mode == "live" and isinstance(self.broker, (MT5Broker, OANDABroker)):
             pnl = self.broker.fetch_closed_pnl(ticket)
 
-        self.trade_journal.record_external_close(ticket, symbol, pnl, at=now)
+        closed = self.trade_journal.record_external_close(ticket, symbol, pnl, at=now)
 
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)
             if self.three_strikes_enabled:
                 self.three_strikes.record_result(symbol, pnl, at=now)
+            if pnl < 0:
+                self._record_mistake_memory(closed, at=now)
             logger.info("Position {} ticket={} closed externally, pnl={:.2f}", symbol, ticket, pnl)
             self.alerts.notify(
                 "Trade closed",

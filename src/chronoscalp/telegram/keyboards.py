@@ -55,6 +55,8 @@ BTN_RISK_15 = "ریسک ۱٫۵٪"
 BTN_DAILY_LOSS_ON = "قفل ضرر روزانه روشن"
 BTN_DAILY_LOSS_OFF = "قفل ضرر روزانه خاموش"
 BTN_DAILY_LOSS_UNLOCK = "باز کردن قفل امروز"
+BTN_MISTAKE_MEM_ON = "یادگیری از اشتباه روشن"
+BTN_MISTAKE_MEM_OFF = "یادگیری از اشتباه خاموش"
 
 BTN_SYM_ALL = "همه نمادها ✓"
 BTN_SYM_NONE = "پاک کردن نمادها"
@@ -142,16 +144,24 @@ def hours_keyboard() -> dict[str, Any]:
     }
 
 
-def risk_keyboard(*, daily_loss_enabled: bool = True) -> dict[str, Any]:
+def risk_keyboard(
+    *, daily_loss_enabled: bool = True, mistake_memory_enabled: bool = True
+) -> dict[str, Any]:
     daily_row = (
         [{"text": BTN_DAILY_LOSS_OFF}, {"text": BTN_DAILY_LOSS_UNLOCK}]
         if daily_loss_enabled
         else [{"text": BTN_DAILY_LOSS_ON}, {"text": BTN_DAILY_LOSS_UNLOCK}]
     )
+    mm_row = (
+        [{"text": BTN_MISTAKE_MEM_OFF}]
+        if mistake_memory_enabled
+        else [{"text": BTN_MISTAKE_MEM_ON}]
+    )
     return {
         "keyboard": [
             [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
             daily_row,
+            mm_row,
             [{"text": BTN_SUMMARY}, {"text": BTN_SETTINGS}],
             [{"text": BTN_MENU}],
         ],
@@ -205,6 +215,7 @@ CONTROL_KEYBOARD: dict[str, Any] = {
         [{"text": BTN_RISK_05}, {"text": BTN_RISK_10}, {"text": BTN_RISK_15}],
         [{"text": BTN_DAILY_LOSS_ON}, {"text": BTN_DAILY_LOSS_OFF}],
         [{"text": BTN_DAILY_LOSS_UNLOCK}],
+        [{"text": BTN_MISTAKE_MEM_ON}, {"text": BTN_MISTAKE_MEM_OFF}],
         [{"text": BTN_SETTINGS}, {"text": BTN_MENU}],
     ],
     "resize_keyboard": True,
@@ -229,6 +240,7 @@ HELP_TEXT = (
     "• ساعات معامله → لندن/آمریکا یا ۲۴ ساعته\n"
     "• ریسک → ۰٫۵٪ / ۱٪ / ۱٫۵٪ (سقف امن ۱٪)\n"
     "• قفل ضرر روزانه → روشن/خاموش یا باز کردن قفل امروز\n"
+    "• یادگیری از اشتباه → روشن/خاموش (بدون تغییر سقف ۱٪/۳٪)\n"
     "• اتصال → بروکر / حالت Paper|Live / تست / تأیید Live\n\n"
     "رمز MT5/OANDA فقط در ویزارد اتصال تایپ می‌شود (اجباری).\n"
     "نکته: Live بدون تأیید Live روشن استارت نمی‌شود.\n"
@@ -335,6 +347,11 @@ ALIASES: dict[str, str] = {
     BTN_DAILY_LOSS_UNLOCK: "daily_loss_unlock",
     "باز کردن قفل امروز": "daily_loss_unlock",
     "/daily_loss": "daily_loss",
+    BTN_MISTAKE_MEM_ON: "mistake_memory_on",
+    "یادگیری از اشتباه روشن": "mistake_memory_on",
+    BTN_MISTAKE_MEM_OFF: "mistake_memory_off",
+    "یادگیری از اشتباه خاموش": "mistake_memory_off",
+    "/mistake_memory": "mistake_memory",
     "/provider": "provider",
     "/mode": "mode",
     "/set_mt5": "set_mt5",

@@ -7,6 +7,7 @@
 - [x] XAUUSD/EURUSD allowlist, unit tests, and operator documentation
 - [x] Telegram menu toggle, runtime persistence, and status visibility
 - [x] Streamlit panel strategy picker + unified `resolve_enabled_strategies` (incl. delta-only path)
+- [ ] **Next (post-forensics):** acquire broker-native M1 via `scripts/fetch_history.py` for `XAUUSD_o` / `EURUSD_o` → `data/history/<symbol>/M1.csv` (see `docs/STRATEGY_RESEARCH.md` § Next: broker-native data). Does not enable live.
 - [ ] Broker-native two-year walk-forward backtest for each symbol
 - [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
 

@@ -36,12 +36,12 @@ def test_floor_volume_never_rounds_up_past_min_lot():
     from chronoscalp.risk.position_sizing import floor_volume_to_step
 
     assert floor_volume_to_step(0.003, volume_min=0.01, volume_max=50, volume_step=0.01) == 0.0
-    assert floor_volume_to_step(0.019, volume_min=0.01, volume_max=50, volume_step=0.01) == pytest.approx(
-        0.01
-    )
-    assert floor_volume_to_step(50.05, volume_min=0.01, volume_max=50, volume_step=0.01) == pytest.approx(
-        50.0
-    )
+    assert floor_volume_to_step(
+        0.019, volume_min=0.01, volume_max=50, volume_step=0.01
+    ) == pytest.approx(0.01)
+    assert floor_volume_to_step(
+        50.05, volume_min=0.01, volume_max=50, volume_step=0.01
+    ) == pytest.approx(50.0)
 
 
 def test_calculate_position_size_rejects_when_min_lot_exceeds_budget():
@@ -64,6 +64,8 @@ def test_calculate_position_size_rejects_when_min_lot_exceeds_budget():
 
 def test_calculate_position_size_does_not_overshoot_via_max_lot():
     """Tight stop must not clamp to max_lot when that would exceed the risk budget."""
+    # Spec intentionally omits operational_max_lot so broker max_lot remains the
+    # only ceiling (regression for pre-operational-cap behavior).
     fx = {
         "pip_size": 0.0001,
         "pip_value_per_lot": 10.0,
@@ -82,6 +84,30 @@ def test_calculate_position_size_does_not_overshoot_via_max_lot():
     # Wider stop keeps actual risk within budget after flooring
     vol3 = calculate_position_size(100_000, 1.0, 1.10, 1.0970, fx)
     assert vol3 * 300 <= 1000.0 * 1.001
+
+
+def test_operational_max_lot_caps_eurusd_below_broker_max():
+    """Large equity + tight stop must not size ~50 lots when operational_max_lot=5."""
+    eurusd = {
+        "pip_size": 0.0001,
+        "pip_value_per_lot": 10.0,
+        "min_lot": 0.01,
+        "lot_step": 0.01,
+        "max_lot": 100.0,
+        "operational_max_lot": 5.0,
+        "contract_size": 100_000,
+    }
+    # 1% of 100k = 1000; 2-pip stop → loss/lot=20 → raw 1% size ≈ 50 lots
+    volume = calculate_position_size(100_000, 1.0, 1.10, 1.0998, eurusd)
+    assert volume <= 5.0
+    assert volume == pytest.approx(5.0)
+    # Cap never increases risk above the 1% budget.
+    assert volume * 20.0 <= 1000.0 * 1.001
+    # Hard 1% ceiling via resolve_active_risk_pct is unchanged.
+    assert (
+        resolve_active_risk_pct({"active_risk_per_trade_pct": 1.5, "max_risk_per_trade_pct": 1.0})
+        == 1.0
+    )
 
 
 def test_calculate_position_size_risks_expected_amount():
@@ -143,9 +169,7 @@ def test_daily_tracker_manual_reset():
 
 
 def test_daily_loss_limit_can_be_disabled():
-    tracker = DailyRiskTracker(
-        max_daily_loss_pct=3.0, starting_equity=10_000, enabled=False
-    )
+    tracker = DailyRiskTracker(max_daily_loss_pct=3.0, starting_equity=10_000, enabled=False)
     now = datetime.now(tz=UTC)
     tracker.record_trade_pnl(-500, at=now)
     assert not tracker.daily_loss_limit_hit(now)

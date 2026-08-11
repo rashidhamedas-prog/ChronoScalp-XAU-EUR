@@ -212,9 +212,7 @@ class PaperBroker:
             open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
             initial_volume=volume,
             initial_stop_loss=signal.stop_loss,
-            strategy=resolve_strategy_tag(
-                explicit=signal.strategy, reason=signal.reason
-            ),
+            strategy=resolve_strategy_tag(explicit=signal.strategy, reason=signal.reason),
         )
         self._positions[position.ticket] = position
         self._next_ticket += 1
@@ -261,7 +259,9 @@ class PaperBroker:
         pnl = (price_diff / pip_size) * pip_value_per_lot * position.volume
         self.balance += pnl
 
-        risk = abs(position.entry_price - position.stop_loss)
+        # Prefer initial SL so trailing/breakeven moves do not distort R.
+        risk_stop = position.initial_stop_loss or position.stop_loss
+        risk = abs(position.entry_price - risk_stop)
         r_multiple = round(price_diff / risk, 3) if risk else 0.0
 
         result = TradeResult(

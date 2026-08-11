@@ -272,3 +272,104 @@ def test_sync_open_from_broker_keeps_recent_within_grace(tmp_path: Path) -> None
         now=datetime(2026, 7, 27, 13, 52, 0, tzinfo=UTC),
     )
     assert 306425496 not in journal.open_trades
+
+
+def test_external_close_r_multiple_uses_dollar_risk_not_price(tmp_path: Path) -> None:
+    """EURUSD: $pnl / dollar-risk ≈ -1.0, never pnl / price-distance (-100000)."""
+    symbols_cfg = {
+        "EURUSD": {"pip_size": 0.0001, "pip_value_per_lot": 10.0},
+    }
+    journal = TradeJournal(tmp_path / "j.json", mode="live", symbols_cfg=symbols_cfg)
+    journal.record_open(
+        Position(
+            ticket=1,
+            symbol="EURUSD",
+            direction=SignalType.BUY,
+            volume=1.0,
+            entry_price=1.10000,
+            stop_loss=1.09900,
+            take_profit=1.10150,
+            open_time=datetime(2026, 7, 17, 10, 0, tzinfo=UTC),
+            initial_stop_loss=1.09900,
+        )
+    )
+    closed = journal.record_external_close(
+        1, "EURUSD", -100.0, at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC)
+    )
+    assert closed is not None
+    assert closed.r_multiple == -1.0
+    assert abs(closed.r_multiple) < 10
+    assert "missing_spec" not in (closed.data_quality or "")
+
+
+def test_external_close_r_uses_initial_stop_not_trailed(tmp_path: Path) -> None:
+    """Trailed SL near entry must not inflate R; initial_stop_loss defines risk."""
+    symbols_cfg = {
+        "EURUSD": {"pip_size": 0.0001, "pip_value_per_lot": 10.0},
+    }
+    journal = TradeJournal(tmp_path / "j.json", mode="live", symbols_cfg=symbols_cfg)
+    journal.record_open(
+        Position(
+            ticket=2,
+            symbol="EURUSD",
+            direction=SignalType.BUY,
+            volume=1.0,
+            entry_price=1.10000,
+            stop_loss=1.09990,  # trailed almost to entry
+            take_profit=1.10150,
+            open_time=datetime(2026, 7, 17, 10, 0, tzinfo=UTC),
+            initial_stop_loss=1.09900,  # true 10-pip risk
+        )
+    )
+    # Confirm open row persisted the initial stop separately from trailed SL.
+    assert journal.open_trades[2].initial_stop_loss == 1.09900
+    assert journal.open_trades[2].stop_loss == 1.09990
+
+    closed = journal.record_external_close(
+        2, "EURUSD", -100.0, at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC)
+    )
+    assert closed is not None
+    assert closed.r_multiple == -1.0
+
+
+def test_orphan_external_close_returns_none(tmp_path: Path) -> None:
+    """No matching open row → fail closed; do not write blank volume=0 rows."""
+    journal = TradeJournal(tmp_path / "j.json", mode="live")
+    closed = journal.record_external_close(
+        999, "EURUSD", -50.0, at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC)
+    )
+    assert closed is None
+    assert journal.closed_trades == []
+    assert journal.open_trades == {}
+
+
+def test_external_close_adjusts_inverted_timestamps(tmp_path: Path) -> None:
+    """Close before open (timezone skew) is adjusted and flagged, not inverted silently."""
+    symbols_cfg = {
+        "EURUSD": {"pip_size": 0.0001, "pip_value_per_lot": 10.0},
+    }
+    journal = TradeJournal(tmp_path / "j.json", mode="live", symbols_cfg=symbols_cfg)
+    open_at = datetime(2026, 7, 17, 10, 0, tzinfo=UTC)
+    journal.record_open(
+        Position(
+            ticket=3,
+            symbol="EURUSD",
+            direction=SignalType.BUY,
+            volume=1.0,
+            entry_price=1.10000,
+            stop_loss=1.09900,
+            take_profit=1.10150,
+            open_time=open_at,
+            initial_stop_loss=1.09900,
+        )
+    )
+    # Broker close stamped earlier than open (e.g. UTC close vs UTC+3 open).
+    early_close = datetime(2026, 7, 17, 7, 0, tzinfo=UTC)
+    closed = journal.record_external_close(3, "EURUSD", -100.0, at=early_close)
+    assert closed is not None
+    assert closed.open_time
+    assert closed.close_time
+    open_parsed = datetime.fromisoformat(closed.open_time.replace("Z", "+00:00"))
+    close_parsed = datetime.fromisoformat(closed.close_time.replace("Z", "+00:00"))
+    assert close_parsed >= open_parsed
+    assert "timestamp_adjusted" in (closed.data_quality or "")
