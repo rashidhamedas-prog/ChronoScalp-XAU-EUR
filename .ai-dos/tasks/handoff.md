@@ -2,6 +2,42 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-12 walk-forward timezone fix (TASK-001)
+
+- Time (UTC): 2026-08-12T16:05:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer (wf-tz lane)
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / pending commit
+- Objective: fix `run_backtest` ValueError when walk-forward passes tz-aware start/end.
+- Verified context and decisions:
+  - Root cause: `pd.Timestamp(aware_dt, tz="UTC")` rejects tz-aware inputs.
+  - Added `_to_utc_timestamp` (aware → `tz_convert`, naive → `tz="UTC"`); used in engine filters; fold windows normalize via same helper.
+  - Live untouched; 1%/3% untouched.
+- Files changed: `engine.py`, `optimizer.py`, `tests/test_backtest_engine.py`, `tests/test_optimizer.py` (new), claims/handoff.
+- Tests/gates:
+  - `pytest tests/test_backtest_engine.py tests/test_optimizer.py -q --basetemp .tmp_pytest_wf_tz` → 5 passed, PYTEST_EXIT=0
+  - `ruff check src/chronoscalp/backtest tests/test_backtest_engine.py tests/test_optimizer.py` → All checks passed!, RUFF_EXIT=0
+- Exact next action: re-run walk-forward / cost-stress on VPS with broker-native history.
+
+## 2026-08-12 VPS history + next-step evidence (TASK-001)
+
+- Time (UTC): 2026-08-12T15:57:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / research-docs
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / docs only (no commit this turn)
+- Objective: record verified VPS MT5 fetch/depth facts and exact next research step; leave cost-stress numbers UNKNOWN until shell agent returns.
+- Verified context and decisions:
+  - VPS broker AUSCommercial-Demo uses native `XAUUSD` / `EURUSD` (not LiteFinance `XAUUSD_o` / `EURUSD_o`).
+  - Chunked `fetch_ohlcv_range` fix required: tz-aware + large range → Invalid params.
+  - History on VPS: ~100k bars M1/M5 for XAUUSD and EURUSD (broker depth cap); ~47–50k M15 bars.
+  - Full walk-forward grid on 100k M1 too slow for interactive run; earlier failure also from tz bug in `run_backtest` date filter.
+  - Live remains disabled; 1%/3% intact.
+  - Cost-stress (1.5×) metrics: UNKNOWN pending shell agent.
+- Files changed (and why): `docs/STRATEGY_RESEARCH.md`, `.ai-dos/project/status.md`, this handoff, `active.yaml` heartbeat — evidence + next action only.
+- Tests/gates run with exact results: none this turn (docs-only).
+- Review/security findings and dispositions: none new; independent reviewer/security still required before live.
+- Known failures, risks, and assumptions: cost-stress numbers not yet available; full WF grid not practical interactively on 100k M1.
+- File claims released or retained: TASK-001 claims retained.
+- Exact next action: finish cost-stress on VPS with `XAUUSD`/`EURUSD`; then limited walk-forward (fewer folds / shorter window) after TZ fix lands.
+
 ## 2026-08-11 merge + VPS deploy complete
 
 - Time (UTC): 2026-08-11T17:15:00Z

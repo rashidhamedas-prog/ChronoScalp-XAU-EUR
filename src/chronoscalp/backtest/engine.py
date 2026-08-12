@@ -99,6 +99,19 @@ def _as_of(df: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
     return df.iloc[:idx]
 
 
+def _to_utc_timestamp(value: datetime | pd.Timestamp) -> pd.Timestamp:
+    """Normalize a datetime-like bound to a UTC-aware Timestamp.
+
+    Walk-forward / grid search pass timezone-aware ``datetime`` values from a
+    UTC ``DatetimeIndex``. Calling ``pd.Timestamp(aware_dt, tz="UTC")`` raises
+    ``ValueError``; convert aware values and only attach tz for naive ones.
+    """
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return pd.Timestamp(ts, tz="UTC")
+    return ts.tz_convert("UTC")
+
+
 def run_backtest(
     symbol: str,
     data_by_timeframe: dict[Timeframe, pd.DataFrame],
@@ -116,9 +129,9 @@ def run_backtest(
     """
     trigger_df = data_by_timeframe[trigger_timeframe]
     if start is not None:
-        trigger_df = trigger_df[trigger_df.index >= pd.Timestamp(start, tz="UTC")]
+        trigger_df = trigger_df[trigger_df.index >= _to_utc_timestamp(start)]
     if end is not None:
-        trigger_df = trigger_df[trigger_df.index <= pd.Timestamp(end, tz="UTC")]
+        trigger_df = trigger_df[trigger_df.index <= _to_utc_timestamp(end)]
 
     starting_equity = float(settings.backtest.get("initial_balance", 10_000))
     broker = PaperBroker(
