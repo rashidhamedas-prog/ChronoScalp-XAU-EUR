@@ -7,6 +7,7 @@ Writes JSON under data/reports/ (gitignored).
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from copy import deepcopy
@@ -76,7 +77,16 @@ def _stress_settings(settings, factor: float = 1.5):
     return stressed
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Baseline + 1.5x cost-stress backtests")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=["XAUUSD_o", "EURUSD_o"],
+        help="Broker-native symbols to validate (default LiteFinance _o names)",
+    )
+    args = parser.parse_args(argv)
+
     settings = get_settings()
     data_dir = str(settings.backtest.get("data_dir", "data/history"))
     higher = [Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]]
@@ -85,7 +95,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     summary_all: dict[str, object] = {}
-    for symbol in ("XAUUSD_o", "EURUSD_o"):
+    for symbol in args.symbols:
         data = _load_enriched(symbol, data_dir, settings)
         if data is None:
             summary_all[symbol] = {"error": "missing_history"}

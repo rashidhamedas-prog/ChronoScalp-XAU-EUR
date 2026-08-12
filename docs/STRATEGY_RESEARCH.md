@@ -17,24 +17,35 @@ are skipped (`mistake_memory` skip reason).
 Configured under `risk.mistake_memory` in `config/settings.yaml`. This gate does
 not loosen risk ceilings and does not authorize live trading by itself.
 
-## Next: broker-native data
+## Broker-native data (VPS evidence)
 
-`data/history/` is gitignored and currently absent in this worktree — no synthetic
-history should be invented. Pull broker-native OHLCV from the logged-in MT5
-terminal (Windows only) via `scripts/fetch_history.py`. `--symbol` is a free
-string, so LiteFinance-style names (`XAUUSD_o`, `EURUSD_o`) are supported when
-they exist in Market Watch. Output layout: `data/history/<symbol>/<TF>.csv`.
+Verified on VPS MT5 broker **AUSCommercial-Demo**:
 
-Operator commands (repo root, venv active, MT5 running and logged in; `.env`
-credentials already configured). M1 only, two years — does **not** start live:
+| Fact | Evidence |
+|------|----------|
+| Native symbols | `XAUUSD` / `EURUSD` — **not** LiteFinance `XAUUSD_o` / `EURUSD_o` |
+| Fetch fix | Chunked `fetch_ohlcv_range` required; tz-aware + large range → `Invalid params` |
+| History depth | ~100k bars M1/M5 for XAUUSD and EURUSD (broker depth cap); ~47–50k M15 bars |
+| Full WF grid | Too slow for interactive run on 100k M1; earlier failure also from tz bug in `run_backtest` date filter |
+| Live / risk | Live remains disabled; 1% per-trade / 3% daily intact |
+
+Cost-stress (1.5×) numbers: **UNKNOWN** — pending shell agent on VPS.
+
+`data/history/` is gitignored. Pull from the logged-in MT5 terminal (Windows only)
+via `scripts/fetch_history.py`. Output: `data/history/<symbol>/<TF>.csv`.
+
+Operator commands on **this** VPS broker (repo root, venv active, MT5 logged in):
 
 ```powershell
 $env:PYTHONPATH="src"
-python scripts/fetch_history.py --symbol XAUUSD_o --timeframes M1 --years 2
-python scripts/fetch_history.py --symbol EURUSD_o --timeframes M1 --years 2
+python scripts/fetch_history.py --symbol XAUUSD --timeframes M1 M5 M15 --years 2
+python scripts/fetch_history.py --symbol EURUSD --timeframes M1 M5 M15 --years 2
 ```
 
-Optional fuller set (script default TFs if `--timeframes` omitted): `M1 M3 M5 M10`.
+LiteFinance-style `_o` names apply only when that broker’s Market Watch exposes them.
 
-After CSVs exist, walk-forward / OOS / 1.5× cost-stress backtests can proceed.
-Fetching history alone does not enable live trading.
+## Exact next action
+
+1. Finish **1.5× cost-stress** on VPS with native `XAUUSD` / `EURUSD` (record metrics when shell agent returns; leave UNKNOWN until then).
+2. After TZ date-filter fix lands: run **limited** walk-forward (fewer folds / shorter window) — not a full 100k-M1 grid interactively.
+3. Do not enable live until walk-forward + OOS + cost-stress evidence exists; keep 1%/3% risk gates.

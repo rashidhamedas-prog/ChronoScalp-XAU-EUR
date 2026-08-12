@@ -398,8 +398,12 @@ class MT5Connector:
     def fetch_ohlcv_range(
         self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime
     ) -> pd.DataFrame:
-        """Fetch all completed bars for symbol/timeframe between start and end
-        (both UTC). Used by scripts/fetch_history.py for backtest data."""
+        """Fetch completed bars between ``start`` and ``end`` (UTC).
+
+        MetaTrader5 rejects timezone-aware datetimes and very large single
+        ranges (``Terminal: Invalid params``). This method converts to UTC-naive
+        and pulls history in calendar-month chunks.
+        """
         _require_windows()
         import MetaTrader5 as mt5
 
@@ -408,30 +412,54 @@ class MT5Connector:
         if not self._ensure_symbol(symbol):
             return self._empty_frame()
 
-        mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
-        rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
-        if rates is None or len(rates) == 0:
-            self._warn_rate_limited(
-                f"range:{symbol}:{timeframe.value}",
-                "No rates returned for {} {} [{} .. {}]: {}",
-                symbol,
-                timeframe.value,
-                start,
-                end,
-                mt5.last_error(),
-            )
+        def _as_utc_naive(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value
+            return value.astimezone(UTC).replace(tzinfo=None)
+
+        start_n = _as_utc_naive(start)
+        end_n = _as_utc_naive(end)
+        if end_n <= start_n:
             return self._empty_frame()
 
-        df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
-        df = df.set_index("time")
-        return df[
-            [
-                c
-                for c in ["open", "high", "low", "close", "tick_volume", "spread"]
-                if c in df.columns
-            ]
-        ]
+        mt5_timeframe = getattr(mt5, _TIMEFRAME_MAP_NAMES[timeframe])
+        # Keep chunks small enough for broker terminals (especially M1).
+        chunk = timedelta(days=30 if timeframe.minutes <= 5 else 90)
+        frames: list[pd.DataFrame] = []
+        cursor = start_n
+        while cursor < end_n:
+            chunk_end = min(cursor + chunk, end_n)
+            rates = mt5.copy_rates_range(symbol, mt5_timeframe, cursor, chunk_end)
+            if rates is None or len(rates) == 0:
+                self._warn_rate_limited(
+                    f"range:{symbol}:{timeframe.value}:{cursor.date()}",
+                    "No rates returned for {} {} [{} .. {}]: {}",
+                    symbol,
+                    timeframe.value,
+                    cursor,
+                    chunk_end,
+                    mt5.last_error(),
+                )
+            else:
+                part = pd.DataFrame(rates)
+                part["time"] = pd.to_datetime(part["time"], unit="s", utc=True)
+                part = part.set_index("time")
+                frames.append(
+                    part[
+                        [
+                            c
+                            for c in ["open", "high", "low", "close", "tick_volume", "spread"]
+                            if c in part.columns
+                        ]
+                    ]
+                )
+            cursor = chunk_end
+
+        if not frames:
+            return self._empty_frame()
+        df = pd.concat(frames).sort_index()
+        df = df[~df.index.duplicated(keep="last")]
+        return df
 
     def current_spread_points(self, symbol: str) -> float | None:
         _require_windows()
