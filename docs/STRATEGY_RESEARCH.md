@@ -29,7 +29,15 @@ Verified on VPS MT5 broker **AUSCommercial-Demo**:
 | Full WF grid | Too slow for interactive run on 100k M1; earlier failure also from tz bug in `run_backtest` date filter |
 | Live / risk | Live remains disabled; 1% per-trade / 3% daily intact |
 
-Cost-stress (1.5×) numbers: **UNKNOWN** — pending shell agent on VPS.
+### Cost-stress evidence
+
+| Run | Window | Symbol | Trades | Expectancy R | PF | Max DD % | Notes |
+|-----|--------|--------|--------|--------------|----|----------|-------|
+| VPS prior (`validate_XAUUSD.json`, 2026-08-11) | full available history (pre–last-days tooling) | XAUUSD | 85 | 0.219 → 0.218 @1.5× | 1.654 → 1.652 | 4.44 → 4.45 | Copied to `data/_analysis/validate_XAUUSD_vps_prior.json` |
+| VPS prior summary | — | EURUSD | — | — | — | — | `cost_stress_1p5x_summary.json` still showed `missing_history` (stale/_o-era) — **do not trust** |
+| VPS limited `--last-days 45` | 2026-06-27 → 2026-08-11 (UTC) | XAUUSD + EURUSD | **IN PROGRESS** | — | — | — | Quiet `LOG_LEVEL=WARNING`; ~30 min/backtest observed |
+
+`scripts/run_cost_stress_validate.py` now supports `--from` / `--to` / `--last-days` and slices before enrich (warmup 300 bars). VPS helpers: `_vps_cost_stress_only.ps1`, `_vps_detach_cost_stress.ps1`, `_vps_status_research.ps1`, `_vps_limited_walkforward.ps1`.
 
 `data/history/` is gitignored. Pull from the logged-in MT5 terminal (Windows only)
 via `scripts/fetch_history.py`. Output: `data/history/<symbol>/<TF>.csv`.
@@ -38,14 +46,16 @@ Operator commands on **this** VPS broker (repo root, venv active, MT5 logged in)
 
 ```powershell
 $env:PYTHONPATH="src"
+$env:LOG_LEVEL="WARNING"
 python scripts/fetch_history.py --symbol XAUUSD --timeframes M1 M5 M15 --years 2
 python scripts/fetch_history.py --symbol EURUSD --timeframes M1 M5 M15 --years 2
+python -u scripts/run_cost_stress_validate.py --symbols XAUUSD EURUSD --last-days 45
 ```
 
 LiteFinance-style `_o` names apply only when that broker’s Market Watch exposes them.
 
 ## Exact next action
 
-1. Finish **1.5× cost-stress** on VPS with native `XAUUSD` / `EURUSD` (record metrics when shell agent returns; leave UNKNOWN until then).
-2. After TZ date-filter fix lands: run **limited** walk-forward (fewer folds / shorter window) — not a full 100k-M1 grid interactively.
-3. Do not enable live until walk-forward + OOS + cost-stress evidence exists; keep 1%/3% risk gates.
+1. Wait for in-progress VPS limited cost-stress (`--last-days 45`) to write `validate_XAUUSD.json`, `validate_EURUSD.json`, `cost_stress_1p5x_summary.json`; pull and record metrics (replace IN PROGRESS).
+2. Run **limited** walk-forward via `scripts/_vps_limited_walkforward.ps1` (folds=2, `expectancy_r`, last ~45 days).
+3. Do not enable live until walk-forward + OOS + cost-stress evidence exists; keep 1%/3% risk gates. Prior XAU full-history PF≈1.65 is promising but not sufficient alone.

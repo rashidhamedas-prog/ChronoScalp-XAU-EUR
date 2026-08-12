@@ -2,6 +2,22 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-12 limited cost-stress tooling + prior XAU metrics (TASK-001)
+
+- Time (UTC): 2026-08-12T21:25:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / pending
+- Objective: finish broker-native 1.5× cost-stress; keep live frozen and 1%/3% intact.
+- Verified context and decisions:
+  - Prior VPS `validate_XAUUSD.json` (2026-08-11): 85 trades, expectancy_r 0.219→0.218 @1.5×, PF 1.654→1.652, max DD ~4.4%. Copied locally to `data/_analysis/validate_XAUUSD_vps_prior.json`.
+  - Stale `cost_stress_1p5x_summary.json` with `missing_history` for both symbols is **not** trusted (wrong-era/_o).
+  - Added `--last-days` / date window + pre-enrich slice to `run_cost_stress_validate.py`; quiet VPS runners (`LOG_LEVEL=WARNING`).
+  - Limited 45d cost-stress observed running on VPS (~30 min per backtest); Finnhub 403 warnings only.
+  - Limited WF script `_vps_limited_walkforward.ps1` ready after cost-stress completes.
+- Files changed: `scripts/run_cost_stress_validate.py`, VPS helper scripts, `docs/STRATEGY_RESEARCH.md`, status/handoff/active claims.
+- Tests/gates: `ruff check scripts/run_cost_stress_validate.py` OK; `pytest tests/test_backtest_engine.py tests/test_optimizer.py -q` 5 passed.
+- Exact next action: poll VPS until `validate_EURUSD.json` + fresh summary appear; record metrics; run limited WF; do not enable live.
+
 ## 2026-08-12 walk-forward timezone fix (TASK-001)
 
 - Time (UTC): 2026-08-12T16:05:00Z
