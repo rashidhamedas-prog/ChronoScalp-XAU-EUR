@@ -31,13 +31,16 @@ Verified on VPS MT5 broker **AUSCommercial-Demo**:
 
 ### Cost-stress evidence
 
-| Run | Window | Symbol | Trades | Expectancy R | PF | Max DD % | Notes |
-|-----|--------|--------|--------|--------------|----|----------|-------|
-| VPS prior (`validate_XAUUSD.json`, 2026-08-11) | full available history (pre–last-days tooling) | XAUUSD | 85 | 0.219 → 0.218 @1.5× | 1.654 → 1.652 | 4.44 → 4.45 | Copied to `data/_analysis/validate_XAUUSD_vps_prior.json` |
-| VPS prior summary | — | EURUSD | — | — | — | — | `cost_stress_1p5x_summary.json` still showed `missing_history` (stale/_o-era) — **do not trust** |
-| VPS limited `--last-days 45` | 2026-06-27 → 2026-08-11 (UTC) | XAUUSD + EURUSD | **IN PROGRESS** | — | — | — | Quiet `LOG_LEVEL=WARNING`; ~30 min/backtest observed |
+Window for limited run: **2026-06-27 → 2026-08-11 UTC** (`--last-days 45`). Local copies under `data/_analysis/*_last45d.json`.
 
-`scripts/run_cost_stress_validate.py` now supports `--from` / `--to` / `--last-days` and slices before enrich (warmup 300 bars). VPS helpers: `_vps_cost_stress_only.ps1`, `_vps_detach_cost_stress.ps1`, `_vps_status_research.ps1`, `_vps_limited_walkforward.ps1`.
+| Run | Symbol | Trades | Expectancy R (base → 1.5×) | PF | Max DD % | Verdict |
+|-----|--------|--------|----------------------------|----|----------|---------|
+| VPS limited 45d (2026-08-12) | XAUUSD | 46 | 0.354 → 0.353 | 2.114 → 2.112 | 2.02 → 2.03 | Survives cost stress on this window |
+| VPS limited 45d (2026-08-12) | EURUSD | 17 | −0.150 → −0.206 | 0.591 → 0.477 | 4.75 → 5.81 | Fails — negative expectancy; redesign before any enable |
+| VPS prior full hist (2026-08-11) | XAUUSD | 85 | 0.219 → 0.218 | 1.654 → 1.652 | 4.44 → 4.45 | Consistent direction with limited window |
+| VPS prior summary | EURUSD | — | — | — | — | Stale `missing_history` — ignore |
+
+`scripts/run_cost_stress_validate.py` supports `--from` / `--to` / `--last-days` and slices before enrich (warmup 300 bars). VPS helpers: `_vps_cost_stress_only.ps1`, `_vps_detach_cost_stress.ps1`, `_vps_status_research.ps1`, `_vps_limited_walkforward.ps1`.
 
 `data/history/` is gitignored. Pull from the logged-in MT5 terminal (Windows only)
 via `scripts/fetch_history.py`. Output: `data/history/<symbol>/<TF>.csv`.
@@ -56,6 +59,6 @@ LiteFinance-style `_o` names apply only when that broker’s Market Watch expose
 
 ## Exact next action
 
-1. Wait for in-progress VPS limited cost-stress (`--last-days 45`) to write `validate_XAUUSD.json`, `validate_EURUSD.json`, `cost_stress_1p5x_summary.json`; pull and record metrics (replace IN PROGRESS).
-2. Run **limited** walk-forward via `scripts/_vps_limited_walkforward.ps1` (folds=2, `expectancy_r`, last ~45 days).
-3. Do not enable live until walk-forward + OOS + cost-stress evidence exists; keep 1%/3% risk gates. Prior XAU full-history PF≈1.65 is promising but not sufficient alone.
+1. Run **limited** walk-forward via `scripts/_vps_limited_walkforward.ps1` (folds=2, `expectancy_r`, last ~45 days) and record OOS folds.
+2. Treat EURUSD as failing current multi-TF system on this broker window — separate EUR redesign before any live path.
+3. Do not enable live; keep 1%/3%. XAUUSD 45d cost-stress is promising but walk-forward/OOS still required.

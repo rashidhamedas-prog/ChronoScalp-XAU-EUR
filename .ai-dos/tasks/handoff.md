@@ -2,6 +2,18 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-12 limited 45d cost-stress COMPLETE (TASK-001)
+
+- Time (UTC): 2026-08-12T22:50:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch / worktree: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3
+- Objective: broker-native baseline + 1.5× cost-stress for XAUUSD/EURUSD.
+- Verified metrics (`data/_analysis/*_last45d.json`, window 2026-06-27→2026-08-11 UTC):
+  - XAUUSD: trades=46, expectancy_r 0.354→0.353, PF 2.114→2.112, max_dd 2.02→2.03%, return ~17%.
+  - EURUSD: trades=17, expectancy_r −0.150→−0.206, PF 0.591→0.477, max_dd 4.75→5.81% — **fail**.
+- Decisions: do not enable live; keep 1%/3%; EUR needs separate redesign; XAU promising on this window but WF/OOS still required.
+- Exact next action: run `_vps_limited_walkforward.ps1` / detach helper; record fold metrics; then EUR redesign plan.
+
 ## 2026-08-12 limited cost-stress tooling + prior XAU metrics (TASK-001)
 
 - Time (UTC): 2026-08-12T21:25:00Z

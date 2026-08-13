@@ -7,9 +7,11 @@
 - [x] XAUUSD/EURUSD allowlist, unit tests, and operator documentation
 - [x] Telegram menu toggle, runtime persistence, and status visibility
 - [x] Streamlit panel strategy picker + unified `resolve_enabled_strategies` (incl. delta-only path)
-- [ ] **Next (post-forensics):** acquire broker-native M1 via `scripts/fetch_history.py` for `XAUUSD_o` / `EURUSD_o` → `data/history/<symbol>/M1.csv` (see `docs/STRATEGY_RESEARCH.md` § Next: broker-native data). Does not enable live.
-- [ ] Broker-native two-year walk-forward backtest for each symbol
+- [x] Broker-native history on VPS AUSCommercial-Demo: `XAUUSD`/`EURUSD` M1/M5/M15 (~100k M1/M5; not LiteFinance `_o`) — see `docs/STRATEGY_RESEARCH.md`
+- [x] Limited 45d baseline + 1.5× cost-stress (2026-08-12): XAUUSD survives (E[R]≈0.35, PF≈2.11); EURUSD fails (E[R]<0) — live still disabled
+- [ ] Limited walk-forward OOS (`scripts/_vps_limited_walkforward.ps1`) then longer-horizon WF
 - [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
+- [ ] **Do not enable live** until WF/OOS + EUR redesign gates pass; keep 1%/3%
 
 Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ not started
 
