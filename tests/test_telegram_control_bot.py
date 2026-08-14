@@ -284,7 +284,7 @@ def test_strategies_menu_controls_and_persists_delta(
     kb = bot.send.call_args.kwargs["reply_markup"]
     assert any("دلتا" in (button.get("text") or "") for row in kb["keyboard"] for button in row)
 
-    bot.handle(42, "⬜ دلتا (طلا/یورو)")
+    bot.handle(42, "⬜ دلتا (طلا)")
     assert "delta" in bot._pending[42]["selected"]
     bot.handle(42, "ذخیره استراتژی‌ها")
     assert saved and "delta" in saved[-1]

@@ -2,6 +2,20 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-14 apply EUR gate + merge/deploy to program (TASK-001)
+
+- Time (UTC): 2026-08-14T08:00:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign → merge to main + VPS deploy
+- Objective: apply research evidence to running config; ship tooling/TZ/MT5 fixes.
+- Product changes:
+  - `settings.yaml`: remove `EURUSD_o` from active symbols; Delta `allowed_symbols: [XAUUSD]`.
+  - Telegram label `دلتا (طلا)`; example overrides + docs updated.
+  - VPS: after deploy run `_vps_apply_eur_gate.ps1` on gitignored runtime_overrides.
+- Gates: focused pytest (delta/telegram/risk/journal/backtest) + ruff OK.
+- Invariants: 1%/3% intact; live confirmation gate unchanged; EUR redesign still required.
+- Exact next action after deploy: confirm VPS HEAD on main, Telegram shows دلتا (طلا), symbols exclude EUR; denser XAU OOS + EUR redesign remain open.
+
 ## 2026-08-14 limited WF + cost-stress evidence recorded (TASK-001)
 
 - Time (UTC): 2026-08-14T01:35:00Z

@@ -81,7 +81,7 @@ def test_delta_rejects_unapproved_symbol_and_low_volume():
     low_volume = _long_sweep_trigger()
     low_volume.loc[low_volume.index[-1], "rvol"] = 0.8
     rejected = generate_delta_signal(
-        "EURUSD",
+        "XAUUSD",
         low_volume,
         [_higher("up"), _higher("up")],
         config={"max_atr_close_ratio": 0.01},

@@ -1,9 +1,14 @@
-# Strategy Delta (XAUUSD / EURUSD)
+# Strategy Delta (XAUUSD; EURUSD redesign pending)
 
 Delta is an explainable, multi-timeframe, cost-aware strategy. It is a research
 strategy, not a promise of profit or a claim that one rule set is universally
 "best". Its edge must be demonstrated separately for each broker, symbol, and
 market regime using out-of-sample and forward demo results.
+
+**Broker-native evidence (AUSCommercial-Demo, 2026-08):** XAUUSD limited 45d
+cost-stress/WF was directionally positive but OOS samples are thin. EURUSD
+failed cost-stress and limited WF OOS — `allowed_symbols` is **XAUUSD-only**
+until a separate EUR redesign clears the gates in `docs/STRATEGY_RESEARCH.md`.
 
 ## Decision stack
 
@@ -44,8 +49,9 @@ used to report performance.
 
 ## Telegram control
 
-Open `تنظیمات → استراتژی‌ها`, toggle `دلتا (طلا/یورو)`, then tap
-`ذخیره استراتژی‌ها`. The choice is persisted in
+Open `تنظیمات → استراتژی‌ها`, toggle `دلتا`, then tap
+`ذخیره استراتژی‌ها`. Delta is currently gold-only (`allowed_symbols: [XAUUSD]`).
+The choice is persisted in
 `config/runtime_overrides.yaml` and appears in `/status` and the settings
 summary. Restart a running trading process after changing strategy selection;
 Telegram never bypasses the live-confirmation or risk gates.

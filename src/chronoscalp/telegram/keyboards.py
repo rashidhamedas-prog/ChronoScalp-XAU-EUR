@@ -70,7 +70,7 @@ TOGGLE_ON = "✅"
 TOGGLE_OFF = "⬜"
 
 STRATEGY_LABELS: dict[str, str] = {
-    "delta": "دلتا (طلا/یورو)",
+    "delta": "دلتا (طلا)",
     "smc_confluence": "SMC",
     "liquidity_volume": "نقدینگی+حجم",
     "ultra_scalp": "اسکلپ S15",

@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-001-strategy-audit-redesign"
     worktree: "D:/soft/claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-09T14:35:07Z"
-    heartbeat_at: "2026-08-14T01:35:00Z"
+    heartbeat_at: "2026-08-14T08:00:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/overview.md"
@@ -42,7 +42,10 @@ tasks:
       - "scripts/_vps_dump_cost_stress.ps1"
       - "scripts/_vps_limited_walkforward.ps1"
       - "scripts/_vps_detach_limited_wf.ps1"
+      - "scripts/_vps_apply_eur_gate.ps1"
+      - "scripts/_vps_show_runtime.ps1"
       - "scripts/_vps_dedup_cost_stress.ps1"
+      - "config/runtime_overrides.demo_shadow.example.yaml"
       - "src/chronoscalp/data/mt5_connector.py"
       - "src/chronoscalp/backtest/engine.py"
       - "src/chronoscalp/backtest/optimizer.py"

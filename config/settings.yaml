@@ -2,11 +2,12 @@
 # Safe to version-control — no secrets here (secrets live only in .env).
 
 symbols:
-  # LiteFinance demo tradeable names (spot FX/gold use "_o" suffix).
+  # Active trade universe. EURUSD removed after broker-native 45d cost-stress +
+  # limited WF OOS failure (see docs/STRATEGY_RESEARCH.md). Keep specs in
+  # symbols.yaml for research/backtests only.
   - "BTCUSD"
   - "ETHUSD"
   - "XAUUSD_o"
-  - "EURUSD_o"
   - "USDJPY_o"
   - "EURJPY_o"
 
@@ -59,8 +60,9 @@ strategy:
   liquidity_rvol_min: 1.5
   entry_rvol_min: 1.5
   delta:
-    # Delta is structure-first and intentionally limited to gold / EURUSD.
-    allowed_symbols: [XAUUSD, EURUSD]
+    # Gold-only until EURUSD redesign passes broker-native cost-stress + denser OOS.
+    # Evidence: docs/STRATEGY_RESEARCH.md (45d stress + limited WF, 2026-08).
+    allowed_symbols: [XAUUSD]
     structure_lookback: 12
     slope_bars: 3
     rvol_min: 1.15

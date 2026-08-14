@@ -9,7 +9,7 @@
 - [x] Streamlit panel strategy picker + unified `resolve_enabled_strategies` (incl. delta-only path)
 - [x] Broker-native history on VPS AUSCommercial-Demo: `XAUUSD`/`EURUSD` M1/M5/M15 (~100k M1/M5; not LiteFinance `_o`) — see `docs/STRATEGY_RESEARCH.md`
 - [x] Limited 45d baseline + 1.5× cost-stress (2026-08-12): XAUUSD survives (E[R]≈0.35, PF≈2.11); EURUSD fails (E[R]<0) — live still disabled
-- [x] Limited walk-forward tiny-grid folds=2 (2026-08-14): XAUUSD OOS avg return +3.5% (thin trades); EURUSD OOS avg −1.76% — fail
+- [x] Applied evidence to config: EURUSD removed from active symbols; Delta gold-only (`allowed_symbols: [XAUUSD]`)
 - [ ] Longer-horizon WF / denser OOS for XAUUSD; **EURUSD strategy redesign**
 - [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
 - [ ] **Do not enable live** until denser WF/OOS + EUR redesign gates pass; keep 1%/3%

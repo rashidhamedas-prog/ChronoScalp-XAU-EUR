@@ -73,6 +73,9 @@ LiteFinance-style `_o` names apply only when that broker’s Market Watch expose
 
 ## Exact next action
 
-1. **EURUSD redesign** (separate system) — current multi-TF fails cost-stress and limited WF OOS.
-2. Longer-horizon / more folds XAUUSD WF once denser history or M5 trigger path is practical; OOS trade counts (4–5/fold) are too thin for live.
-3. Do not enable live; keep 1%/3%. Independent reviewer/security still required before any live path.
+1. **Applied:** EURUSD removed from active `settings.yaml` symbols and Delta
+   `allowed_symbols` (XAUUSD-only) after failed cost-stress/WF evidence.
+2. Merge research branch → `main`, deploy VPS, apply VPS runtime EUR gate,
+   restart bots — **do not** treat deploy as live-validation pass.
+3. Separate EURUSD redesign + denser XAUUSD OOS remain before any live enablement.
+4. Keep 1%/3% risk and `CHRONOSCALP_CONFIRM_LIVE` friction intact.
