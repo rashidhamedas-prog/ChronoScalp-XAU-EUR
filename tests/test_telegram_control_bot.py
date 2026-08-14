@@ -93,7 +93,21 @@ def test_settings_menu(bot: TelegramControlBot) -> None:
 def test_start_paper_via_button(bot: TelegramControlBot) -> None:
     bot.handle(42, "استارت Paper")
     assert bot._started == ["paper"]  # type: ignore[attr-defined]
+    assert bot._stopped == []  # type: ignore[attr-defined]
     assert "✅" in bot.send.call_args.args[1]
+
+
+def test_start_paper_restarts_when_already_running(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("chronoscalp.telegram.control_bot.time.sleep", lambda _s: None)
+    bot._running_fn = lambda: True  # type: ignore[method-assign]
+    bot.handle(42, "استارت Paper")
+    assert bot._stopped == [True]  # type: ignore[attr-defined]
+    assert bot._started == ["paper"]  # type: ignore[attr-defined]
+    text = bot.send.call_args.args[1]
+    assert "stopped" in text
+    assert "started paper" in text
 
 
 def test_start_live_blocked_without_confirm(bot: TelegramControlBot) -> None:
@@ -138,10 +152,22 @@ def test_status_and_logs(bot: TelegramControlBot) -> None:
     assert "line-a" in bot.send.call_args.args[1]
 
 
-def test_stop_alias_is_kill_switch_not_process_stop(bot: TelegramControlBot) -> None:
+def test_stop_alias_stops_process_not_kill_switch(bot: TelegramControlBot) -> None:
     bot.handle(42, "/stop")
+    assert bot._stopped == [True]  # type: ignore[attr-defined]
+    assert not bot.kill.is_active()
+
+
+def test_halt_button_is_kill_switch_not_process_stop(bot: TelegramControlBot) -> None:
+    bot.handle(42, "توقف ورود")
     assert bot.kill.is_active()
     assert bot._stopped == []  # type: ignore[attr-defined]
+    assert "فرآیند ربات هنوز روشن است" in bot.send.call_args.args[1]
+
+
+def test_stop_persian_alias(bot: TelegramControlBot) -> None:
+    bot.handle(42, "استاپ")
+    assert bot._stopped == [True]  # type: ignore[attr-defined]
 
 
 def test_bind_chat_persists_when_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

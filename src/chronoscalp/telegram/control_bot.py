@@ -511,13 +511,26 @@ class TelegramControlBot:
             return str(exc)
         return None
 
+    def _stop_if_running(self) -> str | None:
+        """Stop the trading process when it is still up. Returns a status line."""
+        if not self._running_fn():
+            return None
+        ok, msg = self._stop_fn()
+        time.sleep(1.0)
+        return ("✅ " if ok else "⚠️ ") + msg
+
     def _cmd_start_paper(self, chat_id: int, _text: str = "") -> None:
         err = self._ensure_license()
         if err:
             self.send(chat_id, f"لایسنس: {err}")
             return
+        prior = self._stop_if_running()
+        self.kill.deactivate()
         ok, msg = self._start_fn("paper")
-        self.send(chat_id, ("✅ " if ok else "❌ ") + msg)
+        text = ("✅ " if ok else "❌ ") + msg
+        if prior:
+            text = f"{prior}\n{text}"
+        self.send(chat_id, text)
 
     def _cmd_start_live(self, chat_id: int, _text: str = "") -> None:
         self._reload_settings()
@@ -532,8 +545,13 @@ class TelegramControlBot:
         if err:
             self.send(chat_id, f"لایسنس: {err}")
             return
+        prior = self._stop_if_running()
+        self.kill.deactivate()
         ok, msg = self._start_fn("live")
-        self.send(chat_id, ("✅ " if ok else "❌ ") + msg)
+        text = ("✅ " if ok else "❌ ") + msg
+        if prior:
+            text = f"{prior}\n{text}"
+        self.send(chat_id, text)
 
     def _cmd_bot_stop(self, chat_id: int, _text: str = "") -> None:
         ok, msg = self._stop_fn()
@@ -541,7 +559,11 @@ class TelegramControlBot:
 
     def _cmd_halt(self, chat_id: int, _text: str = "") -> None:
         self.kill.activate("telegram /halt")
-        self.send(chat_id, "🛑 Kill switch فعال شد — ورود جدید متوقف است.")
+        self.send(
+            chat_id,
+            "🛑 ورود جدید متوقف شد — فرآیند ربات هنوز روشن است.\n"
+            "برای خاموش کردن کامل، «توقف ربات» را بزنید.",
+        )
 
     def _cmd_resume(self, chat_id: int, _text: str = "") -> None:
         self.kill.deactivate()

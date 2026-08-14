@@ -2,6 +2,22 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-14 Telegram Stop did not stop trading process (TASK-001)
+
+- Time (UTC): 2026-08-14T09:35:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign
+- Objective: Telegram Stop then Start reported "already running" because Stop did not kill the real `run_live.py` tree (and `/stop` was kill-switch, not process stop).
+- Product changes:
+  - `process_control.stop_bot` kills pid-file PID **and** every `run_live.py` process; writes `data/user/bot.stopped`.
+  - `bot_is_running` / `bot_pid` also detect orphan `run_live.py` processes; pid path is absolute under repo root.
+  - Telegram Start Paper/Live stops first if still running, then starts; clears kill-switch marker.
+  - `/stop`, «استاپ» → process stop; «توقف ورود» / `/halt` stay kill-switch.
+  - `watch_bot.ps1` will not auto-start while `bot.stopped` exists.
+- Gates: `pytest -q --basetemp .tmp_pytest_tg_stop_full` FULL_PYTEST=0; `ruff check src tests` RUFF_EXIT=0; black on touched files after format.
+- Invariants: 1%/3% intact; `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- Exact next action: deploy so VPS Telegram/watchdog pick this up; operator uses «توقف ربات» then Start.
+
 ## 2026-08-14 apply EUR gate + merge/deploy to program (TASK-001)
 
 - Time (UTC): 2026-08-14T08:00:00Z

@@ -233,7 +233,8 @@ OANDA_ENV_KEYBOARD: dict[str, Any] = {
 HELP_TEXT = (
     "ChronoScalp — کنترل از تلگرام\n\n"
     "اجرا (منوی اصلی):\n"
-    "وضعیت · سود/زیان · پوزیشن‌ها · استارت/توقف · Kill Switch · لاگ\n\n"
+    "وضعیت · سود/زیان · پوزیشن‌ها · استارت Paper/Live · توقف ربات\n"
+    "توقف ورود = فقط ورود جدید (فرآیند روشن می‌ماند) · ادامه ورود · لاگ\n\n"
     "تنظیمات (فقط از منو — بدون تایپ):\n"
     "• نمادها → تیک بزنید → ذخیره نمادها\n"
     "• استراتژی‌ها → دلتا / SMC / نقدینگی / اسکلپ / استرادل خبر → ذخیره\n"
@@ -271,10 +272,13 @@ ALIASES: dict[str, str] = {
     "استارت live": "start_live",
     "/bot_stop": "bot_stop",
     "/stop_bot": "bot_stop",
+    "/stop": "bot_stop",
     BTN_STOP_BOT: "bot_stop",
     "توقف ربات": "bot_stop",
+    "استاپ": "bot_stop",
+    "استاپ ربات": "bot_stop",
+    "stop": "bot_stop",
     "/halt": "halt",
-    "/stop": "halt",
     BTN_HALT: "halt",
     "توقف ورود": "halt",
     "/resume": "resume",

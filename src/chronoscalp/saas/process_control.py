@@ -11,9 +11,10 @@ from pathlib import Path
 
 from chronoscalp.logging_setup import logger
 
-PID_FILE = Path("data/user/bot.pid")
 ROOT = Path(__file__).resolve().parents[3]
+PID_FILE = ROOT / "data" / "user" / "bot.pid"
 _BOT_STDOUT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB — rotate before VPS disk fills
+_RUN_LIVE_MARKER = "run_live.py"
 
 
 def _python_executable() -> str:
@@ -27,12 +28,32 @@ def _python_executable() -> str:
     return sys.executable
 
 
-def bot_is_running(pid_file: Path = PID_FILE) -> bool:
-    if not pid_file.exists():
-        return False
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except ValueError:
+def resolve_pid_file(pid_file: Path | None = None) -> Path:
+    """Return an absolute pid-file path (relative paths resolve under ``ROOT``)."""
+    path = PID_FILE if pid_file is None else Path(pid_file)
+    if not path.is_absolute():
+        return (ROOT / path).resolve()
+    return path
+
+
+def stop_marker_path(pid_file: Path | None = None) -> Path:
+    """Sidecar file that tells watchdogs not to auto-restart after an operator stop."""
+    return resolve_pid_file(pid_file).with_name("bot.stopped")
+
+
+def _write_stop_marker(pid_file: Path) -> None:
+    marker = stop_marker_path(pid_file)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("stopped_via_control\n", encoding="utf-8")
+
+
+def _clear_stop_marker(pid_file: Path) -> None:
+    stop_marker_path(pid_file).unlink(missing_ok=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Return True when ``pid`` still exists (best-effort, cross-platform)."""
+    if pid <= 0:
         return False
     if sys.platform == "win32":
         # os.kill(pid, 0) can raise SystemError on some Windows/Python builds.
@@ -48,14 +69,102 @@ def bot_is_running(pid_file: Path = PID_FILE) -> bool:
                 return True
         except Exception:  # noqa: BLE001
             return False
-        pid_file.unlink(missing_ok=True)
         return False
     try:
         os.kill(pid, 0)
     except OSError:
-        pid_file.unlink(missing_ok=True)
         return False
     return True
+
+
+def _list_run_live_pids() -> list[int]:
+    """PIDs whose command line is ``scripts/run_live.py`` (not the Telegram bot)."""
+    me = os.getpid()
+    parent = os.getppid()
+    found: list[int] = []
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.CommandLine -and "
+                "($_.CommandLine -match 'run_live\\.py') -and "
+                "($_.CommandLine -notmatch 'telegram_control_bot') } | "
+                "ForEach-Object { $_.ProcessId }"
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            for line in (result.stdout or "").splitlines():
+                token = line.strip()
+                if token.isdigit():
+                    found.append(int(token))
+        else:
+            result = subprocess.run(
+                ["pgrep", "-f", _RUN_LIVE_MARKER],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            for line in (result.stdout or "").splitlines():
+                token = line.strip()
+                if token.isdigit():
+                    found.append(int(token))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Could not list run_live processes: {}", exc)
+        return []
+    return [pid for pid in found if pid not in {me, parent}]
+
+
+def _managed_pids(pid_file: Path) -> set[int]:
+    """Union of pid-file PID (if alive) and any live ``run_live.py`` processes."""
+    pids: set[int] = set(_list_run_live_pids())
+    if pid_file.exists():
+        try:
+            recorded = int(pid_file.read_text(encoding="utf-8").strip())
+        except ValueError:
+            recorded = 0
+        if recorded and _pid_alive(recorded):
+            pids.add(recorded)
+    return pids
+
+
+def _kill_pid_tree(pid: int) -> None:
+    """Force-kill ``pid`` and its children. Best-effort; does not raise."""
+    if pid <= 0 or pid == os.getpid():
+        return
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=20,
+            )
+        else:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                return
+            time.sleep(0.3)
+            if _pid_alive(pid):
+                os.kill(pid, signal.SIGKILL)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Could not kill pid={}: {}", pid, exc)
+
+
+def bot_is_running(pid_file: Path = PID_FILE) -> bool:
+    """True when the managed pid or any ``run_live.py`` process is still alive."""
+    path = resolve_pid_file(pid_file)
+    if _managed_pids(path):
+        return True
+    if path.exists():
+        path.unlink(missing_ok=True)
+    return False
 
 
 def _rotate_bot_stdout_if_needed(stdout_path: Path) -> None:
@@ -73,6 +182,7 @@ def _rotate_bot_stdout_if_needed(stdout_path: Path) -> None:
 
 def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str]:
     """Spawn ``scripts/run_live.py`` in the background."""
+    pid_file = resolve_pid_file(pid_file)
     if bot_is_running(pid_file):
         return False, "ربات از قبل در حال اجراست"
 
@@ -115,6 +225,7 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
     )
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(proc.pid), encoding="utf-8")
+    _clear_stop_marker(pid_file)
     logger.info("Started bot pid={} mode={}", proc.pid, mode)
 
     # Detect immediate crash (e.g. broker connect fail after gate passes).
@@ -134,38 +245,54 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
 
 
 def stop_bot(pid_file: Path = PID_FILE) -> tuple[bool, str]:
-    if not pid_file.exists():
-        return False, "ربات در حال اجرا نیست"
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except ValueError:
-        pid_file.unlink(missing_ok=True)
-        return False, "فایل PID نامعتبر بود"
+    """Stop every managed ``run_live.py`` process, not just the pid-file PID.
 
-    try:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"], check=False, capture_output=True
-            )
-        else:
-            os.kill(pid, signal.SIGTERM)
-    except OSError as exc:
+    Windows venv launchers often leave a child ``python.exe run_live.py`` that
+    outlives the recorded PID. Telegram Stop must kill that tree too, and write
+    ``bot.stopped`` so scheduled watchdogs do not immediately revive it.
+    """
+    pid_file = resolve_pid_file(pid_file)
+    pids = _managed_pids(pid_file)
+    if not pids:
         pid_file.unlink(missing_ok=True)
-        return False, f"خطا در توقف: {exc}"
+        _write_stop_marker(pid_file)
+        return True, "ربات از قبل متوقف بود"
+
+    for pid in sorted(pids):
+        _kill_pid_tree(pid)
+
+    deadline = time.time() + 3.0
+    leftover: set[int] = set()
+    while time.time() < deadline:
+        leftover = _managed_pids(pid_file)
+        if not leftover:
+            break
+        for pid in leftover:
+            _kill_pid_tree(pid)
+        time.sleep(0.25)
 
     pid_file.unlink(missing_ok=True)
-    logger.info("Stopped bot pid={}", pid)
-    return True, f"ربات (PID {pid}) متوقف شد"
+    _write_stop_marker(pid_file)
+    if leftover:
+        logger.warning("Stop incomplete; leftover pids={}", leftover)
+        return False, f"توقف ناقص؛ هنوز در حال اجرا: {sorted(leftover)}"
+
+    logger.info("Stopped bot pids={}", sorted(pids))
+    return True, f"ربات متوقف شد (PID {', '.join(str(p) for p in sorted(pids))})"
 
 
 def bot_pid(pid_file: Path = PID_FILE) -> int | None:
-    """Return the managed bot PID when the pid file is valid, else None."""
-    if not pid_file.exists():
-        return None
-    try:
-        return int(pid_file.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
+    """Return a live managed PID (pid file first, else any ``run_live.py``)."""
+    path = resolve_pid_file(pid_file)
+    if path.exists():
+        try:
+            recorded = int(path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            recorded = 0
+        if recorded and _pid_alive(recorded):
+            return recorded
+    live = _list_run_live_pids()
+    return live[0] if live else None
 
 
 def tail_logs(n: int = 40, log_dir: Path | None = None) -> list[str]:
