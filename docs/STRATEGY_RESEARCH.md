@@ -40,7 +40,20 @@ Window for limited run: **2026-06-27 → 2026-08-11 UTC** (`--last-days 45`). Lo
 | VPS prior full hist (2026-08-11) | XAUUSD | 85 | 0.219 → 0.218 | 1.654 → 1.652 | 4.44 → 4.45 | Consistent direction with limited window |
 | VPS prior summary | EURUSD | — | — | — | — | Stale `missing_history` — ignore |
 
-`scripts/run_cost_stress_validate.py` supports `--from` / `--to` / `--last-days` and slices before enrich (warmup 300 bars). VPS helpers: `_vps_cost_stress_only.ps1`, `_vps_detach_cost_stress.ps1`, `_vps_status_research.ps1`, `_vps_limited_walkforward.ps1`.
+### Limited walk-forward (tiny-grid, folds=2, expectancy_r)
+
+Window ≈ last 45 calendar days; `--tiny-grid` = default EMA50/RSI14/MACD12-26 only. Copies: `data/_analysis/wf_limited_*.json`.
+
+| Symbol | Fold | OOS trades | OOS E[R] | OOS PF | OOS return % | Notes |
+|--------|------|------------|----------|--------|--------------|-------|
+| XAUUSD | 1 | 5 | 1.007 | 8.002 | +5.03 | Small sample |
+| XAUUSD | 2 | 4 | 0.512 | 2.268 | +1.97 | Small sample |
+| XAUUSD | avg | — | — | — | +3.50 | Directionally positive OOS |
+| EURUSD | 1 | 3 | −0.500 | 0.0 | −1.75 | Fail |
+| EURUSD | 2 | 2 | −0.762 | 0.0 | −1.78 | Fail |
+| EURUSD | avg | — | — | — | −1.76 | Confirms cost-stress fail |
+
+`scripts/run_cost_stress_validate.py` supports `--from` / `--to` / `--last-days` and slices before enrich (warmup 300 bars). VPS helpers: `_vps_cost_stress_only.ps1`, `_vps_detach_cost_stress.ps1`, `_vps_status_research.ps1`, `_vps_limited_walkforward.ps1` (`--tiny-grid`).
 
 `data/history/` is gitignored. Pull from the logged-in MT5 terminal (Windows only)
 via `scripts/fetch_history.py`. Output: `data/history/<symbol>/<TF>.csv`.
@@ -53,12 +66,13 @@ $env:LOG_LEVEL="WARNING"
 python scripts/fetch_history.py --symbol XAUUSD --timeframes M1 M5 M15 --years 2
 python scripts/fetch_history.py --symbol EURUSD --timeframes M1 M5 M15 --years 2
 python -u scripts/run_cost_stress_validate.py --symbols XAUUSD EURUSD --last-days 45
+powershell -File scripts/_vps_limited_walkforward.ps1
 ```
 
 LiteFinance-style `_o` names apply only when that broker’s Market Watch exposes them.
 
 ## Exact next action
 
-1. Run **limited** walk-forward via `scripts/_vps_limited_walkforward.ps1` (folds=2, `expectancy_r`, last ~45 days) and record OOS folds.
-2. Treat EURUSD as failing current multi-TF system on this broker window — separate EUR redesign before any live path.
-3. Do not enable live; keep 1%/3%. XAUUSD 45d cost-stress is promising but walk-forward/OOS still required.
+1. **EURUSD redesign** (separate system) — current multi-TF fails cost-stress and limited WF OOS.
+2. Longer-horizon / more folds XAUUSD WF once denser history or M5 trigger path is practical; OOS trade counts (4–5/fold) are too thin for live.
+3. Do not enable live; keep 1%/3%. Independent reviewer/security still required before any live path.

@@ -2,6 +2,17 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-14 limited WF + cost-stress evidence recorded (TASK-001)
+
+- Time (UTC): 2026-08-14T01:35:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign
+- Objective: broker-native cost-stress + limited walk-forward OOS.
+- Cost-stress 45d: XAUUSD 46 trades E[R] 0.354→0.353 PF≈2.11; EURUSD 17 trades E[R] −0.15→−0.206 (fail).
+- Limited WF tiny-grid folds=2: XAUUSD OOS fold1 E[R]=1.007 (5t), fold2 E[R]=0.512 (4t), avg return +3.5%; EURUSD OOS E[R] −0.5/−0.76 (fail). Artifacts in `data/_analysis/`.
+- Decisions: live stays disabled; EUR needs redesign; XAU promising but OOS sample too thin for live; 1%/3% intact.
+- Exact next action: plan/implement EURUSD-specific strategy redesign; expand XAU OOS sample; independent reviewer/security before any enablement.
+
 ## 2026-08-12 limited 45d cost-stress COMPLETE (TASK-001)
 
 - Time (UTC): 2026-08-12T22:50:00Z
