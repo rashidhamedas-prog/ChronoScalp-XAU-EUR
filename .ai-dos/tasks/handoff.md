@@ -2,6 +2,108 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-14 apply EUR gate + merge/deploy to program (TASK-001)
+
+- Time (UTC): 2026-08-14T08:00:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign → merge to main + VPS deploy
+- Objective: apply research evidence to running config; ship tooling/TZ/MT5 fixes.
+- Product changes:
+  - `settings.yaml`: remove `EURUSD_o` from active symbols; Delta `allowed_symbols: [XAUUSD]`.
+  - Telegram label `دلتا (طلا)`; example overrides + docs updated.
+  - VPS: after deploy run `_vps_apply_eur_gate.ps1` on gitignored runtime_overrides.
+- Gates: focused pytest (delta/telegram/risk/journal/backtest) + ruff OK.
+- Invariants: 1%/3% intact; live confirmation gate unchanged; EUR redesign still required.
+- Exact next action after deploy: confirm VPS HEAD on main, Telegram shows دلتا (طلا), symbols exclude EUR; denser XAU OOS + EUR redesign remain open.
+
+## 2026-08-14 limited WF + cost-stress evidence recorded (TASK-001)
+
+- Time (UTC): 2026-08-14T01:35:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign
+- Objective: broker-native cost-stress + limited walk-forward OOS.
+- Cost-stress 45d: XAUUSD 46 trades E[R] 0.354→0.353 PF≈2.11; EURUSD 17 trades E[R] −0.15→−0.206 (fail).
+- Limited WF tiny-grid folds=2: XAUUSD OOS fold1 E[R]=1.007 (5t), fold2 E[R]=0.512 (4t), avg return +3.5%; EURUSD OOS E[R] −0.5/−0.76 (fail). Artifacts in `data/_analysis/`.
+- Decisions: live stays disabled; EUR needs redesign; XAU promising but OOS sample too thin for live; 1%/3% intact.
+- Exact next action: plan/implement EURUSD-specific strategy redesign; expand XAU OOS sample; independent reviewer/security before any enablement.
+
+## 2026-08-12 limited 45d cost-stress COMPLETE (TASK-001)
+
+- Time (UTC): 2026-08-12T22:50:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch / worktree: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3
+- Objective: broker-native baseline + 1.5× cost-stress for XAUUSD/EURUSD.
+- Verified metrics (`data/_analysis/*_last45d.json`, window 2026-06-27→2026-08-11 UTC):
+  - XAUUSD: trades=46, expectancy_r 0.354→0.353, PF 2.114→2.112, max_dd 2.02→2.03%, return ~17%.
+  - EURUSD: trades=17, expectancy_r −0.150→−0.206, PF 0.591→0.477, max_dd 4.75→5.81% — **fail**.
+- Decisions: do not enable live; keep 1%/3%; EUR needs separate redesign; XAU promising on this window but WF/OOS still required.
+- Exact next action: run `_vps_limited_walkforward.ps1` / detach helper; record fold metrics; then EUR redesign plan.
+
+## 2026-08-12 limited cost-stress tooling + prior XAU metrics (TASK-001)
+
+- Time (UTC): 2026-08-12T21:25:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / pending
+- Objective: finish broker-native 1.5× cost-stress; keep live frozen and 1%/3% intact.
+- Verified context and decisions:
+  - Prior VPS `validate_XAUUSD.json` (2026-08-11): 85 trades, expectancy_r 0.219→0.218 @1.5×, PF 1.654→1.652, max DD ~4.4%. Copied locally to `data/_analysis/validate_XAUUSD_vps_prior.json`.
+  - Stale `cost_stress_1p5x_summary.json` with `missing_history` for both symbols is **not** trusted (wrong-era/_o).
+  - Added `--last-days` / date window + pre-enrich slice to `run_cost_stress_validate.py`; quiet VPS runners (`LOG_LEVEL=WARNING`).
+  - Limited 45d cost-stress observed running on VPS (~30 min per backtest); Finnhub 403 warnings only.
+  - Limited WF script `_vps_limited_walkforward.ps1` ready after cost-stress completes.
+- Files changed: `scripts/run_cost_stress_validate.py`, VPS helper scripts, `docs/STRATEGY_RESEARCH.md`, status/handoff/active claims.
+- Tests/gates: `ruff check scripts/run_cost_stress_validate.py` OK; `pytest tests/test_backtest_engine.py tests/test_optimizer.py -q` 5 passed.
+- Exact next action: poll VPS until `validate_EURUSD.json` + fresh summary appear; record metrics; run limited WF; do not enable live.
+
+## 2026-08-12 walk-forward timezone fix (TASK-001)
+
+- Time (UTC): 2026-08-12T16:05:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer (wf-tz lane)
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / pending commit
+- Objective: fix `run_backtest` ValueError when walk-forward passes tz-aware start/end.
+- Verified context and decisions:
+  - Root cause: `pd.Timestamp(aware_dt, tz="UTC")` rejects tz-aware inputs.
+  - Added `_to_utc_timestamp` (aware → `tz_convert`, naive → `tz="UTC"`); used in engine filters; fold windows normalize via same helper.
+  - Live untouched; 1%/3% untouched.
+- Files changed: `engine.py`, `optimizer.py`, `tests/test_backtest_engine.py`, `tests/test_optimizer.py` (new), claims/handoff.
+- Tests/gates:
+  - `pytest tests/test_backtest_engine.py tests/test_optimizer.py -q --basetemp .tmp_pytest_wf_tz` → 5 passed, PYTEST_EXIT=0
+  - `ruff check src/chronoscalp/backtest tests/test_backtest_engine.py tests/test_optimizer.py` → All checks passed!, RUFF_EXIT=0
+- Exact next action: re-run walk-forward / cost-stress on VPS with broker-native history.
+
+## 2026-08-12 VPS history + next-step evidence (TASK-001)
+
+- Time (UTC): 2026-08-12T15:57:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / research-docs
+- Branch / worktree / commit: ai/TASK-001-strategy-audit-redesign / D:/soft/Claud/porje/ChronoScalp s3 / docs only (no commit this turn)
+- Objective: record verified VPS MT5 fetch/depth facts and exact next research step; leave cost-stress numbers UNKNOWN until shell agent returns.
+- Verified context and decisions:
+  - VPS broker AUSCommercial-Demo uses native `XAUUSD` / `EURUSD` (not LiteFinance `XAUUSD_o` / `EURUSD_o`).
+  - Chunked `fetch_ohlcv_range` fix required: tz-aware + large range → Invalid params.
+  - History on VPS: ~100k bars M1/M5 for XAUUSD and EURUSD (broker depth cap); ~47–50k M15 bars.
+  - Full walk-forward grid on 100k M1 too slow for interactive run; earlier failure also from tz bug in `run_backtest` date filter.
+  - Live remains disabled; 1%/3% intact.
+  - Cost-stress (1.5×) metrics: UNKNOWN pending shell agent.
+- Files changed (and why): `docs/STRATEGY_RESEARCH.md`, `.ai-dos/project/status.md`, this handoff, `active.yaml` heartbeat — evidence + next action only.
+- Tests/gates run with exact results: none this turn (docs-only).
+- Review/security findings and dispositions: none new; independent reviewer/security still required before live.
+- Known failures, risks, and assumptions: cost-stress numbers not yet available; full WF grid not practical interactively on 100k M1.
+- File claims released or retained: TASK-001 claims retained.
+- Exact next action: finish cost-stress on VPS with `XAUUSD`/`EURUSD`; then limited walk-forward (fewer folds / shorter window) after TZ fix lands.
+
+## 2026-08-11 merge + VPS deploy complete
+
+- Time (UTC): 2026-08-11T17:15:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / orchestrator
+- Branch / worktree / commit: main @ `1c3f5aa` (merge `61164ae` + roadmap); task branch synced
+- Objective: merge successful forensic/MistakeMemory/Telegram work; deploy VPS; verify Telegram.
+- Verified context and decisions:
+  - Merged `ai/TASK-001-strategy-audit-redesign` → `main` and pushed.
+  - VPS deploy via `scripts/deploy_vps_from_local.ps1` finished at HEAD `1c3f5aa`; Telegram control bot restarted (`TG_KEYBOARD_RESTORED`); trading bot restarted by deploy script.
+  - Local telegram suite: `tests/test_telegram_control_bot.py` TG_EXIT=0; smoke import OK.
+  - Did not commit dirty `.env.example` / `AGENTS.md` churn.
+- Exact next action: operator fetch broker-native M1 (`XAUUSD_o` / `EURUSD_o`) then walk-forward; keep live risk gates intact.
+
 ## 2026-08-11 Telegram MistakeMemory + merge/deploy
 
 - Time (UTC): 2026-08-11T17:15:00Z

@@ -16,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from chronoscalp.backtest.engine import BacktestResult, run_backtest
+from chronoscalp.backtest.engine import BacktestResult, _to_utc_timestamp, run_backtest
 from chronoscalp.config import Settings
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.logging_setup import logger
@@ -210,8 +210,9 @@ def _fold_windows(
     if not 0 < train_ratio < 1:
         raise ValueError("train_ratio must be between 0 and 1")
 
-    start = index[0].to_pydatetime()
-    end = index[-1].to_pydatetime()
+    # Normalize to UTC-aware datetimes so fold bounds are safe for run_backtest.
+    start = _to_utc_timestamp(index[0]).to_pydatetime()
+    end = _to_utc_timestamp(index[-1]).to_pydatetime()
     total = (end - start).total_seconds()
     fold_seconds = total / n_folds
     windows: list[tuple[datetime, datetime, datetime, datetime]] = []

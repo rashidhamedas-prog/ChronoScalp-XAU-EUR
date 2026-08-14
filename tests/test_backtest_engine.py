@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import numpy as np
 import pandas as pd
 
-from chronoscalp.backtest.engine import run_backtest
+from chronoscalp.backtest.engine import _to_utc_timestamp, run_backtest
 from chronoscalp.config import Settings
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
@@ -96,5 +98,42 @@ def test_run_backtest_in_session_fixture_completes():
     summary = result.summary()
     assert summary["symbol"] == "XAUUSD"
     assert "total_trades" in summary
+    assert isinstance(summary["total_trades"], int)
+    assert summary["total_trades"] >= 0
+
+
+def test_to_utc_timestamp_accepts_aware_and_naive():
+    """Aware bounds must convert; naive bounds localize — never Timestamp(..., tz=)."""
+    aware = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
+    naive = datetime(2026, 1, 5, 8, 0)
+    aware_ts = _to_utc_timestamp(aware)
+    naive_ts = _to_utc_timestamp(naive)
+    assert aware_ts.tzinfo is not None
+    assert naive_ts.tzinfo is not None
+    assert aware_ts == pd.Timestamp("2026-01-05 08:00", tz="UTC")
+    assert naive_ts == pd.Timestamp("2026-01-05 08:00", tz="UTC")
+
+
+def test_run_backtest_accepts_timezone_aware_start_end():
+    """Regression: walk-forward passes tz-aware fold bounds into run_backtest.
+
+    Previously ``pd.Timestamp(aware_dt, tz="UTC")`` raised ValueError.
+    """
+    settings = Settings()
+    data = _enriched_by_tf(start="2026-01-05 08:00")
+    start = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
+    end = datetime(2026, 1, 5, 10, 0, tzinfo=UTC)
+
+    result = run_backtest(
+        symbol="XAUUSD",
+        data_by_timeframe=data,
+        higher_timeframes=[Timeframe.M10, Timeframe.M5],
+        trigger_timeframe=Timeframe.M1,
+        settings=settings,
+        start=start,
+        end=end,
+    )
+    summary = result.summary()
+    assert summary["symbol"] == "XAUUSD"
     assert isinstance(summary["total_trades"], int)
     assert summary["total_trades"] >= 0

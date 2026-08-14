@@ -33,6 +33,14 @@ DEFAULT_GRID = {
     "macd_slow": [24, 26],
 }
 
+# Single default combo for limited OOS research (full DEFAULT_GRID is too slow on M1).
+TINY_GRID = {
+    "ema_period_trend": [50],
+    "rsi_period": [14],
+    "macd_fast": [12],
+    "macd_slow": [26],
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Optimize ChronoScalp indicator parameters")
@@ -49,6 +57,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--folds", type=int, default=3)
     parser.add_argument("--train-ratio", type=float, default=0.7)
     parser.add_argument("--report", default=None, help="JSON output path")
+    parser.add_argument(
+        "--tiny-grid",
+        action="store_true",
+        help="Use single default-parameter combo (fast limited OOS research)",
+    )
     return parser.parse_args()
 
 
@@ -56,6 +69,7 @@ def main() -> None:
     args = parse_args()
     settings = get_settings()
     data_dir = args.data_dir or settings.backtest.get("data_dir", "data/history")
+    param_grid = TINY_GRID if args.tiny_grid else DEFAULT_GRID
 
     higher_tfs = [Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]]
     trigger_tf = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
@@ -88,7 +102,7 @@ def main() -> None:
             settings=settings,
             higher_timeframes=higher_tfs,
             trigger_timeframe=trigger_tf,
-            param_grid=DEFAULT_GRID,
+            param_grid=param_grid,
             metric=args.metric,
             start=start,
             end=end,
@@ -97,6 +111,7 @@ def main() -> None:
             "mode": "grid",
             "symbol": args.symbol,
             "metric": args.metric,
+            "tiny_grid": bool(args.tiny_grid),
             "best": (
                 None
                 if result.best is None
@@ -118,12 +133,16 @@ def main() -> None:
             settings=settings,
             higher_timeframes=higher_tfs,
             trigger_timeframe=trigger_tf,
-            param_grid=DEFAULT_GRID,
+            param_grid=param_grid,
             metric=args.metric,
             n_folds=args.folds,
             train_ratio=args.train_ratio,
         )
-        payload = {"mode": "walk-forward", **wf.to_dict()}
+        payload = {
+            "mode": "walk-forward",
+            "tiny_grid": bool(args.tiny_grid),
+            **wf.to_dict(),
+        }
 
     print(json.dumps(payload, indent=2, default=str))
 

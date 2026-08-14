@@ -1,0 +1,17 @@
+# Diagnose why cost-stress dies after BEGIN.
+$ErrorActionPreference = "Continue"
+Set-Location "C:\ChronoScalp\ChronoScalp-XAU-EUR"
+$env:PYTHONPATH = "src"
+$env:PYTHONUNBUFFERED = "1"
+$env:LOG_LEVEL = "WARNING"
+$py = ".\.venv\Scripts\python.exe"
+Write-Host "PWD=$(Get-Location)"
+Write-Host "PY_EXISTS=$(Test-Path $py)"
+Write-Host "SCRIPT_EXISTS=$(Test-Path .\scripts\run_cost_stress_validate.py)"
+Write-Host "M1_XAU=$(Test-Path .\data\history\XAUUSD\M1.csv)"
+Write-Host "M1_EUR=$(Test-Path .\data\history\EURUSD\M1.csv)"
+& $py -c "print('py_ok'); import chronoscalp; print('import_ok')"
+Write-Host "IMPORT_EXIT=$LASTEXITCODE"
+& $py -u scripts/run_cost_stress_validate.py --help
+Write-Host "HELP_EXIT=$LASTEXITCODE"
+Write-Host "DIAG_DONE"

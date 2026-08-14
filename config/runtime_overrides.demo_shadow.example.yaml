@@ -4,7 +4,6 @@
 
 symbols:
   - XAUUSD_o
-  - EURUSD_o
   - USDJPY_o
 
 strategy:
@@ -18,7 +17,8 @@ strategy:
   use_news_straddle: false
   min_reward_risk_ratio: 1.5
   delta:
-    allowed_symbols: [XAUUSD, EURUSD]
+    # EURUSD gated off until redesign passes broker-native OOS/cost-stress.
+    allowed_symbols: [XAUUSD]
   ultra_scalp:
     min_reward_risk_ratio: 1.5
     net_rr_after_costs: 1.25
