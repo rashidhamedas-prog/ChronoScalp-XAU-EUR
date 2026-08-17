@@ -15,6 +15,7 @@ import platform
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -110,6 +111,21 @@ class MT5Connector:
     def is_connected(self) -> bool:
         return self._connected
 
+    def _process_link_matches(self, mt5: Any) -> bool:
+        """True when this process already holds a live link to *our* account.
+
+        Reconnecting is only safe to skip when the existing link points at the
+        same login: a different login means someone re-pointed the terminal and
+        we must re-handshake rather than trade on the wrong account.
+        """
+        try:
+            if mt5.terminal_info() is None:
+                return False
+            info = mt5.account_info()
+        except Exception:  # noqa: BLE001 - a dead IPC link raises rather than returns None
+            return False
+        return info is not None and int(info.login) == int(self._login)
+
     def connect(self, *, force: bool = False) -> bool:
         """Attach to (or launch) the MT5 terminal and log in.
 
@@ -120,15 +136,21 @@ class MT5Connector:
 
         Idempotent by default: when the terminal link is already alive this is
         a no-op. Every attempt below calls ``mt5.shutdown()`` first, so letting
-        repeated callers (broker adapters, panel/Telegram status probes) fall
-        through would tear down and re-initialize the IPC link underneath any
-        in-flight quote fetch or order. Pass ``force=True`` to rebuild the link
-        deliberately.
+        repeated callers fall through would tear down and re-initialize the IPC
+        link underneath any in-flight quote fetch or order. Pass ``force=True``
+        to rebuild the link deliberately.
+
+        The reuse check deliberately ignores ``self._connected``: the panel API
+        and Telegram handlers build a throwaway ``MT5Connector`` per request, so
+        an instance-scoped flag is always ``False`` for them and every status
+        poll would re-handshake. ``MetaTrader5`` keeps one terminal link per
+        *process*, so process-level state is what actually decides this.
         """
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
 
-        if not force and self._connected and mt5.terminal_info() is not None:
+        if not force and self._process_link_matches(mt5):
+            self._connected = True
             logger.debug("MT5 already connected — reusing existing terminal link")
             return True
 
