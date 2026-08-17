@@ -234,6 +234,25 @@ Append newest entries at the top. Never erase another agent's record.
 - Data-integrity flags: 178 records have absolute R multiple above 10; at least 34 records have close timestamps before open timestamps, and blank timestamps also exist.
 - Research decision: GitHub performance claims are hypotheses only. Reusable ideas are walk-forward/no-lookahead testing, explicit spread/commission/slippage attribution, session/regime gates, and structure-first entries. No external strategy is accepted without reproduction on this broker's untouched data.
 
+### 2026-08-17 — low live trade count / poor results triage
+
+- Time (UTC): 2026-08-17
+- Task / owner / role: TASK-001 / cursor / implementer
+- Branch / worktree / commit: `ai/TASK-001-strategy-audit-redesign`, this worktree
+- Objective: explain why live/demo takes very few trades with poor results, and remove the causes that are configuration or observability defects rather than strategy quality.
+- Verified context and decisions:
+  - `config/runtime_overrides.yaml` on this host had `enabled_strategies: [liquidity_volume]` while the committed example has `[delta, liquidity_volume]`. `resolve_enabled_strategies` prefers the list, so Delta was off regardless of `settings.yaml`. Overlay drift is the primary cause of the low trade count.
+  - 11 override keys are schema-validated and never read: confirmed by searching `src/` for each key outside `config_overrides.py`. Operators were relying on daily trade caps, portfolio heat, weekly/monthly loss caps and single-instance protection that do not exist.
+  - `backtest/engine.py` applies session, news, spread and `validate_signal` only. The live loop adds nine more entry guards, so the 45-day XAUUSD result (46 trades, PF 2.11, +17.08%) is an upper bound and never described the deployed system.
+  - `MT5Connector.connect()` called `mt5.shutdown()` on every attempt with no idempotence check, so any repeated caller rebuilt the IPC link. Matches the reported log bursts.
+  - Independent journal recount reproduces the earlier snapshot: 238 closed trades, 22.7% wins, net -27,326.13, `ultra_scalp` -22,713.50, median volume 7.94 lots, max 50.05, 229 of 238 exits recorded as `external`.
+  - VPS `89.23.103.82` was unreachable from this workstation (no ping, no direct TCP 22, no SSH banner through the local SOCKS5 proxy), so the deployed overlay could not be read or corrected remotely. The MT5 account in the operator's log (`AUSCommercial-Demo` / 55625500) also differs from the deploy helper's LiteFinance account, so the deployment target has moved.
+- Files changed (and why): `src/chronoscalp/data/mt5_connector.py` (idempotent connect), `src/chronoscalp/config.py` (retain overlay for reporting), `src/chronoscalp/config_overrides.py` (`UNENFORCED_OVERRIDE_KEYS`, `unenforced_override_keys`), `src/chronoscalp/main.py` (`_log_entry_gate_profile` at startup), `src/chronoscalp/backtest/engine.py` (`LIVE_ONLY_GATES` + summary field + warning), `config/runtime_overrides.demo_shadow.example.yaml` (INERT annotations, drift warning), `docs/ROADMAP.md`, plus tests.
+- Tests/gates run with exact results: `python -m pytest -q` passed; `python -m ruff check src tests` passed; `python -m black --check` clean on all eight changed files (7 pre-existing unrelated files still fail, untouched).
+- Known failures, risks, and assumptions: no risk ceiling was changed (1% per trade, 1.5 gross R:R, live gate all intact). Delta remains unvalidated for live money per `docs/STRATEGY_DELTA.md`; re-enabling it here only affects the paper/shadow overlay. The deployed VPS overlay is still stale and must be corrected on the host.
+- File claims released or retained: all TASK-001 claims retained.
+- Exact next action: correct the deployed `runtime_overrides.yaml` (or toggle Delta via Telegram Settings -> Strategies), restart the bot, then read the new "Entry gate profile" and 5-minute "Entry skip heartbeat" lines to see which guard dominates before tuning anything.
+
 ## Template
 
 - Time (UTC):

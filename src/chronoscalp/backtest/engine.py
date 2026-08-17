@@ -4,7 +4,13 @@ Deliberately custom instead of Freqtrade/Jesse (both are CCXT/crypto-oriented
 and don't model MT5-style spread/swap mechanics well — see README §3). Walks
 the trigger timeframe bar-by-bar, feeding the strategy only data available up
 to (and including) the current bar for every timeframe, using the same
-strategy/risk/filter code paths as live trading (main.py) via `PaperBroker`.
+strategy, sizing, session, news and spread code paths as live trading via
+`PaperBroker`.
+
+It does NOT model the additional entry guards the live loop applies — see
+``LIVE_ONLY_GATES``. Backtest trade counts are therefore an upper bound on
+live trade counts, and every summary carries that list so results are not
+read as a live forecast.
 
 Performance note: this is an O(n) bar-by-bar loop, not vectorized. Fine for
 M5/M10 backtests spanning a few years; for multi-year M1 backtests, consider
@@ -31,6 +37,20 @@ from chronoscalp.logging_setup import logger
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
 from chronoscalp.utils.types import SignalType, Timeframe, TradeResult
+
+# Entry guards that main.py applies but this engine does not simulate. Each one
+# can only remove trades, so backtest counts bound live counts from above.
+LIVE_ONLY_GATES: tuple[str, ...] = (
+    "circuit_breaker",
+    "correlation_guard",
+    "daily_loss_limit",
+    "kill_switch",
+    "mistake_memory",
+    "spread_ma_guard",
+    "stale_stops",
+    "three_strikes",
+    "volatility_guard",
+)
 
 
 @dataclass
@@ -90,6 +110,7 @@ class BacktestResult:
                 if self.starting_equity
                 else 0.0
             ),
+            "live_only_gates_not_modelled": list(LIVE_ONLY_GATES),
         }
 
 
@@ -213,6 +234,13 @@ def run_backtest(
     result.equity_curve.append((trigger_df.index[-1].to_pydatetime(), result.final_equity))
 
     logger.info("Backtest complete for {}: {}", symbol, result.summary())
+    logger.warning(
+        "Backtest for {} does not model live-only entry guards ({}); "
+        "expect fewer trades live than the {} simulated here.",
+        symbol,
+        ", ".join(LIVE_ONLY_GATES),
+        result.total_trades,
+    )
     return result
 
 

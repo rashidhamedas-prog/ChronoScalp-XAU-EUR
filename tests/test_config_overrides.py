@@ -8,20 +8,51 @@ import pytest
 import yaml
 
 from chronoscalp.config_overrides import (
+    UNENFORCED_OVERRIDE_KEYS,
     RuntimeOverridesValidationError,
+    unenforced_override_keys,
     validate_runtime_overrides,
 )
 
+EXAMPLE_OVERLAY = Path("config/runtime_overrides.demo_shadow.example.yaml")
+
 
 def test_demo_shadow_example_validates() -> None:
-    path = Path("config/runtime_overrides.demo_shadow.example.yaml")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload = yaml.safe_load(EXAMPLE_OVERLAY.read_text(encoding="utf-8"))
     out = validate_runtime_overrides(payload)
     assert out["execution"]["broker"] == "paper"
     assert out["risk"]["active_risk_per_trade_pct"] == 0.25
     assert 1.5 in out["risk"]["risk_presets_pct"]
     assert "liquidity_volume" in out["strategy"]["enabled_strategies"]
     assert len(out["symbols"]) >= 2
+
+
+def test_demo_shadow_example_keeps_delta_enabled() -> None:
+    """A shadow overlay that drops delta silently disables the gold strategy."""
+    payload = yaml.safe_load(EXAMPLE_OVERLAY.read_text(encoding="utf-8"))
+    out = validate_runtime_overrides(payload)
+    assert "delta" in out["strategy"]["enabled_strategies"]
+    assert out["strategy"]["delta"]["allowed_symbols"] == ["XAUUSD"]
+
+
+def test_unenforced_keys_reported_when_present() -> None:
+    found = unenforced_override_keys(
+        {
+            "risk": {"max_trades_portfolio_day": 3, "max_daily_loss_pct": 1.0},
+            "execution": {"single_instance": True, "broker": "paper"},
+        }
+    )
+    assert found == ["execution.single_instance", "risk.max_trades_portfolio_day"]
+
+
+def test_unenforced_keys_empty_for_enforced_only_overlay() -> None:
+    assert unenforced_override_keys({"risk": {"max_daily_loss_pct": 1.0}}) == []
+    assert unenforced_override_keys(None) == []
+
+
+def test_every_unenforced_key_is_dotted_and_sorted() -> None:
+    assert list(UNENFORCED_OVERRIDE_KEYS) == sorted(UNENFORCED_OVERRIDE_KEYS)
+    assert all(key.count(".") == 1 for key in UNENFORCED_OVERRIDE_KEYS)
 
 
 def test_rejects_risk_above_hard_ceiling() -> None:

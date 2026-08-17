@@ -110,16 +110,27 @@ class MT5Connector:
     def is_connected(self) -> bool:
         return self._connected
 
-    def connect(self) -> bool:
+    def connect(self, *, force: bool = False) -> bool:
         """Attach to (or launch) the MT5 terminal and log in.
 
         On a Windows VPS the named-pipe handshake often needs well over the
         package default of 60s, and a hung already-running ``terminal64`` can
         return ``-10003`` forever. We retry with credentials embedded in
         ``initialize`` so the package can spawn a fresh terminal in-process.
+
+        Idempotent by default: when the terminal link is already alive this is
+        a no-op. Every attempt below calls ``mt5.shutdown()`` first, so letting
+        repeated callers (broker adapters, panel/Telegram status probes) fall
+        through would tear down and re-initialize the IPC link underneath any
+        in-flight quote fetch or order. Pass ``force=True`` to rebuild the link
+        deliberately.
         """
         _require_windows()
         import MetaTrader5 as mt5  # noqa: N813 - matches upstream package name
+
+        if not force and self._connected and mt5.terminal_info() is not None:
+            logger.debug("MT5 already connected — reusing existing terminal link")
+            return True
 
         # MetaTrader5 docs: timeout is milliseconds. Some builds still print
         # "60 sec" in the error string even when a larger timeout is used.

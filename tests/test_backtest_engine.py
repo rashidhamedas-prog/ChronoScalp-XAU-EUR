@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
-from chronoscalp.backtest.engine import _to_utc_timestamp, run_backtest
+from chronoscalp.backtest.engine import LIVE_ONLY_GATES, _to_utc_timestamp, run_backtest
 from chronoscalp.config import Settings
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
@@ -66,6 +66,9 @@ def test_run_backtest_returns_summary_without_error():
     summary = result.summary()
     assert summary["symbol"] == "XAUUSD"
     assert "total_trades" in summary
+    # Backtest counts bound live counts from above; the summary must say so.
+    assert summary["live_only_gates_not_modelled"] == list(LIVE_ONLY_GATES)
+    assert "mistake_memory" in summary["live_only_gates_not_modelled"]
     assert result.starting_equity == float(settings.backtest.get("initial_balance", 10_000))
     # Document the known zero-trade cause for this fixture window.
     session = SessionFilter.from_config(settings.sessions)

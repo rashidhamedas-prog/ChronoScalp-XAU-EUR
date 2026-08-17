@@ -18,9 +18,44 @@ KNOWN_STRATEGIES = frozenset(
 KNOWN_BROKERS = frozenset({"paper", "mt5", "oanda"})
 KNOWN_HOURS = frozenset({"london_ny", "always_on_24h"})
 
+# Keys this module accepts and type-checks but which no runtime code reads yet.
+# Setting them looks like a safety control and silently does nothing, so the
+# live loop warns about every one that is present. Remove an entry here as soon
+# as the corresponding enforcement lands.
+UNENFORCED_OVERRIDE_KEYS: tuple[str, ...] = (
+    "execution.max_entry_slippage_r_fraction",
+    "execution.max_risk_overrun_pct",
+    "execution.single_instance",
+    "news_filter.fail_closed_when_stale",
+    "news_filter.max_calendar_age_minutes",
+    "risk.cooldown_after_loss_minutes",
+    "risk.max_monthly_loss_pct",
+    "risk.max_portfolio_heat_pct",
+    "risk.max_trades_per_symbol_day",
+    "risk.max_trades_portfolio_day",
+    "risk.max_weekly_loss_pct",
+)
+
 
 class RuntimeOverridesValidationError(ValueError):
     """Raised when runtime overrides violate schema or hard invariants."""
+
+
+def unenforced_override_keys(payload: dict[str, Any] | None) -> list[str]:
+    """Return the ``UNENFORCED_OVERRIDE_KEYS`` actually present in ``payload``.
+
+    Used at startup so an operator is told which "limits" in their overlay are
+    inert, instead of trusting caps that no code path checks.
+    """
+    if not isinstance(payload, dict):
+        return []
+    present: list[str] = []
+    for dotted in UNENFORCED_OVERRIDE_KEYS:
+        section, _, key = dotted.partition(".")
+        block = payload.get(section)
+        if isinstance(block, dict) and key in block:
+            present.append(dotted)
+    return present
 
 
 def _require_mapping(value: Any, path: str) -> dict[str, Any]:
