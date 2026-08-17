@@ -118,3 +118,21 @@ def test_mistake_memory_nested_validation() -> None:
 def test_mistake_memory_rejects_cooldown_below_one() -> None:
     with pytest.raises(RuntimeOverridesValidationError, match="cooldown_minutes"):
         validate_runtime_overrides({"risk": {"mistake_memory": {"cooldown_minutes": 0}}})
+
+
+def test_alerting_trade_open_copy_normalized() -> None:
+    out = validate_runtime_overrides(
+        {
+            "alerting": {
+                "trade_open_copy_enabled": True,
+                "trade_open_copy_chat_id": "taranomrashid",
+            }
+        }
+    )
+    assert out["alerting"]["trade_open_copy_enabled"] is True
+    assert out["alerting"]["trade_open_copy_chat_id"] == "@taranomrashid"
+
+
+def test_alerting_rejects_invalid_copy_chat() -> None:
+    with pytest.raises(RuntimeOverridesValidationError, match="trade_open_copy_chat_id"):
+        validate_runtime_overrides({"alerting": {"trade_open_copy_chat_id": "nope!"}})

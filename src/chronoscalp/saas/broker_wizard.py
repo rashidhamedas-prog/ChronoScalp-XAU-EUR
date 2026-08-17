@@ -370,6 +370,44 @@ def apply_mistake_memory_enabled(
     return bool(enabled)
 
 
+def apply_trade_open_copy_enabled(
+    enabled: bool,
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> bool:
+    """Persist ``alerting.trade_open_copy_enabled`` (extra Telegram on fill)."""
+    from chronoscalp.utils.telegram_chat import DEFAULT_TRADE_OPEN_COPY_CHAT
+
+    payload = _load_overrides(overrides_path)
+    alerting = dict(payload.get("alerting") or {})
+    alerting["trade_open_copy_enabled"] = bool(enabled)
+    if enabled and not str(alerting.get("trade_open_copy_chat_id") or "").strip():
+        alerting["trade_open_copy_chat_id"] = DEFAULT_TRADE_OPEN_COPY_CHAT
+    payload["alerting"] = alerting
+    _write_overrides(overrides_path, payload)
+    logger.info("Trade-open Telegram copy enabled={}", bool(enabled))
+    return bool(enabled)
+
+
+def apply_trade_open_copy_chat_id(
+    chat_ref: str,
+    *,
+    overrides_path: Path = OVERRIDES_PATH,
+) -> str:
+    """Persist ``alerting.trade_open_copy_chat_id`` and enable the copy."""
+    from chronoscalp.utils.telegram_chat import normalize_telegram_chat_ref
+
+    normalized = normalize_telegram_chat_ref(chat_ref)
+    payload = _load_overrides(overrides_path)
+    alerting = dict(payload.get("alerting") or {})
+    alerting["trade_open_copy_chat_id"] = normalized
+    alerting["trade_open_copy_enabled"] = True
+    payload["alerting"] = alerting
+    _write_overrides(overrides_path, payload)
+    logger.info("Trade-open Telegram copy chat_id={}", normalized)
+    return normalized
+
+
 def enable_live_confirm(*, overrides_env: Path | None = None) -> None:
     """Write CHRONOSCALP_CONFIRM_LIVE=yes into ``.env`` (explicit user action only)."""
     import os

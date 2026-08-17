@@ -9,7 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from chronoscalp.telegram.control_bot import TelegramControlBot
-from chronoscalp.telegram.keyboards import MAIN_KEYBOARD, SETTINGS_KEYBOARD
+from chronoscalp.telegram.keyboards import (
+    BTN_TRADE_NOTIFY,
+    BTN_TRADE_NOTIFY_OFF,
+    BTN_TRADE_NOTIFY_SET_ID,
+    MAIN_KEYBOARD,
+    SETTINGS_KEYBOARD,
+)
 
 
 def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNamespace:
@@ -75,7 +81,9 @@ def bot(tmp_path: Path) -> TelegramControlBot:
 def test_unauthorized_chat_rejected(bot: TelegramControlBot) -> None:
     bot.handle(99, "/status")
     bot.send.assert_called_once()
-    assert "Unauthorized" in bot.send.call_args.args[1]
+    text = bot.send.call_args.args[1]
+    assert "مجاز به کنترل" in text
+    assert "99" in text
 
 
 def test_help_sends_keyboard(bot: TelegramControlBot) -> None:
@@ -332,6 +340,7 @@ def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     assert "ساعات معامله" in labels
     assert "ریسک معامله" in labels
     assert "اتصال" in labels
+    assert "اعلان معامله" in labels
     assert "تأیید Live روشن" in labels
 
 
@@ -376,6 +385,78 @@ def test_mistake_memory_toggle_persists(
     assert called == [False, True]
     text_on = bot.send.call_args.args[1]
     assert "روشن" in text_on
+
+
+def test_trade_notify_menu_shows_default_username(bot: TelegramControlBot) -> None:
+    bot.handle(42, BTN_TRADE_NOTIFY)
+    text = bot.send.call_args.args[1]
+    assert "@taranomrashid" in text
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    labels = {b["text"] for row in kb["keyboard"] for b in row}
+    assert "تغییر آی‌دی اعلان" in labels
+    assert "ارسال تست اعلان" in labels
+    assert "اعلان معامله خاموش" in labels
+
+
+def test_trade_notify_toggle_persists(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[bool] = []
+
+    def _fake_apply(enabled: bool, **_kwargs: object) -> bool:
+        called.append(enabled)
+        return enabled
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_trade_open_copy_enabled",
+        _fake_apply,
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+
+    bot.handle(42, BTN_TRADE_NOTIFY_OFF)
+    assert called == [False]
+    text = bot.send.call_args.args[1]
+    assert "اعلان معامله" in text
+    assert "خاموش" in text
+
+
+def test_trade_notify_set_id_via_command(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[str] = []
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_trade_open_copy_chat_id",
+        lambda raw: saved.append(raw) or "@newtarget",
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+    monkeypatch.setattr(bot, "_try_trade_notify_ping", lambda _target: "✅ ping")
+
+    bot.handle(42, "/notify_id @newtarget")
+    assert saved == ["@newtarget"]
+    text = bot.send.call_args.args[1]
+    assert "@newtarget" in text
+    assert "ذخیره" in text
+
+
+def test_trade_notify_set_id_wizard(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: list[str] = []
+
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.apply_trade_open_copy_chat_id",
+        lambda raw: saved.append(raw) or "@taranomrashid",
+    )
+    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
+    monkeypatch.setattr(bot, "_try_trade_notify_ping", lambda _target: "✅ ping")
+
+    bot.handle(42, BTN_TRADE_NOTIFY_SET_ID)
+    assert bot._pending[42]["flow"] == "trade_notify_id"
+    bot.handle(42, "@taranomrashid")
+    assert saved == ["@taranomrashid"]
+    assert 42 not in bot._pending
+    assert "@taranomrashid" in bot.send.call_args.args[1]
 
 
 def test_open_positions_from_fresh_broker_snapshot(bot: TelegramControlBot, tmp_path: Path) -> None:

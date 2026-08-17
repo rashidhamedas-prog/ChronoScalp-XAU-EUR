@@ -247,6 +247,18 @@ backtest:
     BTCUSD: 25
     ETHUSD: 25
 
+alerting:
+  enabled: false
+  telegram_enabled: true
+  discord_enabled: true
+  timeout_seconds: 5
+  prefix: ChronoScalp
+  # Extra Telegram copy sent the moment a trade fills. Change the id from
+  # Telegram Settings -> اعلان معامله. Recipient must Start this bot first;
+  # private users usually need a numeric chat_id, not @username.
+  trade_open_copy_enabled: true
+  trade_open_copy_chat_id: "@taranomrashid"
+
 resilience:
   max_consecutive_errors: 5
   reconcile_interval_seconds: 60

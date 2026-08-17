@@ -791,7 +791,7 @@ class TradingBot:
                                 event_title = ""
                                 if straddle_res.session is not None:
                                     event_title = straddle_res.session.event_title
-                                self.alerts.notify(
+                                self.alerts.notify_trade_opened(
                                     "News straddle filled",
                                     (
                                         f"{symbol} {position.direction.value} "
@@ -799,7 +799,6 @@ class TradingBot:
                                         f"entry={position.entry_price:.5f} "
                                         f"event={event_title}"
                                     ),
-                                    AlertLevel.INFO,
                                 )
                         if (
                             self.news_straddle.is_scalp_paused(now, currency)
@@ -1106,14 +1105,13 @@ class TradingBot:
                 self.signal_deduper.prune_older_than()
                 self._persist_state()
                 self._last_trade_opened_at = now
-                self.alerts.notify(
+                self.alerts.notify_trade_opened(
                     "Trade opened",
                     (
                         f"{symbol} {signal.signal_type.value} vol={volume:.2f} "
                         f"entry={position.entry_price:.5f} sl={position.stop_loss:.5f} "
                         f"tp={position.take_profit:.5f} strategy={strategy_tag}"
                     ),
-                    AlertLevel.INFO,
                 )
 
             except StaleStopsError as exc:

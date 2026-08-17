@@ -130,3 +130,22 @@ def test_user_config_roundtrip(tmp_path: Path):
     reloaded = UserConfigStore(tmp_path / "user_config.json")
     assert reloaded.config.broker.provider == "oanda"
     assert reloaded.config.broker.onboarding_complete is True
+
+
+def test_apply_trade_open_copy_chat_and_toggle(tmp_path: Path) -> None:
+    from chronoscalp.saas.broker_wizard import (
+        apply_trade_open_copy_chat_id,
+        apply_trade_open_copy_enabled,
+    )
+
+    overrides = tmp_path / "runtime_overrides.yaml"
+    saved = apply_trade_open_copy_chat_id("@taranomrashid", overrides_path=overrides)
+    assert saved == "@taranomrashid"
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["alerting"]["trade_open_copy_chat_id"] == "@taranomrashid"
+    assert data["alerting"]["trade_open_copy_enabled"] is True
+
+    assert apply_trade_open_copy_enabled(False, overrides_path=overrides) is False
+    data2 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data2["alerting"]["trade_open_copy_enabled"] is False
+    assert data2["alerting"]["trade_open_copy_chat_id"] == "@taranomrashid"

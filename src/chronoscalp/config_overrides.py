@@ -312,6 +312,39 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
                     raise RuntimeOverridesValidationError(f"execution.{key} must be >= 0")
         out["execution"] = execution
 
+    alerting = _require_mapping(out.get("alerting"), "alerting")
+    if alerting:
+        for flag in (
+            "enabled",
+            "telegram_enabled",
+            "discord_enabled",
+            "trade_open_copy_enabled",
+        ):
+            if flag in alerting:
+                alerting[flag] = _as_bool(alerting[flag], f"alerting.{flag}")
+        if "timeout_seconds" in alerting:
+            alerting["timeout_seconds"] = _as_float(
+                alerting["timeout_seconds"], "alerting.timeout_seconds"
+            )
+            if alerting["timeout_seconds"] <= 0:
+                raise RuntimeOverridesValidationError("alerting.timeout_seconds must be > 0")
+        if "prefix" in alerting:
+            alerting["prefix"] = str(alerting["prefix"]).strip() or "ChronoScalp"
+        if "trade_open_copy_chat_id" in alerting:
+            from chronoscalp.utils.telegram_chat import normalize_telegram_chat_ref
+
+            raw_chat = str(alerting["trade_open_copy_chat_id"] or "").strip()
+            if raw_chat:
+                try:
+                    alerting["trade_open_copy_chat_id"] = normalize_telegram_chat_ref(raw_chat)
+                except ValueError as exc:
+                    raise RuntimeOverridesValidationError(
+                        f"alerting.trade_open_copy_chat_id is invalid: {exc}"
+                    ) from exc
+            else:
+                alerting["trade_open_copy_chat_id"] = ""
+        out["alerting"] = alerting
+
     # Explicitly refuse Telegram-disabling remote gates if someone adds them later.
     control = out.get("control")
     if isinstance(control, dict):

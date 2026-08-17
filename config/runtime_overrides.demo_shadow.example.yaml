@@ -113,4 +113,4 @@ execution:
 oanda:
   environment: practice
 
-alerting: {}
+alerting: {}  # trade-open copy defaults live in settings.yaml; Telegram Settings -> اعلان معامله writes trade_open_copy_* here

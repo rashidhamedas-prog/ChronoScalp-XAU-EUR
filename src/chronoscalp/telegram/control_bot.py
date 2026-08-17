@@ -30,6 +30,8 @@ from chronoscalp.saas.broker_wizard import (
     apply_enabled_strategies,
     apply_mistake_memory_enabled,
     apply_risk_preset,
+    apply_trade_open_copy_chat_id,
+    apply_trade_open_copy_enabled,
     apply_trading_hours_mode,
     disable_live_confirm,
     enable_live_confirm,
@@ -62,6 +64,7 @@ from chronoscalp.telegram.keyboards import (
     risk_keyboard,
     strategies_keyboard,
     symbols_keyboard,
+    trade_notify_keyboard,
 )
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -244,7 +247,7 @@ class TelegramControlBot:
             chat_id,
             "⚙️ تنظیمات — همه گزینه‌ها از منو (بدون تایپ).\n"
             f"ساعات فعلی: {self._trading_hours_label()}\n"
-            "نماد · استراتژی · ساعات · ریسک · اتصال · تأیید Live",
+            "نماد · استراتژی · ساعات · ریسک · اعلان معامله · اتصال · تأیید Live",
             reply_markup=SETTINGS_KEYBOARD,
         )
 
@@ -621,6 +624,8 @@ class TelegramControlBot:
         hours = self._trading_hours_label()
         daily_loss = "on" if self._daily_loss_enabled() else "off"
         mm = "on" if self._mistake_memory_enabled() else "off"
+        copy_on, copy_chat = self._trade_open_copy_state()
+        copy_status = "on" if copy_on else "off"
         text = (
             self._connection_summary()
             + "\n\nکنترل / Control\n"
@@ -630,7 +635,8 @@ class TelegramControlBot:
             + f"risk_effective={risk}%\n"
             + f"daily_loss_limit={daily_loss}"
             + f" ({float(self.settings.risk.get('max_daily_loss_pct', 3.0))}%)\n"
-            + f"mistake_memory={mm}"
+            + f"mistake_memory={mm}\n"
+            + f"trade_open_copy={copy_status} → {copy_chat}"
         )
         self.send(chat_id, text, reply_markup=SETTINGS_KEYBOARD)
 
@@ -1190,6 +1196,125 @@ class TelegramControlBot:
     def _cmd_mistake_memory_off(self, chat_id: int, _text: str = "") -> None:
         self._set_mistake_memory_enabled(chat_id, False)
 
+    def _trade_open_copy_state(self) -> tuple[bool, str]:
+        from chronoscalp.utils.telegram_chat import DEFAULT_TRADE_OPEN_COPY_CHAT
+
+        alerting = self.settings.alerting or {}
+        enabled = bool(alerting.get("trade_open_copy_enabled", True))
+        chat = str(alerting.get("trade_open_copy_chat_id") or "").strip()
+        return enabled, chat or DEFAULT_TRADE_OPEN_COPY_CHAT
+
+    def _trade_notify_keyboard(self) -> dict[str, Any]:
+        enabled, _chat = self._trade_open_copy_state()
+        return trade_notify_keyboard(enabled=enabled)
+
+    def _cmd_trade_notify_menu(self, chat_id: int, _text: str = "") -> None:
+        self._pending.pop(chat_id, None)
+        self._reload_settings()
+        enabled, target = self._trade_open_copy_state()
+        status = "روشن ✅" if enabled else "خاموش ⬜"
+        self.send(
+            chat_id,
+            "اعلان باز شدن معامله\n"
+            f"وضعیت: {status}\n"
+            f"گیرنده: {target}\n\n"
+            "به‌محض پر شدن معامله یک پیام به این آی‌دی می‌رود.\n"
+            "گیرنده باید همین ربات را Start کرده باشد.\n"
+            "برای کاربر خصوصی معمولاً chat_id عددی لازم است (نه @یوزرنیم).\n"
+            "تغییر آی‌دی را از دکمه بزنید یا /notify_id را بفرستید.",
+            reply_markup=self._trade_notify_keyboard(),
+        )
+
+    def _set_trade_open_copy_enabled(self, chat_id: int, enabled: bool) -> None:
+        apply_trade_open_copy_enabled(enabled)
+        self._reload_settings()
+        label = "روشن ✅" if enabled else "خاموش ⬜"
+        _, target = self._trade_open_copy_state()
+        self.send(
+            chat_id,
+            f"✅ اعلان معامله: {label}\nگیرنده: {target}\n"
+            "ربات معامله را Stop سپس Start کنید تا اعمال شود.",
+            reply_markup=self._trade_notify_keyboard(),
+        )
+
+    def _cmd_trade_notify_on(self, chat_id: int, _text: str = "") -> None:
+        self._set_trade_open_copy_enabled(chat_id, True)
+
+    def _cmd_trade_notify_off(self, chat_id: int, _text: str = "") -> None:
+        self._set_trade_open_copy_enabled(chat_id, False)
+
+    def _cmd_trade_notify_set_id(self, chat_id: int, text: str = "") -> None:
+        raw = (text or "").strip()
+        if raw.startswith("/"):
+            args = self._args(text)
+            if args:
+                self._save_trade_open_copy_chat(chat_id, " ".join(args))
+                return
+        self._pending[chat_id] = {"flow": "trade_notify_id", "step": "chat", "data": {}}
+        self.send(
+            chat_id,
+            "آی‌دی گیرنده اعلان را بفرستید:\n"
+            "• یوزرنیم مثل @taranomrashid\n"
+            "• یا عدد chat_id مثل 123456789\n\n"
+            "گیرنده باید ربات را Start کرده باشد.\n"
+            "لغو = انصراف",
+            reply_markup=self._trade_notify_keyboard(),
+        )
+
+    def _save_trade_open_copy_chat(self, chat_id: int, raw: str) -> None:
+        from chronoscalp.utils.telegram_chat import InvalidTelegramChatRef
+
+        try:
+            saved = apply_trade_open_copy_chat_id(raw)
+        except InvalidTelegramChatRef as exc:
+            self.send(
+                chat_id,
+                f"❌ {exc}",
+                reply_markup=self._trade_notify_keyboard(),
+            )
+            return
+        self._pending.pop(chat_id, None)
+        self._reload_settings()
+        ping_note = self._try_trade_notify_ping(saved)
+        self.send(
+            chat_id,
+            f"✅ گیرنده اعلان ذخیره شد: {saved}\n"
+            f"{ping_note}\n"
+            "ربات معامله را Stop سپس Start کنید تا اعلان زنده با آی‌دی جدید برود.",
+            reply_markup=self._trade_notify_keyboard(),
+        )
+
+    def _try_trade_notify_ping(self, target: str) -> str:
+        try:
+            self.send(
+                target,
+                "تست اعلان معامله ChronoScalp — اگر این را می‌بینید آی‌دی درست است.",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Trade-open copy test failed target={}: {}", target, exc)
+            return (
+                "⚠️ تست ارسال نشد. گیرنده باید ربات را Start کرده باشد؛ "
+                "برای کاربر خصوصی chat_id عددی بفرستید (دستور /whoami در همان چت)."
+            )
+        return "✅ پیام تست ارسال شد."
+
+    def _cmd_trade_notify_test(self, chat_id: int, _text: str = "") -> None:
+        self._reload_settings()
+        enabled, target = self._trade_open_copy_state()
+        if not enabled:
+            self.send(
+                chat_id,
+                "اعلان معامله خاموش است. اول «اعلان معامله روشن» را بزنید.",
+                reply_markup=self._trade_notify_keyboard(),
+            )
+            return
+        ping_note = self._try_trade_notify_ping(target)
+        self.send(
+            chat_id,
+            f"تست به {target}\n{ping_note}",
+            reply_markup=self._trade_notify_keyboard(),
+        )
+
     def _cmd_mistake_memory(self, chat_id: int, text: str = "") -> None:
         args = self._args(text)
         if not args:
@@ -1326,13 +1451,25 @@ class TelegramControlBot:
         if flow in ("symbols_menu", "strategies_menu"):
             return False
 
+        if flow == "trade_notify_id" and step == "chat":
+            if self._resolve_command(raw) is not None:
+                return False
+            self._save_trade_open_copy_chat(chat_id, raw)
+            return True
+
         return False
 
     def handle(self, chat_id: int, text: str) -> None:
         """Dispatch one inbound message."""
         logger.info("Telegram cmd from chat_id={} text={!r}", chat_id, (text or "")[:80])
         if not self._authorized(chat_id):
-            self.send(chat_id, "⛔ Unauthorized chat.")
+            self.send(
+                chat_id,
+                "⛔ این چت مجاز به کنترل ربات نیست.\n"
+                f"chat_id عددی شما: {chat_id}\n"
+                "اگر باید اعلان معامله بگیرید، این عدد را به اپراتور بدهید "
+                "و همین ربات را Start کرده باشید.",
+            )
             return
 
         self._bind_chat_if_needed(chat_id)
@@ -1409,6 +1546,11 @@ class TelegramControlBot:
             "mistake_memory_on": self._cmd_mistake_memory_on,
             "mistake_memory_off": self._cmd_mistake_memory_off,
             "mistake_memory": self._cmd_mistake_memory,
+            "trade_notify_menu": self._cmd_trade_notify_menu,
+            "trade_notify_on": self._cmd_trade_notify_on,
+            "trade_notify_off": self._cmd_trade_notify_off,
+            "trade_notify_set_id": self._cmd_trade_notify_set_id,
+            "trade_notify_test": self._cmd_trade_notify_test,
         }
         handlers[cmd](chat_id, text)
 

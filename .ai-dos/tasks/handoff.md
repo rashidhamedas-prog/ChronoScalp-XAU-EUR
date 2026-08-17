@@ -2,6 +2,20 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-17 Telegram trade-open copy to configurable chat (TASK-001)
+
+- Time (UTC): 2026-08-17T12:00:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: ai/TASK-001-strategy-audit-redesign
+- Objective: send a Telegram message as soon as a trade fills, default recipient `@taranomrashid`, with in-bot ID change.
+- Product changes:
+  - `alerting.trade_open_copy_enabled` / `trade_open_copy_chat_id` in `settings.yaml` (default `@taranomrashid`).
+  - Fill path (`place_order` + news-straddle fill) calls `AlertNotifier.notify_trade_opened` so the copy goes even when general alerting is off.
+  - Telegram Settings → اعلان معامله: on/off, change ID, test ping. Persist via `runtime_overrides.yaml`.
+  - Unauthorized chats now see their numeric `chat_id` so a private recipient can Start the bot and pass the id to the operator.
+- Invariants: 1%/3% intact; `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- Exact next action: restart Telegram control bot and trading bot so the menu and copy path load; recipient must Start the bot.
+
 ## 2026-08-14 Telegram Stop did not stop trading process (TASK-001)
 
 - Time (UTC): 2026-08-14T09:35:00Z

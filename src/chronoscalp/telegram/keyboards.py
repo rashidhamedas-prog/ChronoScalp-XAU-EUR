@@ -58,6 +58,12 @@ BTN_DAILY_LOSS_UNLOCK = "باز کردن قفل امروز"
 BTN_MISTAKE_MEM_ON = "یادگیری از اشتباه روشن"
 BTN_MISTAKE_MEM_OFF = "یادگیری از اشتباه خاموش"
 
+BTN_TRADE_NOTIFY = "اعلان معامله"
+BTN_TRADE_NOTIFY_ON = "اعلان معامله روشن"
+BTN_TRADE_NOTIFY_OFF = "اعلان معامله خاموش"
+BTN_TRADE_NOTIFY_SET_ID = "تغییر آی‌دی اعلان"
+BTN_TRADE_NOTIFY_TEST = "ارسال تست اعلان"
+
 BTN_SYM_ALL = "همه نمادها ✓"
 BTN_SYM_NONE = "پاک کردن نمادها"
 BTN_SYM_SAVE = "ذخیره نمادها"
@@ -170,6 +176,20 @@ def risk_keyboard(
     }
 
 
+def trade_notify_keyboard(*, enabled: bool = True) -> dict[str, Any]:
+    toggle = [{"text": BTN_TRADE_NOTIFY_OFF}] if enabled else [{"text": BTN_TRADE_NOTIFY_ON}]
+    return {
+        "keyboard": [
+            toggle,
+            [{"text": BTN_TRADE_NOTIFY_SET_ID}, {"text": BTN_TRADE_NOTIFY_TEST}],
+            [{"text": BTN_SUMMARY}, {"text": BTN_SETTINGS}],
+            [{"text": BTN_MENU}],
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
 MAIN_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_STATUS}, {"text": BTN_PNL}, {"text": BTN_OPEN}],
@@ -187,6 +207,7 @@ SETTINGS_KEYBOARD: dict[str, Any] = {
         [{"text": BTN_CONN}, {"text": BTN_CONTROL}],
         [{"text": BTN_SYMBOLS}, {"text": BTN_STRATEGIES}],
         [{"text": BTN_HOURS_MENU}, {"text": BTN_RISK_MENU}],
+        [{"text": BTN_TRADE_NOTIFY}],
         [{"text": BTN_LIVE_ON}, {"text": BTN_LIVE_OFF}],
         [{"text": BTN_MENU}],
     ],
@@ -242,6 +263,7 @@ HELP_TEXT = (
     "• ریسک → ۰٫۵٪ / ۱٪ / ۱٫۵٪ (سقف امن ۱٪)\n"
     "• قفل ضرر روزانه → روشن/خاموش یا باز کردن قفل امروز\n"
     "• یادگیری از اشتباه → روشن/خاموش (بدون تغییر سقف ۱٪/۳٪)\n"
+    "• اعلان معامله → پیام فوری هنگام باز شدن معامله + تغییر آی‌دی گیرنده\n"
     "• اتصال → بروکر / حالت Paper|Live / تست / تأیید Live\n\n"
     "رمز MT5/OANDA فقط در ویزارد اتصال تایپ می‌شود (اجباری).\n"
     "نکته: Live بدون تأیید Live روشن استارت نمی‌شود.\n"
@@ -356,6 +378,20 @@ ALIASES: dict[str, str] = {
     BTN_MISTAKE_MEM_OFF: "mistake_memory_off",
     "یادگیری از اشتباه خاموش": "mistake_memory_off",
     "/mistake_memory": "mistake_memory",
+    BTN_TRADE_NOTIFY: "trade_notify_menu",
+    "اعلان معامله": "trade_notify_menu",
+    "/trade_notify": "trade_notify_menu",
+    "/notify": "trade_notify_menu",
+    BTN_TRADE_NOTIFY_ON: "trade_notify_on",
+    "اعلان معامله روشن": "trade_notify_on",
+    BTN_TRADE_NOTIFY_OFF: "trade_notify_off",
+    "اعلان معامله خاموش": "trade_notify_off",
+    BTN_TRADE_NOTIFY_SET_ID: "trade_notify_set_id",
+    "تغییر آی‌دی اعلان": "trade_notify_set_id",
+    "/notify_id": "trade_notify_set_id",
+    BTN_TRADE_NOTIFY_TEST: "trade_notify_test",
+    "ارسال تست اعلان": "trade_notify_test",
+    "/notify_test": "trade_notify_test",
     "/provider": "provider",
     "/mode": "mode",
     "/set_mt5": "set_mt5",
