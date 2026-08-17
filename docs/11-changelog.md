@@ -18,6 +18,9 @@
   `live_only_gates_not_modelled` در خروجی هر بک‌تست، به‌همراه هشدار پایان اجرا.
 - تست‌های رگرسیون برای چرن اتصال MT5
   (`tests/test_mt5_connect_idempotent.py`).
+- `scripts/analyze_spread_guard.py`: گزارش قیف ورود از روی لاگ‌های روزانه —
+  سهم هر دلیل رد شدن به‌ازای هر نماد، و توزیع اسپرد مشاهده‌شده هنگام رد شدن
+  در برابر سقف گارد. فقط گزارش می‌دهد و هیچ تنظیمی را تغییر نمی‌دهد.
 - زیرساخت AI-DOS: `.ai-dos/`، `ai-dos.yaml`، `prompts/`، `tasks/`،
   `validate_ai_dos.py` و قواعد `.cursor/rules/0*-*.mdc`.
 
@@ -54,17 +57,25 @@
 
 ### دیپلوی
 
-- VPS ویندوزی `45.90.98.99` (پورت SSH ۲۲، نه ۲۲۹۹) از `ca045c9` به `756df50`
-  آمد و ربات با کتاب پوزیشن خالی ری‌استارت شد. overlay قبل از تغییر در
-  `config/runtime_overrides.pre-deploy.bak.yaml` بکاپ گرفته شد.
+- VPS ویندوزی `45.90.98.99` (پورت SSH ۲۲، نه ۲۲۹۹؛ کاربر `Administrator`) از
+  `ca045c9` به `9609c1f` آمد و ربات سه بار با کتاب پوزیشن خالی ری‌استارت شد.
+  هر overlay قبل از تغییر بکاپ گرفته شد
+  (`runtime_overrides.pre-deploy.bak.yaml` و
+  `runtime_overrides.pre-symbols.bak.yaml`).
+- overlay سرور با تأیید مالک پروژه: `symbols` به `[XAUUSD, EURUSD]`،
+  `strategy.delta.allowed_symbols` به `[XAUUSD, EURUSD]`، و حذف `ultra_scalp`
+  از `enabled_strategies` به‌همراه `use_ultra_scalp: false` و حذف بلوک
+  تنظیمات آن. تأیید در لاگ استارت:
+  `strategies=[liquidity_volume,news_straddle,delta] symbols=[XAUUSD,EURUSD]`.
 
 ### هنوز باز
 
-- BUG-005: تصمیم درباره‌ی `BTCUSD` (بدون داده)، `EURUSD` و `USDJPY` (بدون
-  استراتژی مجاز). این تصمیم مالک پروژه است، نه شل‌کردن گاردها.
+- BUG-006: تصمیم درباره‌ی گارد اسپرد طلا (۲۴٪ از ردها) و `three_strikes`
+  (۱۸٪ از ردها، با توقف ۱۲ ساعته). هر دو کنترل ریسک عمدی‌اند و تغییرشان
+  تصمیم مالک پروژه است.
+- برای تصمیم دقیق درباره‌ی ضریب گارد اسپرد، نمونه‌برداری از *همه‌ی* اسپردها
+  لازم است؛ لاگ فعلی فقط ردها را ثبت می‌کند.
 - تصمیم درباره‌ی یازده کلید بی‌اثر: پیاده‌سازی یا حذف از schema.
-- `ultra_scalp` هنوز در `enabled_strategies` روی VPS هست. الان بی‌اثر است چون
-  برای هر چهار نماد در `settings.yaml` غیرفعال شده، ولی هندسه‌ی overlay آن
-  (`atr_stop_multiple: 1.0` با `atr_target_multiple: 1.0`) با کف R:R ۱.۵
-  ناسازگار است.
+- `risk.max_concurrent_positions: 8` با `independent_symbol_entries: true` و
+  گارد همبستگی خاموش، در حالی که فقط دو نماد فعال است — ارزش بازبینی دارد.
 - سایر قالب‌های `docs/0*.md` هنوز TODO هستند و باید توسط مالک پروژه پر شوند.
