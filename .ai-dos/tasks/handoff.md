@@ -2,6 +2,20 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-17 deploy trade-open copy to VPS (TASK-001)
+
+- Time (UTC): 2026-08-17T12:32:00Z
+- Task / owner / role: TASK-001 / cursor:grok-4.5 / implementer
+- Branch: main @ `86bc291`
+- Objective: apply Telegram trade-open copy to the running VPS program and control bot.
+- Verified:
+  - `origin/main` already had `86bc291`; no extra merge needed.
+  - `scripts/deploy_vps_from_local.ps1` → `45.90.98.99`: VPS reset to `86bc291`, panel/API/Telegram restarted, `TG_KEYBOARD_RESTORED` to chat `1008770451`.
+  - First trading restart left a leftover `run_live` PID; force restart started live PID `4644` (`START_OK=True`). Telegram PIDs running; VPS HEAD=`86bc291`.
+  - `89.23.103.82` SSH port closed from this workstation; deploy target is `45.90.98.99`.
+- Invariants: 1%/3% intact; `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- Exact next action: operator opens Telegram Settings → اعلان معامله; recipient must Start the bot (numeric chat_id if @username fails).
+
 ## 2026-08-17 Telegram trade-open copy to configurable chat (TASK-001)
 
 - Time (UTC): 2026-08-17T12:00:00Z
