@@ -1,0 +1,8 @@
+---
+description: Project rules
+alwaysApply: true
+---
+
+- Read project overview, architecture, and business rules.
+- Treat TODO as unknown information.
+- Do not invent business requirements.

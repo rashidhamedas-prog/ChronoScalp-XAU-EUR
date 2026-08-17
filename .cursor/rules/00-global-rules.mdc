@@ -1,0 +1,14 @@
+---
+description: Global AI development rules
+alwaysApply: true
+---
+
+- Read AGENTS.md before changes.
+- Work only within active task scope.
+- Prefer the smallest safe complete change.
+- Do not perform unrelated refactoring.
+- Never expose or commit secrets.
+- Require a plan before coding.
+- Add regression tests for bug fixes.
+- Report actual validation results only.
+- Update handoff and changelog.
