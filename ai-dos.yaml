@@ -1,0 +1,29 @@
+version: "1.0"
+system:
+  name: "AI Development Operating System"
+  portable: true
+agent_policy:
+  one_task_per_chat: true
+  require_plan_before_code: true
+  require_acceptance_criteria: true
+  require_handoff: true
+  prefer_smallest_safe_change: true
+  forbid_unrelated_refactors: true
+safety:
+  require_confirmation_for:
+    - destructive_database_changes
+    - force_push
+    - deleting_core_files
+    - changing_authentication
+    - production_deployment
+quality_gates:
+  required_when_available:
+    - typecheck
+    - lint
+    - unit_tests
+    - integration_tests
+    - build
+git:
+  branch_per_task: true
+  conventional_commits: true
+  review_diff_before_commit: true

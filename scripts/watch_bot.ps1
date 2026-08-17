@@ -8,6 +8,7 @@ $Script = Join-Path $Root 'scripts\run_live.py'
 $LogDir = Join-Path $Root 'logs'
 $WatchLog = Join-Path $LogDir 'bot_watchdog.log'
 $PidFile = Join-Path $Root 'data\user\bot.pid'
+$StopMarker = Join-Path $Root 'data\user\bot.stopped'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $PidFile) | Out-Null
@@ -15,6 +16,11 @@ New-Item -ItemType Directory -Force -Path (Split-Path $PidFile) | Out-Null
 function Write-Watch([string]$msg) {
   $line = '{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
   Add-Content -Path $WatchLog -Value $line -Encoding utf8
+}
+
+if (Test-Path $StopMarker) {
+  Write-Watch 'operator stop marker present — not starting'
+  exit 0
 }
 
 if (-not (Test-Path $Py)) {

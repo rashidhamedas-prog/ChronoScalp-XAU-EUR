@@ -1,6 +1,15 @@
 # Committed Demo/Shadow example — copy to runtime_overrides.yaml on the host.
 # See also the live file (gitignored): config/runtime_overrides.yaml
 # Does NOT replace config/settings.yaml.
+#
+# Keys marked "INERT" below are schema-validated but no code path reads them
+# yet, so they are documentation of intent, not enforced limits. The live loop
+# logs a warning listing every INERT key it finds at startup; the authoritative
+# list is chronoscalp.config_overrides.UNENFORCED_OVERRIDE_KEYS.
+#
+# Deployed overlays drift from this file. Diff the host copy against it before
+# assuming a strategy is running: an overlay that omits `delta` from
+# enabled_strategies silently disables it no matter what settings.yaml says.
 
 symbols:
   - XAUUSD_o
@@ -49,8 +58,8 @@ news_filter:
   high_impact_only: true
   blackout_minutes_before: 30
   blackout_minutes_after: 30
-  fail_closed_when_stale: true
-  max_calendar_age_minutes: 60
+  fail_closed_when_stale: true # INERT
+  max_calendar_age_minutes: 60 # INERT
 
 risk:
   max_risk_per_trade_pct: 1.0
@@ -61,26 +70,28 @@ risk:
     - 1.0
     - 1.5
   min_reward_risk_ratio: 1.5
-  max_portfolio_heat_pct: 1.0
+  max_portfolio_heat_pct: 1.0 # INERT
+  # 1 while a single strategy is under observation. Raise to the active symbol
+  # count once Delta's shadow evidence is in, or pairs block each other.
   max_concurrent_positions: 1
   independent_symbol_entries: false
   max_daily_loss_pct: 1.0
-  max_weekly_loss_pct: 3.0
-  max_monthly_loss_pct: 6.0
+  max_weekly_loss_pct: 3.0 # INERT
+  max_monthly_loss_pct: 6.0 # INERT
   daily_loss_limit_enabled: true
-  max_trades_per_symbol_day: 3
-  max_trades_portfolio_day: 3
-  cooldown_after_loss_minutes: 60
+  max_trades_per_symbol_day: 3 # INERT
+  max_trades_portfolio_day: 3 # INERT
+  cooldown_after_loss_minutes: 60 # INERT
   three_strikes:
     enabled: true
     max_losses: 2
     pause_hours: 24
-    persistent: true
+    persistent: true # INERT
   correlation:
     enabled: true
     period: 60
     max_abs_corr: 0.75
-    use_returns: true
+    use_returns: true # INERT
   partial_tp:
     enabled: false
   chandelier:
@@ -94,9 +105,9 @@ execution:
   broker: paper
   data_source: mt5
   trade_on_bar_close_only: true
-  single_instance: true
-  max_entry_slippage_r_fraction: 0.10
-  max_risk_overrun_pct: 0.0
+  single_instance: true # INERT
+  max_entry_slippage_r_fraction: 0.10 # INERT
+  max_risk_overrun_pct: 0.0 # INERT
   state_dir: data/state
 
 oanda:

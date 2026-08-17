@@ -1,0 +1,11 @@
+---
+description: Code quality rules
+alwaysApply: true
+---
+
+- Follow existing conventions.
+- Avoid duplicate logic.
+- Keep functions focused.
+- Handle errors explicitly.
+- Preserve type safety.
+- Avoid unnecessary dependencies.

@@ -19,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from chronoscalp.config import Settings, get_settings
+from chronoscalp.config_overrides import unenforced_override_keys
 from chronoscalp.data.spread_sampler import SpreadSampler
 from chronoscalp.execution.mt5_broker import MT5Broker
 from chronoscalp.execution.mt5_utils import StaleStopsError
@@ -299,6 +300,7 @@ class TradingBot:
             poll_seconds,
             self.trade_on_bar_close,
         )
+        self._log_entry_gate_profile()
         if self.alerts.is_configured:
             self.alerts.notify(
                 "Bot started",
@@ -440,6 +442,65 @@ class TradingBot:
         if elapsed >= self._reconcile_interval:
             self._reconcile_state_with_broker(alert_on_change=True)
             self._last_reconcile_at = now
+
+    def _log_entry_gate_profile(self) -> None:
+        """Log every gate that can suppress an entry, plus inert override keys.
+
+        Low live trade counts are usually a configuration result, not a bug, so
+        the effective profile belongs in the log next to the startup banner
+        rather than only in the 5-minute skip heartbeat.
+        """
+        strategy_cfg = self.settings.strategy
+        use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(strategy_cfg)
+        active = [
+            name
+            for name, on in (
+                ("smc_confluence", use_smc),
+                ("liquidity_volume", use_liq),
+                ("ultra_scalp", use_scalp),
+                ("news_straddle", use_news),
+                ("delta", use_delta),
+            )
+            if on
+        ]
+        sessions_cfg = self.settings.sessions
+        risk_cfg = self.settings.risk
+        logger.info(
+            "Entry gate profile: strategies=[{}] symbols=[{}] max_concurrent={} "
+            "sessions={} trade_outside={} news_filter={} risk_pct={} min_rr={}",
+            ",".join(active) or "none",
+            ",".join(self.settings.symbols),
+            self.max_concurrent,
+            sessions_cfg.get("trading_hours_mode", "london_ny"),
+            sessions_cfg.get("trade_outside_sessions", False),
+            (self.settings.news_filter or {}).get("enabled", True),
+            risk_cfg.get("active_risk_per_trade_pct", risk_cfg.get("max_risk_per_trade_pct")),
+            risk_cfg.get("min_reward_risk_ratio"),
+        )
+        logger.info(
+            "Entry guards: three_strikes={} mistake_memory={} correlation={} "
+            "volatility={} spread_ma={} daily_loss_lock={}",
+            self.three_strikes_enabled,
+            self.mistake_memory.config.enabled,
+            bool(self.corr_cfg.get("enabled", False)),
+            bool(self.vol_cfg.get("enabled", True)),
+            self.spread_ma_enabled,
+            self.daily_loss_limit_enabled,
+        )
+        if not active:
+            logger.warning(
+                "No entry strategy is enabled — the bot will never open a position. "
+                "Enable one via Telegram Settings -> Strategies or "
+                "strategy.enabled_strategies in config."
+            )
+        inert = unenforced_override_keys(getattr(self.settings, "runtime_overrides", {}))
+        if inert:
+            logger.warning(
+                "Runtime overrides set {} key(s) that no code path enforces yet: {}. "
+                "Do not rely on them as risk controls.",
+                len(inert),
+                ", ".join(inert),
+            )
 
     def _note_skip(self, reason: str) -> None:
         self._skip_counts[reason] = self._skip_counts.get(reason, 0) + 1

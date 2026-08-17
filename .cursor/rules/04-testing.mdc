@@ -1,0 +1,10 @@
+---
+description: Testing rules
+alwaysApply: true
+---
+
+- Test observable behavior.
+- Add unit tests for business logic.
+- Add integration tests for module interactions.
+- Add regression tests for reproducible bugs.
+- Never claim unexecuted tests passed.

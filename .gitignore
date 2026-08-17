@@ -81,6 +81,15 @@ Thumbs.db
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+# pytest --basetemp scratch dirs
+.tmp_*/
+
+# AI-DOS local artifacts
+.ai-dos/backups/
+
+# Local-only proxy/SSH scratch helpers (may embed host details)
+scripts/_socks5_*.py
+scripts/_vps_finalize_main.ps1
 
 # ML artifacts
 *.pkl

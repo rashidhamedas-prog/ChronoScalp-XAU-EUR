@@ -23,7 +23,6 @@ from chronoscalp.orchestration.trade_journal import (
     load_journal_snapshot,
     write_daily_reset_marker,
 )
-from chronoscalp.saas import bot_is_running, start_bot, stop_bot
 from chronoscalp.saas.broker_wizard import (
     KNOWN_STRATEGIES,
     apply_active_symbols,
@@ -34,10 +33,10 @@ from chronoscalp.saas.broker_wizard import (
     disable_live_confirm,
     enable_live_confirm,
 )
+from chronoscalp.saas.process_control import PID_FILE, bot_is_running, start_bot, stop_bot
 from chronoscalp.saas.user_config import UserConfigStore
 
 ROOT = Path(__file__).resolve().parents[3]
-PID_FILE = Path("data/user/bot.pid")
 STATE_DIR = Path("data/state")
 load_dotenv(ROOT / ".env")
 
@@ -168,9 +167,7 @@ def create_app() -> FastAPI:
             "strategies": settings.strategy.get("enabled_strategies"),
             "known_strategies": list(KNOWN_STRATEGIES),
             "trading_hours_mode": (settings.sessions or {}).get("trading_hours_mode"),
-            "daily_loss_limit_enabled": bool(
-                settings.risk.get("daily_loss_limit_enabled", True)
-            ),
+            "daily_loss_limit_enabled": bool(settings.risk.get("daily_loss_limit_enabled", True)),
             "max_daily_loss_pct": float(settings.risk.get("max_daily_loss_pct", 3.0)),
             "risk_per_trade_pct": float(settings.risk.get("risk_per_trade_pct", 1.0)),
             "live_confirmed": settings.secrets.live_trading_confirmed,

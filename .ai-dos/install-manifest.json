@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "ai_dos_version": "2.0.0",
+  "installed_at": "2026-08-08T13:12:48.086115+00:00",
+  "files": {
+    ".ai-dos/ai-dos.yaml": {
+      "sha256": "6a7408de900a6516093f42e0caa35df2d6c1cab10c125a9f84c5dcd5211da635",
+      "managed": true
+    },
+    ".ai-dos/project/architecture.md": {
+      "sha256": "6daa4bf3e3bdda1789078dc55b2e5766997296da79809ce5e9675bd02342bac1",
+      "managed": true
+    },
+    ".ai-dos/project/overview.md": {
+      "sha256": "b89ac9536385ea6e8fbdbbad880a1dc207ae29ccd900d2a24d92ccb6c3b73f50",
+      "managed": true
+    },
+    ".ai-dos/project/status.md": {
+      "sha256": "856849d1a14d217a506b4a5dac2dd020a84d1a784bb397d2d642d0d59b4fd4c6",
+      "managed": true
+    },
+    ".ai-dos/prompts/start-codex.md": {
+      "sha256": "b7238060f7f524b9e8946fbf8b7d806cbbdce8213f079725bf2e9d1760eefb06",
+      "managed": true
+    },
+    ".ai-dos/prompts/start-cursor.md": {
+      "sha256": "b8268a6b526348618c8e4b8f195cfd4f3ca84557c4cc1b8a81df327d739592dc",
+      "managed": true
+    },
+    ".ai-dos/QUALITY-GATES.md": {
+      "sha256": "10eb4d0afcf34c5088c9a9d25fba54269d0f2d844a1ec9b4727623895cc128ca",
+      "managed": true
+    },
+    ".ai-dos/SECURITY-REVIEW.md": {
+      "sha256": "792e83ea9890979696d6a47eb64711ba6dfdb18ad221d7a199fe7e19c9bb982a",
+      "managed": true
+    },
+    ".ai-dos/tasks/active.yaml": {
+      "sha256": "a479bfa00c9b79e35c8706f8234b646abb9acdefa0e76b07d1207ac43c0dcbe6",
+      "managed": true
+    },
+    ".ai-dos/tasks/handoff.md": {
+      "sha256": "71844190738306d8a773d87bb38303788d556348522a107fe47d1eaa3f078561",
+      "managed": true
+    },
+    ".cursor/rules/ai-dos.mdc": {
+      "sha256": "520e76164bcd70527ba26a5a829333b240987457e01fc32a6ccb4d75a71c048e",
+      "managed": true
+    },
+    "AGENTS.md": {
+      "sha256": "748d7c53103017ad0a4aabdf577bab057abda32d48ec768644ebfdd7e6cc4e36",
+      "managed": true
+    }
+  }
+}

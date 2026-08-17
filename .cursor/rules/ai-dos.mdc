@@ -1,0 +1,11 @@
+---
+description: AI-DOS coordination, ownership, and quality contract
+alwaysApply: true
+---
+
+Read and obey the root `AGENTS.md`. Before editing, read `.ai-dos/ai-dos.yaml`, `.ai-dos/project/status.md`, `.ai-dos/tasks/active.yaml`, and `.ai-dos/tasks/handoff.md`.
+
+You may write only when an active task names you as owner and explicitly claims each target file. Never edit a file claimed by another task. Use the task's branch and worktree. If a claim conflicts, is stale, or a required file is unclaimed, stop and request an ownership update.
+
+Keep changes scoped, preserve unrelated user work, run configured quality gates, perform risk-triggered security review, and record a complete handoff. Never mark work done on unverified assumptions or hidden test failures.
+

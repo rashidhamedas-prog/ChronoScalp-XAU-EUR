@@ -1,0 +1,53 @@
+schema_version: 1
+ai_dos_version: "2.0.0"
+project:
+  name: "CHANGE_ME"
+  type: "unknown"
+  primary_branch: "main"
+roles:
+  high_risk_requires_independent_reviewer: true
+  high_risk_requires_security_review: true
+concurrency:
+  task_registry: ".ai-dos/tasks/active.yaml"
+  handoff_log: ".ai-dos/tasks/handoff.md"
+  one_writer_per_file: true
+  stale_claim_hours: 24
+git:
+  branch_pattern: "^(ai|feat|fix|chore)/[A-Za-z0-9._-]+$"
+  worktree_per_task: true
+  direct_commit_to_primary: false
+context:
+  soft_limit_percent: 65
+  checkpoint_percent: 75
+  new_session_percent: 85
+  load_order:
+    - "AGENTS.md"
+    - ".ai-dos/project/status.md"
+    - ".ai-dos/tasks/active.yaml"
+    - ".ai-dos/tasks/handoff.md"
+quality_gates:
+  required:
+    - "format"
+    - "lint"
+    - "typecheck"
+    - "unit_test"
+    - "integration_test_when_affected"
+    - "build"
+    - "review"
+  commands:
+    format: "CONFIGURE_ME"
+    lint: "CONFIGURE_ME"
+    typecheck: "CONFIGURE_ME"
+    unit_test: "CONFIGURE_ME"
+    integration_test: "CONFIGURE_ME"
+    build: "CONFIGURE_ME"
+security:
+  review_triggers:
+    - "authentication_or_authorization"
+    - "secrets_or_cryptography"
+    - "payments_or_personal_data"
+    - "network_or_file_input"
+    - "dependency_or_ci_change"
+    - "database_migration"
+  secret_scan_command: "CONFIGURE_ME"
+

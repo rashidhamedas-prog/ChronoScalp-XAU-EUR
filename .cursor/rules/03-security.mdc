@@ -1,0 +1,11 @@
+---
+description: Security rules
+alwaysApply: true
+---
+
+- Never hard-code credentials or tokens.
+- Enforce authorization on the server.
+- Use parameterized queries.
+- Validate uploads.
+- Prevent path traversal.
+- Apply least privilege.

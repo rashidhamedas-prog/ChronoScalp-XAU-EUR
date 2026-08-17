@@ -9,3 +9,4 @@
 - Next milestone: denser XAUUSD OOS; EURUSD redesign; independent review before live.
 - Invariants: 1%/3% intact; `CHRONOSCALP_CONFIRM_LIVE` unchanged.
 - Telegram: Delta labeled `دلتا (طلا)`; Mistake Memory under Settings → Risk.
+- Telegram Stop/Start: process stop now kills all `run_live.py` trees (not only pid-file PID); `/stop` and «استاپ» stop the process; «توقف ورود» remains kill switch. Watchdog respects `data/user/bot.stopped`.

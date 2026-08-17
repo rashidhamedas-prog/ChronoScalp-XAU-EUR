@@ -77,6 +77,8 @@ class Settings:
 
     def __init__(self) -> None:
         self.raw: dict[str, Any] = _load_yaml("settings.yaml")
+        # Kept after merging so startup can report what the overlay changed.
+        self.runtime_overrides: dict[str, Any] = {}
         # Optional runtime overrides written by the user panel (broker mode, etc.)
         overrides_path = CONFIG_DIR / "runtime_overrides.yaml"
         if overrides_path.exists():
@@ -84,6 +86,7 @@ class Settings:
                 overlay = yaml.safe_load(f) or {}
             if isinstance(overlay, dict):
                 overlay = validate_runtime_overrides(overlay)
+                self.runtime_overrides = overlay
                 self.raw = _deep_merge(self.raw, overlay)
         self.symbols_raw: dict[str, Any] = _load_yaml("symbols.yaml")
         self.secrets = Secrets()
