@@ -197,6 +197,7 @@ KNOWN_STRATEGIES: tuple[str, ...] = (
     "liquidity_volume",
     "ultra_scalp",
     "news_straddle",
+    "xau_vwap_pullback",
 )
 
 
@@ -277,8 +278,14 @@ def apply_enabled_strategies(
     strategies: list[str],
     *,
     overrides_path: Path = OVERRIDES_PATH,
+    shadow: list[str] | None = None,
 ) -> list[str]:
-    """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only."""
+    """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only.
+
+    ``shadow`` lists strategies that evaluate but must not place orders
+    (``shadow_only: true``). Shadow ids are also written to
+    ``enabled_strategies`` so the engine actually runs.
+    """
     known = set(KNOWN_STRATEGIES)
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -287,6 +294,14 @@ def apply_enabled_strategies(
         if name in known and name not in seen:
             seen.add(name)
             cleaned.append(name)
+    shadow_set: set[str] = set()
+    for raw in shadow or []:
+        name = str(raw).strip().lower()
+        if name in known:
+            shadow_set.add(name)
+            if name not in seen:
+                seen.add(name)
+                cleaned.append(name)
 
     payload = _load_overrides(overrides_path)
     strategy = dict(payload.get("strategy") or {})
@@ -296,6 +311,15 @@ def apply_enabled_strategies(
     strategy["use_ultra_scalp"] = "ultra_scalp" in seen
     strategy["use_news_straddle"] = "news_straddle" in seen
     strategy["use_delta"] = "delta" in seen
+    strategy["use_xau_vwap_pullback"] = "xau_vwap_pullback" in seen
+    xau = dict(strategy.get("xau_vwap_pullback") or {})
+    if "xau_vwap_pullback" in seen:
+        xau["enabled"] = True
+        xau["shadow_only"] = "xau_vwap_pullback" in shadow_set
+    else:
+        xau["enabled"] = False
+        xau["shadow_only"] = True
+    strategy["xau_vwap_pullback"] = xau
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)
     logger.info("Enabled strategies saved: {}", ",".join(cleaned) or "(none)")

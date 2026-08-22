@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.strategy.multi_timeframe import (
@@ -132,7 +131,7 @@ def test_both_strategies_or_allows_smc_without_vol():
 def test_resolve_enabled_strategies_from_list():
     from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-    smc, liq, scalp, news, delta = resolve_enabled_strategies(
+    enabled = resolve_enabled_strategies(
         {
             "enabled_strategies": [
                 "smc_confluence",
@@ -142,11 +141,16 @@ def test_resolve_enabled_strategies_from_list():
             ]
         }
     )
-    assert smc and liq and scalp and not news and delta
-    smc2, liq2, scalp2, news2, delta2 = resolve_enabled_strategies({"enabled_strategies": []})
-    assert not smc2 and not liq2 and not scalp2 and not news2 and not delta2
-    *_, delta3 = resolve_enabled_strategies({"use_delta": True, "use_smc_confluence": False})
-    assert delta3 is True
+    assert enabled.smc and enabled.liquidity and enabled.ultra_scalp
+    assert not enabled.news_straddle and enabled.delta
+    assert not enabled.xau_vwap_pullback
+    empty = resolve_enabled_strategies({"enabled_strategies": []})
+    assert not empty.smc and not empty.liquidity and not empty.ultra_scalp
+    assert not empty.news_straddle and not empty.delta
+    flags = resolve_enabled_strategies({"use_delta": True, "use_smc_confluence": False})
+    assert flags.delta is True
+    xau = resolve_enabled_strategies({"enabled_strategies": ["xau_vwap_pullback"]})
+    assert xau.xau_vwap_pullback and not xau.delta
 
 
 def test_ultra_scalp_impulse_buy():
@@ -442,7 +446,7 @@ def test_ultra_scalp_v3_reports_uneconomic_when_caps_hit():
 
 
 def test_strategies_run_independently_not_as_fallback(monkeypatch):
-    """Scalp and institutional evaluate in parallel; best R:R wins (no chain)."""
+    """Scalp and institutional evaluate in parallel; both candidates are kept."""
     from chronoscalp.strategy import entry_trigger
     from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, pick_best_signal
     from chronoscalp.utils.types import Signal
@@ -486,6 +490,7 @@ def test_strategies_run_independently_not_as_fallback(monkeypatch):
             timeframe=Timeframe.S15,
             reason="ultra_scalp_v3,trend=bullish",
             confidence=0.7,
+            strategy="ultra_scalp",
         )
 
     def _fake_inst(*_a, **_k):
@@ -499,6 +504,7 @@ def test_strategies_run_independently_not_as_fallback(monkeypatch):
             timeframe=Timeframe.M1,
             reason="institutional_entry,trend=bullish",
             confidence=0.6,
+            strategy="smc_confluence",
         )
 
     monkeypatch.setattr(entry_trigger, "generate_ultra_scalp_v3", _fake_scalp)
@@ -514,6 +520,20 @@ def test_strategies_run_independently_not_as_fallback(monkeypatch):
         },
         {"ema_period_trend": 50},
     )
+    candidates = strategy.evaluate_candidates(
+        "EURUSD",
+        {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
+        higher_timeframes=[Timeframe.M5, Timeframe.M1],
+        trigger_timeframe=Timeframe.S15,
+        ignore_confidence_gate=True,
+        run_scalp=True,
+        run_institutional=True,
+    )
+    reasons = " ".join(s.reason for s in candidates)
+    assert "ultra_scalp" in reasons
+    assert "institutional_entry" in reasons
+    assert len(candidates) >= 2
+
     signal = strategy.evaluate(
         "EURUSD",
         {Timeframe.M5: m5, Timeframe.M1: m1, Timeframe.S15: scalp_df},
@@ -524,8 +544,6 @@ def test_strategies_run_independently_not_as_fallback(monkeypatch):
         run_institutional=True,
     )
     assert signal.signal_type == SignalType.BUY
-    assert "institutional_entry" in signal.reason
-    assert signal.risk_reward_ratio == pytest.approx(1.5)
 
     # Institutional alone still works when only its bar is due.
     only_inst = strategy.evaluate(
@@ -639,6 +657,6 @@ def test_institutional_still_runs_when_scalp_quiet(monkeypatch):
         trigger_timeframe=Timeframe.S15,
         ignore_confidence_gate=True,
     )
-    assert scalp_calls["n"] == 1 and inst_calls["n"] == 1
+    assert scalp_calls["n"] == 1 and inst_calls["n"] == 2
     assert signal.signal_type == SignalType.BUY
     assert "institutional_entry" in signal.reason

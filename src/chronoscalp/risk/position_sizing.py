@@ -427,10 +427,18 @@ class RiskManager:
         return True
 
     def position_size_for(
-        self, signal: Signal, equity: float, win_rate_estimate: float = 0.6
+        self,
+        signal: Signal,
+        equity: float,
+        win_rate_estimate: float = 0.6,
+        *,
+        risk_pct: float | None = None,
     ) -> float:
         symbol_spec = self.symbols_cfg[signal.symbol]
-        risk_pct = resolve_active_risk_pct(self.risk_cfg)
+        if risk_pct is None:
+            risk_pct = resolve_active_risk_pct(self.risk_cfg)
+        else:
+            risk_pct = min(max(float(risk_pct), 0.0), HARD_MAX_RISK_PCT)
 
         if self.risk_cfg.get("use_kelly_sizing", False):
             risk_pct = kelly_fraction(

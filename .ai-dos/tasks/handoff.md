@@ -2,6 +2,35 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-22 TASK-002 independent multi-strategy + xau_vwap_pullback
+
+- Time (UTC): 2026-08-22T16:40:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer and security remain distinct identities — **not done**)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: independent candidates, (symbol, strategy, ticket) state, 3% live heat, DST sessions, `xau_vwap_pullback` shadow-only, Telegram simultaneous-OR, tests + validation template.
+- Product changes (this session):
+  - Kernel: `evaluate_candidates`, composite tickets, heat allocation, MT5 hedging/netting fail-closed, news OCO twin-only, DST `SessionFilter`, spread shield, comparison vs live books.
+  - `xau_vwap_pullback` module + `enabled: false` / `shadow_only: true`. Not on `enabled_strategies`. Not live-enabled.
+  - Backtest processes all candidates (comparison books), SL-first, LIVE_ONLY_GATES includes live shared heat + netting.
+  - Telegram off/shadow/on for VWAP pullback; status source; per-strategy PnL.
+  - Docs: `STRATEGY_XAU_VWAP_PULLBACK.md`, validation templates with UNKNOWN metrics, ROADMAP, TELEGRAM_BOT_FA.
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; Delta not rewritten.
+- Exact next action: independent reviewer + security (distinct from implementer) before merge. Do **not** live-enable `xau_vwap_pullback`. Do not merge to `main` until those reviews land.
+- Validation: `pytest -q` passed; `ruff check src tests` passed; `black --check` on touched files passed.
+
+## 2026-08-22 TASK-002 claim + reclaim stale TASK-001 overlap
+
+- Time (UTC): 2026-08-22T15:26:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / orchestrator + implementer
+- Branch: ai/TASK-002-xau-vwap-multistrat
+- Objective: independent multi-strategy execution + `xau_vwap_pullback` (disabled, shadow_only).
+- Verified context and decisions:
+  - TASK-001 heartbeat 2026-08-17 is stale vs 24h; owner `cursor:grok-4.5` is not this session.
+  - Overlapping live/paper/telegram/risk/backtest files reclaimed into TASK-002. TASK-001 keeps Delta, research scripts, forensic docs.
+  - Live heat cap 3.0% (matches daily loss); per-trade 1% and min 1.5 R:R unchanged. Comparison/paper uses independent virtual books.
+  - `xau_vwap_pullback` will not be live-enabled this cycle. `CHRONOSCALP_CONFIRM_LIVE` untouched. Delta not rewritten.
+- Exact next action: implement kernel (position keys, heat, account mode, DST sessions, candidate fan-out) then the strategy module and Telegram.
+
 ## 2026-08-17 deploy trade-open copy to VPS (TASK-001)
 
 - Time (UTC): 2026-08-17T12:32:00Z

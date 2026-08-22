@@ -292,7 +292,7 @@ def test_strategies_menu_toggle_news_straddle(
 
     monkeypatch.setattr(
         "chronoscalp.telegram.control_bot.apply_enabled_strategies",
-        lambda parts: saved.append(list(parts)) or list(parts),
+        lambda parts, shadow=None, **_k: saved.append(list(parts)) or list(parts),
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
 
@@ -310,7 +310,7 @@ def test_strategies_menu_controls_and_persists_delta(
 
     monkeypatch.setattr(
         "chronoscalp.telegram.control_bot.apply_enabled_strategies",
-        lambda parts: saved.append(list(parts)) or list(parts),
+        lambda parts, shadow=None, **_k: saved.append(list(parts)) or list(parts),
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
 
@@ -518,3 +518,36 @@ def test_open_positions_empty_live_snapshot(bot: TelegramControlBot, tmp_path: P
     assert "پوزیشن بازی روی بروکر نیست" in text
     assert "91323064" in text
     assert "equity=9426.47" in text
+
+
+def test_strategies_menu_says_simultaneous_and_hides_xau_from_all(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot.handle(42, "استراتژی‌ها")
+    text = bot.send.call_args.args[1]
+    assert "هم‌زمان" in text
+    kb = bot.send.call_args.kwargs["reply_markup"]
+    labels = {b["text"] for row in kb["keyboard"] for b in row}
+    assert any("VWAP" in label for label in labels)
+    assert not any(label.startswith("✅") and "VWAP" in label for label in labels)
+
+    bot.handle(42, "همه استراتژی‌ها ✓")
+    assert "xau_vwap_pullback" not in bot._pending[42]["selected"]
+
+
+def test_xau_vwap_cycles_shadow_then_enabled(bot: TelegramControlBot) -> None:
+    bot.handle(42, "استراتژی‌ها")
+    bot.handle(42, "⬜ پولبک VWAP (طلا)")
+    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
+    assert "xau_vwap_pullback" in bot._pending[42]["shadow"]
+    bot.handle(42, "👁 پولبک VWAP (طلا)")
+    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
+    assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
+
+
+def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "منبع تنظیم" in text
+    assert "multi_strategy_mode" in text
+    assert "shadow_only" in text

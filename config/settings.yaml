@@ -124,14 +124,43 @@ strategy:
     comment_prefix: "CS_News"
     # null = default NFP/CPI/FOMC/rate tokens; [] = any high-impact event
     title_tokens: null
+    require_session: false
+
+  xau_vwap_pullback:
+    # Research candidate. Not live-ready. Must stay off until OOS gates pass.
+    enabled: false
+    shadow_only: true
+    allowed_symbols: [XAUUSD]
+    ema_slope_bars: 3
+    impulse_lookback: 8
+    impulse_swing_bars: 10
+    impulse_body_atr: 0.6
+    impulse_rvol_min: 1.10
+    impulse_expire_m1_bars: 6
+    min_body_fraction: 0.45
+    level_touch_atr: 0.20
+    no_chase_atr: 0.25
+    trigger_expire_m1_bars: 2
+    sl_buffer_atr: 0.15
+    min_stop_atr: 0.70
+    max_stop_atr: 1.80
+    reward_risk_ratio: 2.0
+    cost_stress_multiple: 1.5
+    min_net_rr_cost_stress: 1.25
+    min_score: 5
+    m1_rvol_score_min: 1.10
+    spread_median_expansion: 1.2
 
 sessions:
-  timezone: "GMT"
+  timezone: "UTC"
   # london_ny = only London + New York windows; always_on_24h = trade any time
   trading_hours_mode: london_ny
   windows:
     london: { start: "08:00", end: "11:00" }
-    new_york: { start: "13:30", end: "16:30" }
+    new_york: { start: "08:30", end: "11:30" }
+  market_timezones:
+    london: Europe/London
+    new_york: America/New_York
   trade_outside_sessions: false
   # Legacy per-symbol bypass — ignored when trading_hours_mode is explicitly london_ny
   always_on_symbols:
@@ -150,6 +179,7 @@ risk:
   active_risk_per_trade_pct: 1.0
   min_reward_risk_ratio: 1.5
   max_daily_loss_pct: 3.0
+  max_portfolio_heat_pct: 3.0
   # When false: daily loss / DD cutoff does not block new entries (operator toggle).
   # Per-trade 1% risk and min R:R are unchanged.
   daily_loss_limit_enabled: true
@@ -231,6 +261,8 @@ execution:
   trade_on_bar_close_only: true
   state_dir: "data/state"
   magic_number: 20260711
+  # comparison = independent virtual books (paper default). live = shared 3% heat.
+  multi_strategy_mode: comparison
 
 backtest:
   initial_balance: 10000

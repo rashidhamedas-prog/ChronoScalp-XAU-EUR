@@ -74,6 +74,8 @@ BTN_STRAT_SAVE = "ذخیره استراتژی‌ها"
 # Toggle markers (menu-only pickers)
 TOGGLE_ON = "✅"
 TOGGLE_OFF = "⬜"
+TOGGLE_SHADOW = "👁"
+SHADOW_CAPABLE_STRATEGIES: frozenset[str] = frozenset({"xau_vwap_pullback"})
 
 STRATEGY_LABELS: dict[str, str] = {
     "delta": "دلتا (طلا)",
@@ -81,6 +83,7 @@ STRATEGY_LABELS: dict[str, str] = {
     "liquidity_volume": "نقدینگی+حجم",
     "ultra_scalp": "اسکلپ S15",
     "news_straddle": "استرادل خبر",
+    "xau_vwap_pullback": "پولبک VWAP (طلا)",
 }
 STRATEGY_LABEL_TO_KEY: dict[str, str] = {v: k for k, v in STRATEGY_LABELS.items()}
 
@@ -94,7 +97,7 @@ def toggle_label(name: str, *, enabled: bool) -> str:
 def parse_toggle_label(text: str) -> str | None:
     """Extract the payload after ✅/⬜, or None if not a toggle button."""
     raw = (text or "").strip()
-    for mark in (TOGGLE_ON, TOGGLE_OFF, "✓", "○"):
+    for mark in (TOGGLE_ON, TOGGLE_OFF, TOGGLE_SHADOW, "✓", "○"):
         prefix = f"{mark} "
         if raw.startswith(prefix):
             return raw[len(prefix) :].strip() or None
@@ -125,11 +128,55 @@ def symbols_keyboard(catalog: list[str], selected: list[str] | set[str]) -> dict
     return {"keyboard": rows, "resize_keyboard": True, "is_persistent": True}
 
 
-def strategies_keyboard(selected: list[str] | set[str]) -> dict[str, Any]:
-    """Reply keyboard: toggle each known strategy + save."""
+def strategy_toggle_label(key: str, *, selected: bool, shadow: bool) -> str:
+    """Build an on/off (or off/shadow/on) label for a known strategy."""
+    name = STRATEGY_LABELS.get(key, key)
+    if key in SHADOW_CAPABLE_STRATEGIES:
+        if shadow:
+            mark = TOGGLE_SHADOW
+        elif selected:
+            mark = TOGGLE_ON
+        else:
+            mark = TOGGLE_OFF
+        return f"{mark} {name}"
+    return toggle_label(name, enabled=selected)
+
+
+def cycle_strategy_selection(
+    key: str,
+    selected: list[str],
+    shadow: list[str],
+) -> tuple[list[str], list[str]]:
+    """Advance one strategy: off↔on, or off→shadow→on→off for shadow-capable ids."""
+    selected_l = [s for s in selected if s != key]
+    shadow_l = [s for s in shadow if s != key]
+    in_selected = key in selected
+    in_shadow = key in shadow
+    if key in SHADOW_CAPABLE_STRATEGIES:
+        if not in_selected and not in_shadow:
+            return [*selected_l, key], [*shadow_l, key]
+        if in_shadow:
+            return [*selected_l, key], shadow_l
+        return selected_l, shadow_l
+    if in_selected:
+        return selected_l, shadow_l
+    return [*selected_l, key], shadow_l
+
+
+def strategies_keyboard(
+    selected: list[str] | set[str],
+    shadow: list[str] | set[str] | None = None,
+) -> dict[str, Any]:
+    """Reply keyboard: toggle each known strategy + save.
+
+    Selection is simultaneous OR (every ticked strategy may fire), not pick-best.
+    ``xau_vwap_pullback`` cycles off / shadow / enabled.
+    """
     selected_l = {str(s).strip().lower() for s in selected}
+    shadow_l = {str(s).strip().lower() for s in (shadow or [])}
     labels = [
-        toggle_label(STRATEGY_LABELS[key], enabled=key in selected_l) for key in STRATEGY_LABELS
+        strategy_toggle_label(key, selected=key in selected_l, shadow=key in shadow_l)
+        for key in STRATEGY_LABELS
     ]
     rows = _chunk_buttons(labels, per_row=2)
     rows.append([{"text": BTN_STRAT_ALL}, {"text": BTN_STRAT_NONE}])

@@ -100,6 +100,7 @@ def generate_institutional_entry(
     atr_stop_multiple: float = 1.5,
     atr_target_multiple: float = 2.25,
     rvol_min: float = 1.5,
+    strategy_id: str = "institutional",
 ) -> Signal:
     """Normal-mode entry: sweep reclaim + MSS + RVOL + optional SMC confluence."""
     if trend == TrendDirection.NEUTRAL or trigger_df is None or len(trigger_df) < 5:
@@ -166,6 +167,7 @@ def generate_institutional_entry(
         ),
         reason=", ".join(reason_parts),
         timeframe=timeframe,
+        strategy=strategy_id,
     )
     if signal.risk_reward_ratio < min_reward_risk_ratio:
         return _no_signal(symbol, timeframe, reason="rr_fail")
@@ -289,6 +291,7 @@ def generate_ultra_scalp_v3(
         ),
         reason=f"ultra_scalp_v3,trend={trend.value},rvol={rvol:.2f}",
         timeframe=timeframe,
+        strategy="ultra_scalp",
     )
     if signal.risk_reward_ratio < min_reward_risk_ratio:
         return _no_signal(symbol, timeframe, reason="rr_fail")

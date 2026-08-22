@@ -61,6 +61,7 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     assert data2["strategy"]["use_ultra_scalp"] is True
     assert data2["strategy"]["use_news_straddle"] is True
     assert data2["strategy"]["use_delta"] is True
+    assert data2["strategy"]["use_xau_vwap_pullback"] is False
     assert data2["symbols"] == ["ETHUSD", "USDJPY"]  # preserved
 
     from chronoscalp.saas.broker_wizard import apply_trading_hours_mode
@@ -76,6 +77,38 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     data4 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
     assert data4["sessions"]["trading_hours_mode"] == "london_ny"
     assert data4["sessions"]["trade_outside_sessions"] is False
+
+
+def test_apply_xau_vwap_shadow_only(tmp_path: Path):
+    overrides = tmp_path / "runtime_overrides.yaml"
+    saved = apply_enabled_strategies(
+        ["delta"],
+        shadow=["xau_vwap_pullback"],
+        overrides_path=overrides,
+    )
+    assert "delta" in saved
+    assert "xau_vwap_pullback" in saved
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["strategy"]["xau_vwap_pullback"]["shadow_only"] is True
+    assert data["strategy"]["xau_vwap_pullback"]["enabled"] is True
+    from chronoscalp.strategy.multi_timeframe import is_shadow_only, resolve_enabled_strategies
+
+    enabled = resolve_enabled_strategies(data["strategy"])
+    assert enabled.xau_vwap_pullback is True
+    assert is_shadow_only(data["strategy"], "xau_vwap_pullback") is True
+
+
+def test_overlay_news_straddle_resolves_enabled_after_reload(tmp_path: Path):
+    """Saving News in the overlay is enough for resolve_enabled_strategies.
+
+    The trading *process* still needs Stop/Start; this only checks settings reload.
+    """
+    overrides = tmp_path / "runtime_overrides.yaml"
+    apply_enabled_strategies(["news_straddle"], overrides_path=overrides)
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+
+    assert resolve_enabled_strategies(data["strategy"]).news_straddle is True
 
 
 def test_apply_daily_loss_limit_enabled(tmp_path: Path):

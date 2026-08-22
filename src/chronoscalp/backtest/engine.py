@@ -33,19 +33,25 @@ from chronoscalp.execution.position_logic import (
 )
 from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
+from chronoscalp.filters.spread_shield import RollingMedianSpread
 from chronoscalp.logging_setup import logger
 from chronoscalp.risk.position_sizing import RiskManager
-from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, is_shadow_only
+from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import SignalType, Timeframe, TradeResult
 
 # Entry guards that main.py applies but this engine does not simulate. Each one
 # can only remove trades, so backtest counts bound live counts from above.
+# Heat, per-strategy already_open, and spread-median shields *are* modelled
+# for comparison books; live shared 3% heat and MT5 netting remain live-only.
 LIVE_ONLY_GATES: tuple[str, ...] = (
     "circuit_breaker",
     "correlation_guard",
     "daily_loss_limit",
     "kill_switch",
     "mistake_memory",
+    "mt5_netting_fail_closed",
+    "portfolio_heat_live_shared",
     "spread_ma_guard",
     "stale_stops",
     "three_strikes",
@@ -179,54 +185,70 @@ def run_backtest(
     result = BacktestResult(symbol=symbol, starting_equity=starting_equity)
     warmup = max(50, settings.indicators.get("ema_period_trend", 50) + 5)
 
-    open_ticket: int | None = None
+    # Comparison books: one ticket per strategy, never winner-takes-all.
+    open_tickets: dict[str, int] = {}
+    spread_median = RollingMedianSpread()
 
     for i in range(warmup, len(trigger_df)):
         t = trigger_df.index[i]
         bar = trigger_df.iloc[i]
 
-        # --- manage any open position first: did SL/TP get hit on this bar? ---
-        if open_ticket is not None:
-            open_ticket = _manage_open_position(broker, risk_manager, open_ticket, bar, t, result)
-
-        if open_ticket is not None:
-            continue  # only one position at a time in this simplified engine
+        for tag, ticket in list(open_tickets.items()):
+            remaining = _manage_open_position(broker, risk_manager, ticket, bar, t, result)
+            if remaining is None:
+                open_tickets.pop(tag, None)
 
         if not session_filter.is_within_session(t.to_pydatetime()):
             continue
         if news_filter.is_blackout(t.to_pydatetime()):
             continue
 
+        spread_pips = broker.get_current_spread_pips(symbol)
+        spread_median.observe(symbol, spread_pips)
+        median = spread_median.median(symbol)
+        cap = None
+        spread_map = settings.spread_filter.get("max_spread_pips") or {}
+        if isinstance(spread_map, dict):
+            cap = spread_map.get(symbol)
+
         sliced = {tf: _as_of(df, t) for tf, df in data_by_timeframe.items()}
-        signal = strategy.evaluate(
+        candidates = strategy.evaluate_candidates(
             symbol=symbol,
             data_by_timeframe=sliced,
             higher_timeframes=higher_timeframes,
             trigger_timeframe=trigger_timeframe,
+            spread_pips=spread_pips,
+            median_spread_pips=median,
+            broker_spread_cap_pips=float(cap) if cap is not None else None,
         )
-        if signal.signal_type == SignalType.NONE:
-            continue
+        for signal in candidates:
+            if signal.signal_type == SignalType.NONE or not signal.is_actionable:
+                continue
+            tag = resolve_strategy_tag(
+                explicit=getattr(signal, "strategy", "") or "", reason=signal.reason
+            )
+            if tag in open_tickets:
+                continue
+            if is_shadow_only(settings.strategy, tag):
+                continue
+            if not risk_manager.validate_signal(signal, spread_pips):
+                continue
 
-        spread_pips = broker.get_current_spread_pips(symbol)
-        if not risk_manager.validate_signal(signal, spread_pips):
-            continue
+            equity = broker.get_balance()
+            volume = risk_manager.position_size_for(signal, equity)
+            if volume <= 0:
+                continue
 
-        equity = broker.get_balance()
-        volume = risk_manager.position_size_for(signal, equity)
-        if volume <= 0:
-            continue
+            position = broker.place_order(signal, volume, fill_price=bar["close"])
+            open_tickets[tag] = position.ticket
+            result.equity_curve.append((t.to_pydatetime(), broker.get_balance()))
 
-        position = broker.place_order(signal, volume, fill_price=bar["close"])
-        open_ticket = position.ticket
-        result.equity_curve.append((t.to_pydatetime(), broker.get_balance()))
-
-    if open_ticket is not None:
+    for tag, ticket in list(open_tickets.items()):
         last_bar = trigger_df.iloc[-1]
-        trade = broker.close_position(
-            open_ticket, exit_price=last_bar["close"], reason="backtest_end"
-        )
+        trade = broker.close_position(ticket, exit_price=last_bar["close"], reason="backtest_end")
         result.trades.append(trade)
         risk_manager.daily_tracker.record_trade_pnl(trade.pnl)
+        open_tickets.pop(tag, None)
 
     result.final_equity = broker.get_balance()
     if not result.equity_curve:

@@ -195,6 +195,24 @@ def test_check_sl_tp_hit_sell_take_profit():
     assert exit_price_for_hit(position, hit) == pytest.approx(1.0970)
 
 
+def test_check_sl_tp_hit_both_in_bar_is_sl_first():
+    position = Position(
+        ticket=3,
+        symbol="XAUUSD",
+        direction=SignalType.BUY,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=1990.0,
+        take_profit=2010.0,
+        open_time=datetime.now(tz=UTC),
+    )
+    hit = check_sl_tp_hit(position, bar_high=2012.0, bar_low=1988.0)
+    assert hit.hit_sl is True
+    assert hit.hit_tp is True
+    assert hit.exit_reason() == "stop_loss"
+    assert exit_price_for_hit(position, hit) == 1990.0
+
+
 def test_apply_breakeven_never_widens_after_trail():
     """ATR trail locked profit past entry — classic BE must not pull SL back."""
     from chronoscalp.risk.position_sizing import RiskManager

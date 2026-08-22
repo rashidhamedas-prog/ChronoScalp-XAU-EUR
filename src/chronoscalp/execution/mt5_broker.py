@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from chronoscalp.data.mt5_connector import MT5Connector, _require_windows
+from chronoscalp.execution.account_mode import AccountMarginMode, from_mt5_margin_mode
 from chronoscalp.execution.mt5_utils import (
     CHRONOSCALP_MAGIC,
     StaleStopsError,
@@ -69,6 +70,19 @@ class MT5Broker:
         if info is None:
             raise RuntimeError(f"MT5 account_info() failed: {mt5.last_error()}")
         return float(info.equity)
+
+    def account_margin_mode(self) -> AccountMarginMode:
+        """Detect MT5 hedging vs netting. Unknown fails closed upstream."""
+        _require_windows()
+        import MetaTrader5 as mt5
+
+        info = mt5.account_info()
+        if info is None:
+            return AccountMarginMode.UNKNOWN
+        raw = getattr(info, "margin_mode", None)
+        mode = from_mt5_margin_mode(int(raw) if raw is not None else None)
+        logger.info("MT5 account margin mode={}", mode.value)
+        return mode
 
     def get_open_positions(self, symbol: str | None = None) -> list[Position]:
         return self.get_managed_positions(symbol=symbol)
@@ -427,9 +441,7 @@ class MT5Broker:
             open_time=datetime.now(tz=UTC),
             initial_volume=volume,
             initial_stop_loss=signal.stop_loss,
-            strategy=resolve_strategy_tag(
-                explicit=signal.strategy, reason=signal.reason
-            ),
+            strategy=resolve_strategy_tag(explicit=signal.strategy, reason=signal.reason),
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:

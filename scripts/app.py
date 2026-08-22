@@ -466,21 +466,10 @@ def page_control(settings) -> None:
         "liquidity_volume": _t("strategy_liq"),
         "ultra_scalp": _t("strategy_scalp"),
         "news_straddle": _t("strategy_news"),
+        "xau_vwap_pullback": "XAU VWAP pullback",
     }
-    use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(
-        settings.strategy
-    )
-    default_strats: list[str] = []
-    if use_delta:
-        default_strats.append("delta")
-    if use_smc:
-        default_strats.append("smc_confluence")
-    if use_liq:
-        default_strats.append("liquidity_volume")
-    if use_scalp:
-        default_strats.append("ultra_scalp")
-    if use_news:
-        default_strats.append("news_straddle")
+    enabled = resolve_enabled_strategies(settings.strategy)
+    default_strats = enabled.names()
     if not default_strats:
         default_strats = [s for s in KNOWN_STRATEGIES if s != "news_straddle"]
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from chronoscalp.execution.account_mode import AccountMarginMode
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import (
@@ -41,6 +42,10 @@ class PaperBroker:
     def connect(self) -> bool:
         logger.info("PaperBroker ready (starting_balance={:.2f})", self.balance)
         return True
+
+    def account_margin_mode(self) -> AccountMarginMode:
+        """Paper books are independent; treated as hedging-capable."""
+        return AccountMarginMode.PAPER
 
     def get_balance(self) -> float:
         return self.balance
@@ -146,7 +151,10 @@ class PaperBroker:
         spike would leave a hedged orphan. If a position is already open on the
         symbol, leave remaining stops for the engine to cancel.
         """
-        if any(p.symbol == symbol for p in self._positions.values()):
+        if any(
+            p.symbol == symbol and (p.strategy or "") == "news_straddle"
+            for p in self._positions.values()
+        ):
             return
         quote = self.get_quote(symbol)
         if quote is None:
@@ -179,6 +187,7 @@ class PaperBroker:
                 open_time=datetime.now(tz=UTC),
                 initial_volume=order.volume,
                 initial_stop_loss=order.stop_loss,
+                strategy="news_straddle" if (order.comment or "").startswith("CS_News") else "",
             )
             self._positions[position.ticket] = position
             self._next_ticket += 1

@@ -12,6 +12,7 @@ backtest/engine.py (historical).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd
@@ -86,31 +87,66 @@ def _liquidity_volume_confirms(row: pd.Series, direction: TrendDirection) -> boo
     return liquidity_volume_confirms(row, direction)
 
 
-def resolve_enabled_strategies(
-    strategy_cfg: dict,
-) -> tuple[bool, bool, bool, bool, bool]:
-    """Return ``(smc, liquidity, ultra_scalp, news_straddle, delta)``.
+@dataclass(frozen=True)
+class EnabledStrategies:
+    """Resolved strategy switches. Selection is simultaneous OR, not pick-best."""
 
-    Prefers ``enabled_strategies`` list when present; otherwise falls back to
-    the boolean flags. Empty list means no confluence filter (MACD/trend only).
+    smc: bool = False
+    liquidity: bool = False
+    ultra_scalp: bool = False
+    news_straddle: bool = False
+    delta: bool = False
+    xau_vwap_pullback: bool = False
+
+    def names(self) -> list[str]:
+        out: list[str] = []
+        if self.smc:
+            out.append("smc_confluence")
+        if self.liquidity:
+            out.append("liquidity_volume")
+        if self.ultra_scalp:
+            out.append("ultra_scalp")
+        if self.news_straddle:
+            out.append("news_straddle")
+        if self.delta:
+            out.append("delta")
+        if self.xau_vwap_pullback:
+            out.append("xau_vwap_pullback")
+        return out
+
+
+def resolve_enabled_strategies(strategy_cfg: dict) -> EnabledStrategies:
+    """Resolve enabled strategies from the list or boolean flags.
+
+    Prefers ``enabled_strategies`` when present. Empty list means no named
+    engines (legacy MACD/trend only). ``xau_vwap_pullback`` is never implied
+    by legacy flags — it must be listed or ``use_xau_vwap_pullback: true``.
     """
     enabled = strategy_cfg.get("enabled_strategies")
     if isinstance(enabled, list):
         names = {str(x).strip().lower() for x in enabled}
-        return (
-            "smc_confluence" in names,
-            "liquidity_volume" in names,
-            "ultra_scalp" in names,
-            "news_straddle" in names,
-            "delta" in names,
+        return EnabledStrategies(
+            smc="smc_confluence" in names,
+            liquidity="liquidity_volume" in names,
+            ultra_scalp="ultra_scalp" in names,
+            news_straddle="news_straddle" in names,
+            delta="delta" in names,
+            xau_vwap_pullback="xau_vwap_pullback" in names,
         )
-    return (
-        bool(strategy_cfg.get("use_smc_confluence", True)),
-        bool(strategy_cfg.get("use_liquidity_volume", False)),
-        bool(strategy_cfg.get("use_ultra_scalp", False)),
-        bool(strategy_cfg.get("use_news_straddle", False)),
-        bool(strategy_cfg.get("use_delta", False)),
+    return EnabledStrategies(
+        smc=bool(strategy_cfg.get("use_smc_confluence", True)),
+        liquidity=bool(strategy_cfg.get("use_liquidity_volume", False)),
+        ultra_scalp=bool(strategy_cfg.get("use_ultra_scalp", False)),
+        news_straddle=bool(strategy_cfg.get("use_news_straddle", False)),
+        delta=bool(strategy_cfg.get("use_delta", False)),
+        xau_vwap_pullback=bool(strategy_cfg.get("use_xau_vwap_pullback", False)),
     )
+
+
+def is_shadow_only(strategy_cfg: dict, strategy_id: str) -> bool:
+    """True when this strategy must record candidates but never place live/paper orders."""
+    block = strategy_cfg.get(strategy_id) or {}
+    return isinstance(block, dict) and block.get("shadow_only") is True
 
 
 def _canonical_symbol_root(symbol: str) -> str:
@@ -413,6 +449,12 @@ class MultiTimeframeStrategy:
         self.strategy_cfg = strategy_cfg
         self.indicators_cfg = indicators_cfg
         self.symbols_cfg = symbols_cfg or {}
+        from chronoscalp.strategy.xau_vwap_pullback import XauVwapPullbackEngine
+
+        self.xau_vwap_engine = XauVwapPullbackEngine(
+            cfg=dict(strategy_cfg.get("xau_vwap_pullback") or {}),
+            symbols_cfg=self.symbols_cfg,
+        )
 
     def evaluate(
         self,
@@ -423,19 +465,90 @@ class MultiTimeframeStrategy:
         *,
         ignore_confidence_gate: bool = False,
         spread_pips: float | None = None,
+        median_spread_pips: float | None = None,
+        broker_spread_cap_pips: float | None = None,
         run_scalp: bool = True,
         run_institutional: bool = True,
     ) -> Signal:
-        """Evaluate enabled strategies independently (parallel, not fallback).
+        """Compatibility wrapper: one Signal when a single engine fires.
 
-        Each engine uses its own trigger timeframe (S15 ultra-scalp, M1
-        institutional/SMC/liquidity). When several produce actionable signals
-        in one call, :func:`pick_best_signal` picks the strongest — scalp
-        never blocks institutional just because it ran first.
+        Production paths must use :meth:`evaluate_candidates`. Multiple
+        candidates are not collapsed with pick-best.
         """
-        use_smc, use_liq, use_scalp, _use_news, use_delta = resolve_enabled_strategies(
-            self.strategy_cfg
+        candidates, skip_reasons = self._collect_candidates(
+            symbol,
+            data_by_timeframe,
+            higher_timeframes,
+            trigger_timeframe,
+            ignore_confidence_gate=ignore_confidence_gate,
+            spread_pips=spread_pips,
+            median_spread_pips=median_spread_pips,
+            broker_spread_cap_pips=broker_spread_cap_pips,
+            run_scalp=run_scalp,
+            run_institutional=run_institutional,
         )
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            logger.info(
+                "{} {} independent candidates (not pick-best): {}",
+                symbol,
+                len(candidates),
+                ",".join((s.strategy or s.reason.split(",")[0]) for s in candidates),
+            )
+            return candidates[0]
+        reason = "|".join(skip_reasons) if skip_reasons else "no_signal"
+        return _no_signal(symbol, trigger_timeframe, reason=reason)
+
+    def evaluate_candidates(
+        self,
+        symbol: str,
+        data_by_timeframe: dict[Timeframe, pd.DataFrame],
+        higher_timeframes: list[Timeframe],
+        trigger_timeframe: Timeframe,
+        *,
+        ignore_confidence_gate: bool = False,
+        spread_pips: float | None = None,
+        median_spread_pips: float | None = None,
+        broker_spread_cap_pips: float | None = None,
+        run_scalp: bool = True,
+        run_institutional: bool = True,
+    ) -> list[Signal]:
+        """Return every actionable candidate. Never winner-takes-all."""
+        candidates, _skip = self._collect_candidates(
+            symbol,
+            data_by_timeframe,
+            higher_timeframes,
+            trigger_timeframe,
+            ignore_confidence_gate=ignore_confidence_gate,
+            spread_pips=spread_pips,
+            median_spread_pips=median_spread_pips,
+            broker_spread_cap_pips=broker_spread_cap_pips,
+            run_scalp=run_scalp,
+            run_institutional=run_institutional,
+        )
+        return candidates
+
+    def _collect_candidates(
+        self,
+        symbol: str,
+        data_by_timeframe: dict[Timeframe, pd.DataFrame],
+        higher_timeframes: list[Timeframe],
+        trigger_timeframe: Timeframe,
+        *,
+        ignore_confidence_gate: bool = False,
+        spread_pips: float | None = None,
+        median_spread_pips: float | None = None,
+        broker_spread_cap_pips: float | None = None,
+        run_scalp: bool = True,
+        run_institutional: bool = True,
+    ) -> tuple[list[Signal], list[str]]:
+        enabled = resolve_enabled_strategies(self.strategy_cfg)
+        use_smc = enabled.smc
+        use_liq = enabled.liquidity
+        use_scalp = enabled.ultra_scalp
+        use_delta = enabled.delta
+        use_xau = enabled.xau_vwap_pullback
         scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
@@ -445,9 +558,10 @@ class MultiTimeframeStrategy:
         # legacy MACD path when nothing (including Delta) is selected.
         # Delta-only must not also fire the institutional engine.
         want_institutional = bool(run_institutional) and (
-            use_smc or use_liq or (not use_scalp and not use_delta)
+            use_smc or use_liq or (not use_scalp and not use_delta and not use_xau)
         )
         want_delta = bool(run_institutional and use_delta)
+        want_xau = bool(run_institutional and use_xau)
 
         higher_frames = [
             data_by_timeframe[tf] for tf in higher_timeframes if tf in data_by_timeframe
@@ -538,9 +652,7 @@ class MultiTimeframeStrategy:
                     spread_pips=spread_pips,
                     cost_aware_geometry=bool(scalp_cfg.get("cost_aware_geometry", True)),
                     min_stop_spread_multiple=float(scalp_cfg.get("min_stop_spread_multiple", 2.0)),
-                    net_rr_after_costs=max(
-                        1.25, float(scalp_cfg.get("net_rr_after_costs", 1.25))
-                    ),
+                    net_rr_after_costs=max(1.25, float(scalp_cfg.get("net_rr_after_costs", 1.25))),
                     max_stop_atr_multiple=float(scalp_cfg.get("max_stop_atr_multiple", 8.0)),
                     max_target_atr_multiple=float(scalp_cfg.get("max_target_atr_multiple", 12.0)),
                 )
@@ -557,41 +669,55 @@ class MultiTimeframeStrategy:
                 skip_reasons.append("inst:no_trigger_data")
             else:
                 inst_trend = _trend(for_scalp=False)
-                if entry_engine == "institutional" and (use_smc or use_liq or not use_scalp):
-                    from chronoscalp.strategy.entry_trigger import (
-                        generate_institutional_entry,
-                    )
+                from chronoscalp.strategy.entry_trigger import generate_institutional_entry
+                from chronoscalp.utils.strategy_tags import (
+                    STRATEGY_LIQUIDITY,
+                    STRATEGY_SMC,
+                )
 
-                    inst_signal = generate_institutional_entry(
-                        symbol=symbol,
-                        trigger_df=inst_df,
-                        trend=inst_trend,
-                        timeframe=inst_tf,
-                        use_smc_confluence=use_smc,
-                        use_liquidity_volume=use_liq,
-                        min_reward_risk_ratio=float(
-                            self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
-                        ),
-                        atr_stop_multiple=float(self.strategy_cfg.get("atr_stop_multiple", 1.5)),
-                        atr_target_multiple=float(
-                            self.strategy_cfg.get("atr_target_multiple", 2.25)
-                        ),
-                        rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
-                    )
-                else:
-                    inst_signal = generate_entry_signal(
-                        symbol=symbol,
-                        trigger_df=inst_df,
-                        trend=inst_trend,
-                        timeframe=inst_tf,
-                        use_smc_confluence=use_smc,
-                        use_liquidity_volume=use_liq,
-                    )
-                inst_signal = _apply_confidence(inst_signal)
-                if inst_signal.is_actionable:
-                    candidates.append(inst_signal)
-                else:
-                    skip_reasons.append(f"inst:{inst_signal.reason or 'no_signal'}")
+                inst_passes: list[tuple[str, bool, bool]] = []
+                if use_smc:
+                    inst_passes.append((STRATEGY_SMC, True, False))
+                if use_liq:
+                    inst_passes.append((STRATEGY_LIQUIDITY, False, True))
+                if not inst_passes and (not use_scalp and not use_delta and not use_xau):
+                    inst_passes.append(("institutional", False, False))
+
+                for strategy_id, smc_flag, liq_flag in inst_passes:
+                    if entry_engine == "institutional" and (smc_flag or liq_flag or not use_scalp):
+                        inst_signal = generate_institutional_entry(
+                            symbol=symbol,
+                            trigger_df=inst_df,
+                            trend=inst_trend,
+                            timeframe=inst_tf,
+                            use_smc_confluence=smc_flag,
+                            use_liquidity_volume=liq_flag,
+                            min_reward_risk_ratio=float(
+                                self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
+                            ),
+                            atr_stop_multiple=float(
+                                self.strategy_cfg.get("atr_stop_multiple", 1.5)
+                            ),
+                            atr_target_multiple=float(
+                                self.strategy_cfg.get("atr_target_multiple", 2.25)
+                            ),
+                            rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
+                            strategy_id=strategy_id,
+                        )
+                    else:
+                        inst_signal = generate_entry_signal(
+                            symbol=symbol,
+                            trigger_df=inst_df,
+                            trend=inst_trend,
+                            timeframe=inst_tf,
+                            use_smc_confluence=smc_flag,
+                            use_liquidity_volume=liq_flag,
+                        )
+                    inst_signal = _apply_confidence(inst_signal)
+                    if inst_signal.is_actionable:
+                        candidates.append(inst_signal)
+                    else:
+                        skip_reasons.append(f"{strategy_id}:{inst_signal.reason or 'no_signal'}")
 
         if want_delta:
             delta_tf = Timeframe.M1 if Timeframe.M1 in data_by_timeframe else trigger_timeframe
@@ -616,17 +742,33 @@ class MultiTimeframeStrategy:
                 else:
                     skip_reasons.append(delta_signal.reason or "delta:no_signal")
 
-        best = pick_best_signal(candidates)
-        if best is not None:
-            if len(candidates) > 1:
-                logger.info(
-                    "{} parallel strategies fired ({}); selected {} rr={:.2f}",
-                    symbol,
-                    ",".join(s.reason.split(",")[0] for s in candidates),
-                    best.reason.split(",")[0],
-                    best.risk_reward_ratio,
+        if want_xau:
+            xau_tf = Timeframe.M1 if Timeframe.M1 in data_by_timeframe else trigger_timeframe
+            xau_df = data_by_timeframe.get(xau_tf)
+            if xau_df is None:
+                skip_reasons.append("xau_vwap_pullback:no_trigger_data")
+            else:
+                from chronoscalp.strategy.xau_vwap_pullback import (
+                    generate_xau_vwap_pullback_signal,
                 )
-            return best
 
-        reason = "|".join(skip_reasons) if skip_reasons else "no_signal"
-        return _no_signal(symbol, trigger_timeframe, reason=reason)
+                xau_cfg = dict(self.strategy_cfg.get("xau_vwap_pullback") or {})
+                xau_cfg.setdefault("enabled", True)
+                xau_signal = generate_xau_vwap_pullback_signal(
+                    symbol,
+                    xau_df,
+                    higher_frames,
+                    engine=self.xau_vwap_engine,
+                    config=xau_cfg,
+                    symbol_spec=self.symbols_cfg.get(symbol),
+                    spread_pips=spread_pips,
+                    median_spread_pips=median_spread_pips,
+                    broker_spread_cap_pips=broker_spread_cap_pips,
+                )
+                xau_signal = _apply_confidence(xau_signal)
+                if xau_signal.is_actionable:
+                    candidates.append(xau_signal)
+                else:
+                    skip_reasons.append(xau_signal.reason or "xau_vwap_pullback:no_signal")
+
+        return candidates, skip_reasons

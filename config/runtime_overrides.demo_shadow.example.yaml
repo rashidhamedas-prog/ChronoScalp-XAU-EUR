@@ -70,7 +70,7 @@ risk:
     - 1.0
     - 1.5
   min_reward_risk_ratio: 1.5
-  max_portfolio_heat_pct: 1.0 # INERT
+  max_portfolio_heat_pct: 1.0  # enforced; cannot exceed overlay max_daily_loss_pct
   # 1 while a single strategy is under observation. Raise to the active symbol
   # count once Delta's shadow evidence is in, or pairs block each other.
   max_concurrent_positions: 1

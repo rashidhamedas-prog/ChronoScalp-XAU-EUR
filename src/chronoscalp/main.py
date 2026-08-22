@@ -21,6 +21,10 @@ import pandas as pd
 from chronoscalp.config import Settings, get_settings
 from chronoscalp.config_overrides import unenforced_override_keys
 from chronoscalp.data.spread_sampler import SpreadSampler
+from chronoscalp.execution.account_mode import (
+    AccountMarginMode,
+    independent_same_symbol_allowed,
+)
 from chronoscalp.execution.mt5_broker import MT5Broker
 from chronoscalp.execution.mt5_utils import StaleStopsError
 from chronoscalp.execution.oanda_broker import OANDABroker
@@ -33,6 +37,7 @@ from chronoscalp.execution.trade_manager import manage_open_position
 from chronoscalp.filters.news_calendar import NewsCalendarManager
 from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
+from chronoscalp.filters.spread_shield import RollingMedianSpread
 from chronoscalp.indicators.technical import enrich_with_indicators
 from chronoscalp.logging_setup import logger
 from chronoscalp.ml.scorer import configure_scorer
@@ -51,7 +56,9 @@ from chronoscalp.orchestration.bootstrap import (
 )
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.kill_switch import KillSwitch
+from chronoscalp.orchestration.position_keys import parse_position_key, position_key
 from chronoscalp.orchestration.state_store import TradingStateStore
+from chronoscalp.orchestration.strategy_attribution import AttributionLedger
 from chronoscalp.orchestration.trade_journal import (
     TradeJournal,
     journal_path_for,
@@ -68,9 +75,19 @@ from chronoscalp.risk.institutional_guards import (
     volatility_decision,
 )
 from chronoscalp.risk.mistake_memory import MistakeMemory
+from chronoscalp.risk.portfolio_heat import (
+    allocate_risk_pct,
+    open_heat_from_dollar_risks,
+    resolve_max_portfolio_heat_pct,
+)
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
-from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, resolve_enabled_strategies
+from chronoscalp.strategy.multi_timeframe import (
+    MultiTimeframeStrategy,
+    is_shadow_only,
+    resolve_enabled_strategies,
+)
+from chronoscalp.strategy.news_skip_reasons import NewsSkipReason
 from chronoscalp.strategy.news_straddle_engine import DynamicNewsStraddleEngine
 from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import SignalType, Timeframe
@@ -91,9 +108,9 @@ class TradingBot:
 
         self.settings = settings
         self.mode = mode
-        _, _, use_ultra_scalp, use_news_straddle, _use_delta = resolve_enabled_strategies(
-            settings.strategy
-        )
+        enabled = resolve_enabled_strategies(settings.strategy)
+        use_ultra_scalp = enabled.ultra_scalp
+        use_news_straddle = enabled.news_straddle
         self.use_ultra_scalp = use_ultra_scalp
         self.use_news_straddle = use_news_straddle
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
@@ -254,6 +271,24 @@ class TradingBot:
         )
 
         self.open_tickets: dict[str, int] = dict(self.state_store.state.open_tickets)
+        self.attribution = AttributionLedger()
+        self.spread_median = RollingMedianSpread()
+        exec_cfg = settings.execution if isinstance(settings.execution, dict) else {}
+        default_mode = "comparison" if mode == "paper" else "live"
+        self.multi_strategy_mode = (
+            str(exec_cfg.get("multi_strategy_mode", default_mode)).strip().lower()
+        )
+        if self.multi_strategy_mode not in ("comparison", "live"):
+            self.multi_strategy_mode = default_mode
+        try:
+            self._account_mode = self.broker.account_margin_mode()
+        except Exception:  # noqa: BLE001
+            self._account_mode = AccountMarginMode.UNKNOWN
+        logger.info(
+            "Multi-strategy mode={} account_margin_mode={}",
+            self.multi_strategy_mode,
+            self._account_mode.value,
+        )
         self.bar_gate = BarCloseGate()
         for symbol, bar_iso in self.state_store.state.last_evaluated_bars.items():
             try:
@@ -276,6 +311,60 @@ class TradingBot:
     def _news_currency(self, symbol: str) -> str | None:
         spec = self.settings.symbols_raw.get(symbol, {})
         return spec.get("news_currency")
+
+    def _is_comparison_book(self) -> bool:
+        """Independent virtual books: paper comparison mode only.
+
+        Live trading always shares the 3% heat ceiling. Paper can opt into
+        shared heat with ``execution.multi_strategy_mode: live``.
+        """
+        if self.mode == "live":
+            return False
+        return self.multi_strategy_mode != "live"
+
+    def _open_key(self, symbol: str, strategy: str) -> str:
+        return position_key(symbol, strategy)
+
+    def _has_open_strategy(self, symbol: str, strategy: str) -> bool:
+        return self._open_key(symbol, strategy) in self.open_tickets
+
+    def _symbol_open_count(self, symbol: str) -> int:
+        return sum(1 for key in self.open_tickets if parse_position_key(key)[0] == symbol)
+
+    def _keys_for_symbol(self, symbol: str) -> list[str]:
+        return [key for key in self.open_tickets if parse_position_key(key)[0] == symbol]
+
+    def _register_open(self, symbol: str, strategy: str, ticket: int) -> None:
+        self.open_tickets[self._open_key(symbol, strategy)] = ticket
+
+    def _drop_ticket(self, ticket: int) -> None:
+        for key, value in list(self.open_tickets.items()):
+            if value == ticket:
+                self.open_tickets.pop(key, None)
+
+    def _open_dollar_risks(self) -> list[float]:
+        risks: list[float] = []
+        for key, ticket in self.open_tickets.items():
+            meta = self._position_meta.get(ticket) or {}
+            stored = meta.get("dollar_risk")
+            if stored is not None:
+                try:
+                    risks.append(float(stored))
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            symbol, _strategy = parse_position_key(key)
+            spec = self.settings.symbols_raw.get(symbol) or {}
+            pip_size = float(spec.get("pip_size", 0.0) or 0.0)
+            pip_value = float(spec.get("pip_value_per_lot", 0.0) or 0.0)
+            initial_sl = meta.get("initial_stop_loss")
+            volume = meta.get("initial_volume")
+            entry = meta.get("entry_price")
+            if None in (initial_sl, volume, entry) or pip_size <= 0 or pip_value <= 0:
+                continue
+            risk_pips = abs(float(entry) - float(initial_sl)) / pip_size
+            risks.append(risk_pips * pip_value * float(volume))
+        return risks
 
     def start(self) -> None:
         if not self.connector.connect():
@@ -343,13 +432,18 @@ class TradingBot:
 
         managed_tickets = {p.ticket for p in managed}
         now = datetime.now(tz=UTC)
-        for symbol, ticket in list(previous.items()):
+        for key, ticket in list(previous.items()):
             if ticket not in managed_tickets:
-                # SL/TP/manual close — record PnL before state/journal ghost-drop.
+                symbol, _strategy = parse_position_key(key)
                 self._on_position_closed_externally(symbol, ticket, now)
 
-        broker_map = {p.symbol: p.ticket for p in managed}
-        self.state_store.reconcile_open_tickets(broker_map)
+        broker_map: dict[str, int] = {}
+        ticket_strategies: dict[int, str] = {}
+        for pos in managed:
+            tag = resolve_strategy_tag(explicit=getattr(pos, "strategy", "") or "")
+            broker_map[position_key(pos.symbol, tag)] = pos.ticket
+            ticket_strategies[pos.ticket] = tag
+        self.state_store.reconcile_open_tickets(broker_map, ticket_strategies=ticket_strategies)
         self.open_tickets = dict(self.state_store.state.open_tickets)
         self.trade_journal.sync_open_from_broker(managed, now=now)
         self._write_broker_positions_snapshot()
@@ -451,18 +545,8 @@ class TradingBot:
         rather than only in the 5-minute skip heartbeat.
         """
         strategy_cfg = self.settings.strategy
-        use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(strategy_cfg)
-        active = [
-            name
-            for name, on in (
-                ("smc_confluence", use_smc),
-                ("liquidity_volume", use_liq),
-                ("ultra_scalp", use_scalp),
-                ("news_straddle", use_news),
-                ("delta", use_delta),
-            )
-            if on
-        ]
+        enabled = resolve_enabled_strategies(strategy_cfg)
+        active = enabled.names()
         sessions_cfg = self.settings.sessions
         risk_cfg = self.settings.risk
         logger.info(
@@ -670,11 +754,16 @@ class TradingBot:
                 spread_pips = self.broker.get_current_spread_pips(symbol)
                 self.spread_sampler.record(symbol, spread_pips, at=now)
                 self.spread_ma_guard.observe(symbol, spread_pips)
+                self.spread_median.observe(symbol, spread_pips)
 
                 self._manage_open_position(symbol, now)
 
-                use_smc, use_liq, use_scalp, use_news_straddle, _use_delta = (
-                    resolve_enabled_strategies(self.settings.strategy)
+                enabled = resolve_enabled_strategies(self.settings.strategy)
+                use_smc, use_liq, use_scalp, use_news_straddle = (
+                    enabled.smc,
+                    enabled.liquidity,
+                    enabled.ultra_scalp,
+                    enabled.news_straddle,
                 )
                 currency = self._news_currency(symbol)
 
@@ -692,12 +781,14 @@ class TradingBot:
                         symbol, at=now
                     )
                     in_session = self.session_filter.is_within_session(now, symbol=symbol)
+                    news_session_ok = in_session or not self.news_straddle.require_session
+                    news_already = self._has_open_strategy(symbol, "news_straddle")
                     allow_place = (
                         allow_new_entries
-                        and symbol not in self.open_tickets
+                        and not news_already
                         and not three_paused
                         and not at_capacity
-                        and in_session
+                        and news_session_ok
                     )
                     abort_pending = (
                         not allow_new_entries
@@ -705,17 +796,25 @@ class TradingBot:
                         and session.phase.value == "pending"
                     )
                     run_straddle = needs_manage or allow_place
+                    placement_block_reason: str | None = None
+                    if not allow_place:
+                        if at_capacity:
+                            placement_block_reason = NewsSkipReason.MAX_CONCURRENT.value
+                        elif not news_session_ok:
+                            placement_block_reason = NewsSkipReason.OUTSIDE_SESSION.value
+                        elif news_already:
+                            placement_block_reason = NewsSkipReason.ALREADY_OPEN_SAME_STRATEGY.value
                     if (
                         not run_straddle
                         and allow_new_entries
-                        and in_session
+                        and news_session_ok
                         and self.news_straddle.is_scalp_paused(now, currency)
                     ):
                         # Enter pause/place path even when not yet PENDING.
                         run_straddle = True
-                        allow_place = (
-                            symbol not in self.open_tickets and not three_paused and not at_capacity
-                        )
+                        allow_place = not news_already and not three_paused and not at_capacity
+                        if allow_place:
+                            placement_block_reason = None
                     if run_straddle:
                         m1_for_straddle = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
                         if m1_for_straddle is not None and not m1_for_straddle.empty:
@@ -746,9 +845,10 @@ class TradingBot:
                             m1_df=m1_for_straddle,
                             spread_pips=spread_pips,
                             currency=currency,
-                            already_open=symbol in self.open_tickets,
+                            already_open=news_already,
                             allow_place=allow_place,
                             abort_pending=abort_pending,
+                            placement_block_reason=placement_block_reason,
                         )
                         if straddle_res.action in (
                             "placed",
@@ -766,19 +866,22 @@ class TradingBot:
                             )
                         if straddle_res.opened_position is not None:
                             position = straddle_res.opened_position
-                            already = self.open_tickets.get(symbol) == position.ticket
+                            already = (
+                                self.open_tickets.get(self._open_key(symbol, "news_straddle"))
+                                == position.ticket
+                            )
                             if not already:
-                                # Fill already happened at the broker — track it even
-                                # if we are at max_concurrent (exposure already exists).
-                                self.open_tickets[symbol] = position.ticket
+                                self._register_open(symbol, "news_straddle", position.ticket)
                                 self._position_meta[position.ticket] = {
                                     "initial_volume": position.volume,
                                     "initial_stop_loss": position.stop_loss,
+                                    "entry_price": position.entry_price,
                                     "partial_taken": False,
                                     "breakeven_moved": False,
                                     "strategy": "news_straddle",
                                     "reason": "news_straddle",
                                 }
+                                self.attribution.for_strategy("news_straddle").filled += 1
                                 if not getattr(position, "strategy", ""):
                                     position.strategy = "news_straddle"
                                 self.trade_journal.record_open(
@@ -800,19 +903,23 @@ class TradingBot:
                                         f"event={event_title}"
                                     ),
                                 )
-                        if (
-                            self.news_straddle.is_scalp_paused(now, currency)
-                            or straddle_res.phase.value in ("paused", "pending")
-                            or straddle_res.action == "placed"
+                        if straddle_res.action and straddle_res.action not in (
+                            "placed",
+                            "oco_filled",
+                            "filled",
+                            "oco_retry",
+                            "manage_open",
+                            "waiting",
+                            "already_active",
+                            "noop",
                         ):
                             if allow_new_entries:
                                 self._note_skip(f"{symbol}:news_straddle_{straddle_res.action}")
-                            continue
+                            counters = self.attribution.for_strategy("news_straddle")
+                            counters.evaluated += 1
+                            counters.record_internal_reject(straddle_res.action)
 
                 if not allow_new_entries:
-                    continue
-                if symbol in self.open_tickets:
-                    self._note_skip(f"{symbol}:already_open")
                     continue
 
                 if self.three_strikes_enabled and self.three_strikes.is_paused(symbol, at=now):
@@ -836,7 +943,13 @@ class TradingBot:
                     continue
 
                 data_by_tf = self._fetch_and_enrich(symbol)
-                want_institutional = use_smc or use_liq or (not use_scalp)
+                want_institutional = (
+                    use_smc
+                    or use_liq
+                    or enabled.delta
+                    or enabled.xau_vwap_pullback
+                    or (not use_scalp)
+                )
 
                 scalp_df = data_by_tf.get(self.trigger_timeframe) if use_scalp else None
                 inst_tf = Timeframe.M1
@@ -913,7 +1026,8 @@ class TradingBot:
                     m5 = data_by_tf.get(Timeframe.M5)
                     if m5 is not None and not m5.empty:
                         closes_map = {symbol: m5["close"]}
-                        for other_sym in list(self.open_tickets):
+                        for other_key in list(self.open_tickets):
+                            other_sym, _other_strat = parse_position_key(other_key)
                             if other_sym == symbol:
                                 continue
                             other_m5 = self.connector.fetch_ohlcv(other_sym, Timeframe.M5, count=40)
@@ -955,42 +1069,46 @@ class TradingBot:
                     run_institutional = want_institutional
 
                 # Independent engines on their own timeframes (not fallback chain).
-                raw_signals = []
+                raw_signals: list = []
                 skip_parts: list[str] = []
+                cap = None
+                spread_map = self.settings.spread_filter.get("max_spread_pips") or {}
+                if isinstance(spread_map, dict):
+                    cap = spread_map.get(symbol)
+                median = self.spread_median.median(symbol)
+                eval_kwargs = {
+                    "symbol": symbol,
+                    "data_by_timeframe": data_by_tf,
+                    "higher_timeframes": self.higher_timeframes,
+                    "trigger_timeframe": self.trigger_timeframe,
+                    "spread_pips": spread_pips,
+                    "median_spread_pips": median,
+                    "broker_spread_cap_pips": float(cap) if cap is not None else None,
+                }
                 if run_scalp:
-                    scalp_sig = self.strategy.evaluate(
-                        symbol=symbol,
-                        data_by_timeframe=data_by_tf,
-                        higher_timeframes=self.higher_timeframes,
-                        trigger_timeframe=self.trigger_timeframe,
-                        spread_pips=spread_pips,
-                        run_scalp=True,
-                        run_institutional=False,
+                    raw_signals.extend(
+                        self.strategy.evaluate_candidates(
+                            **eval_kwargs, run_scalp=True, run_institutional=False
+                        )
                     )
-                    if scalp_sig.is_actionable:
-                        raw_signals.append(scalp_sig)
-                    else:
-                        skip_parts.append(f"scalp:{(scalp_sig.reason or 'no_signal')}")
                 if run_institutional:
-                    inst_sig = self.strategy.evaluate(
-                        symbol=symbol,
-                        data_by_timeframe=data_by_tf,
-                        higher_timeframes=self.higher_timeframes,
-                        trigger_timeframe=self.trigger_timeframe,
-                        spread_pips=spread_pips,
-                        run_scalp=False,
-                        run_institutional=True,
+                    raw_signals.extend(
+                        self.strategy.evaluate_candidates(
+                            **eval_kwargs, run_scalp=False, run_institutional=True
+                        )
                     )
-                    if inst_sig.is_actionable:
-                        raw_signals.append(inst_sig)
-                    else:
-                        skip_parts.append(f"inst:{(inst_sig.reason or 'no_signal')}")
 
-                # Risk/dedup each candidate independently, then pick the strongest.
+                # Risk/dedup each candidate independently; fill all that pass.
                 viable = []
                 for cand in raw_signals:
+                    tag = resolve_strategy_tag(
+                        explicit=getattr(cand, "strategy", "") or "", reason=cand.reason
+                    )
+                    counters = self.attribution.for_strategy(tag)
+                    counters.evaluated += 1
+                    counters.candidate += 1
                     cand_tf = cand.timeframe or self.trigger_timeframe
-                    if "ultra_scalp" in (cand.reason or ""):
+                    if tag == "ultra_scalp":
                         cand_bar = scalp_bar or last_completed_bar_time(
                             scalp_df if scalp_df is not None else trigger_df
                         )
@@ -1000,21 +1118,24 @@ class TradingBot:
                         )
                     if cand_bar is None:
                         cand_bar = now
-                    dedup_key = signal_dedup_key(symbol, cand_tf, cand_bar, cand.signal_type)
+                    dedup_key = signal_dedup_key(
+                        f"{symbol}:{tag}", cand_tf, cand_bar, cand.signal_type
+                    )
                     if self.signal_deduper.already_processed(dedup_key):
-                        skip_parts.append(f"{cand_tf.value}:dedup")
+                        skip_parts.append(f"{tag}:dedup")
+                        counters.record_internal_reject("dedup")
                         continue
                     if not self.risk_manager.validate_signal(
                         cand,
                         spread_pips,
                         min_reward_risk_ratio=self._min_rr_for_signal(cand),
                     ):
-                        skip_parts.append(f"{cand_tf.value}:risk_reject")
+                        skip_parts.append(f"{tag}:risk_reject")
+                        counters.risk_reject += 1
                         continue
-                    viable.append((cand, cand_tf, cand_bar, dedup_key))
+                    viable.append((cand, cand_tf, cand_bar, dedup_key, tag))
 
                 if not viable:
-                    # Soft skips (no signal / risk / dedup) consume the bar.
                     self._mark_engine_bars_evaluated(
                         symbol,
                         run_scalp=run_scalp,
@@ -1026,57 +1147,116 @@ class TradingBot:
                     self._note_skip(f"{symbol}:{detail}")
                     continue
 
-                signal, signal_tf, completed_bar, dedup_key = max(
-                    viable,
-                    key=lambda item: (
-                        float(item[0].risk_reward_ratio),
-                        float(item[0].confidence),
-                    ),
-                )
-                if len(viable) > 1:
-                    logger.info(
-                        "{} parallel entries viable ({}); taking {} on {}",
-                        symbol,
-                        ",".join(v[0].reason.split(",")[0] for v in viable),
-                        signal.reason.split(",")[0],
-                        signal_tf.value,
-                    )
-                strategy_tag = resolve_strategy_tag(
-                    explicit=getattr(signal, "strategy", "") or "",
-                    reason=signal.reason,
-                )
                 session_name = self.session_filter.active_session_name(now) or "none"
-                mm_fp = self.mistake_memory.fingerprint(
-                    symbol=symbol,
-                    strategy=strategy_tag,
-                    session=session_name,
-                    direction=signal.signal_type.value,
-                    reason=signal.reason,
-                )
-                if self.mistake_memory.blocks(mm_fp, now):
-                    self._mark_engine_bars_evaluated(
-                        symbol,
-                        run_scalp=run_scalp,
-                        scalp_bar=scalp_bar,
-                        run_institutional=run_institutional,
-                        inst_bar=inst_bar,
+                placed_any = False
+                for signal, _signal_tf, _completed_bar, dedup_key, strategy_tag in viable:
+                    counters = self.attribution.for_strategy(strategy_tag)
+                    if self._has_open_strategy(symbol, strategy_tag):
+                        skip_parts.append(f"{strategy_tag}:already_open_same_strategy")
+                        counters.record_internal_reject("already_open_same_strategy")
+                        continue
+                    if is_shadow_only(self.settings.strategy, strategy_tag):
+                        skip_parts.append(f"{strategy_tag}:shadow_only")
+                        self.signal_deduper.mark_processed(dedup_key)
+                        continue
+                    if (
+                        not self._is_comparison_book()
+                        and self._symbol_open_count(symbol) > 0
+                        and not independent_same_symbol_allowed(self._account_mode)
+                    ):
+                        logger.error(
+                            "{} netting/unknown account cannot open a second independent "
+                            "ticket (mode={}); skip {}",
+                            symbol,
+                            self._account_mode.value,
+                            strategy_tag,
+                        )
+                        skip_parts.append(f"{strategy_tag}:broker_unsupported")
+                        counters.lost_arbitration += 1
+                        continue
+                    mm_fp = self.mistake_memory.fingerprint(
+                        symbol=symbol,
+                        strategy=strategy_tag,
+                        session=session_name,
+                        direction=signal.signal_type.value,
+                        reason=signal.reason,
                     )
-                    self._note_skip(f"{symbol}:mistake_memory")
-                    continue
-                equity = self.broker.get_balance()
-                volume = self.risk_manager.position_size_for(signal, equity)
-                if volume <= 0:
-                    self._mark_engine_bars_evaluated(
-                        symbol,
-                        run_scalp=run_scalp,
-                        scalp_bar=scalp_bar,
-                        run_institutional=run_institutional,
-                        inst_bar=inst_bar,
+                    if self.mistake_memory.blocks(mm_fp, now):
+                        skip_parts.append(f"{strategy_tag}:mistake_memory")
+                        continue
+                    equity = self.broker.get_balance()
+                    requested = float(
+                        self.risk_manager.risk_cfg.get(
+                            "active_risk_per_trade_pct",
+                            self.risk_manager.risk_cfg.get("max_risk_per_trade_pct", 1.0),
+                        )
                     )
-                    self._note_skip(f"{symbol}:zero_volume")
-                    continue
+                    risk_pct = min(requested, 1.0)
+                    if not self._is_comparison_book():
+                        heat_cap = resolve_max_portfolio_heat_pct(self.settings.risk)
+                        open_heat = open_heat_from_dollar_risks(self._open_dollar_risks(), equity)
+                        alloc = allocate_risk_pct(
+                            requested_risk_pct=risk_pct,
+                            open_heat_pct=open_heat,
+                            max_heat_pct=heat_cap,
+                        )
+                        if not alloc.allowed:
+                            skip_parts.append(f"{strategy_tag}:portfolio_heat")
+                            counters.lost_arbitration += 1
+                            holders = [parse_position_key(k)[1] for k in self.open_tickets]
+                            for other in holders:
+                                counters.record_heat_block(other)
+                            continue
+                        risk_pct = alloc.risk_pct
+                    volume = self.risk_manager.position_size_for(signal, equity, risk_pct=risk_pct)
+                    if volume <= 0:
+                        skip_parts.append(f"{strategy_tag}:zero_volume")
+                        counters.risk_reject += 1
+                        continue
+                    try:
+                        position = self.broker.place_order(signal, volume)
+                    except StaleStopsError:
+                        skip_parts.append(f"{strategy_tag}:stale_stops")
+                        continue
+                    placed_any = True
+                    self._register_open(symbol, strategy_tag, position.ticket)
+                    position.strategy = strategy_tag
+                    spec = self.settings.symbols_raw.get(symbol) or {}
+                    pip_size = float(spec.get("pip_size", 0.0) or 0.0)
+                    pip_value = float(spec.get("pip_value_per_lot", 0.0) or 0.0)
+                    dollar_risk = 0.0
+                    if pip_size > 0 and pip_value > 0:
+                        dollar_risk = (
+                            abs(position.entry_price - position.stop_loss)
+                            / pip_size
+                            * pip_value
+                            * position.volume
+                        )
+                    self._position_meta[position.ticket] = {
+                        "initial_volume": position.volume,
+                        "initial_stop_loss": position.stop_loss,
+                        "entry_price": position.entry_price,
+                        "dollar_risk": dollar_risk,
+                        "partial_taken": False,
+                        "breakeven_moved": False,
+                        "strategy": strategy_tag,
+                        "reason": signal.reason or "",
+                    }
+                    counters.filled += 1
+                    self.trade_journal.record_open(
+                        position, strategy=strategy_tag, reason=signal.reason or ""
+                    )
+                    self.signal_deduper.mark_processed(dedup_key)
+                    self._last_trade_opened_at = now
+                    self.alerts.notify_trade_opened(
+                        "Trade opened",
+                        (
+                            f"{symbol} {signal.signal_type.value} vol={volume:.2f} "
+                            f"entry={position.entry_price:.5f} sl={position.stop_loss:.5f} "
+                            f"tp={position.take_profit:.5f} strategy={strategy_tag}"
+                        ),
+                    )
 
-                position = self.broker.place_order(signal, volume)
                 self._mark_engine_bars_evaluated(
                     symbol,
                     run_scalp=run_scalp,
@@ -1084,35 +1264,11 @@ class TradingBot:
                     run_institutional=run_institutional,
                     inst_bar=inst_bar,
                 )
-                self.open_tickets[symbol] = position.ticket
-                strategy_tag = resolve_strategy_tag(
-                    explicit=getattr(position, "strategy", "") or signal.strategy or strategy_tag,
-                    reason=signal.reason,
-                )
-                position.strategy = strategy_tag
-                self._position_meta[position.ticket] = {
-                    "initial_volume": position.volume,
-                    "initial_stop_loss": position.stop_loss,
-                    "partial_taken": False,
-                    "breakeven_moved": False,
-                    "strategy": strategy_tag,
-                    "reason": signal.reason or "",
-                }
-                self.trade_journal.record_open(
-                    position, strategy=strategy_tag, reason=signal.reason or ""
-                )
-                self.signal_deduper.mark_processed(dedup_key)
                 self.signal_deduper.prune_older_than()
-                self._persist_state()
-                self._last_trade_opened_at = now
-                self.alerts.notify_trade_opened(
-                    "Trade opened",
-                    (
-                        f"{symbol} {signal.signal_type.value} vol={volume:.2f} "
-                        f"entry={position.entry_price:.5f} sl={position.stop_loss:.5f} "
-                        f"tp={position.take_profit:.5f} strategy={strategy_tag}"
-                    ),
-                )
+                if placed_any:
+                    self._persist_state()
+                elif skip_parts:
+                    self._note_skip(f"{symbol}:{('|'.join(skip_parts)).replace(' ', '_')}")
 
             except StaleStopsError as exc:
                 # Price moved through SL/TP before fill — skip, do not trip circuit breaker.
@@ -1186,7 +1342,8 @@ class TradingBot:
 
     def _estimate_unrealized_pnl(self) -> float:
         total = 0.0
-        for symbol, ticket in list(self.open_tickets.items()):
+        for key, ticket in list(self.open_tickets.items()):
+            symbol, _strategy = parse_position_key(key)
             positions = self.broker.get_open_positions(symbol)
             position = next((p for p in positions if p.ticket == ticket), None)
             if position is None:
@@ -1223,7 +1380,8 @@ class TradingBot:
         )
 
     def _close_all_positions(self, now: datetime, *, reason: str) -> None:
-        for symbol, ticket in list(self.open_tickets.items()):
+        for key, ticket in list(self.open_tickets.items()):
+            symbol, _strategy = parse_position_key(key)
             try:
                 trade = self.broker.close_position(ticket)
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
@@ -1232,16 +1390,21 @@ class TradingBot:
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
                 self._position_meta.pop(ticket, None)
-                self.open_tickets.pop(symbol, None)
+                self.open_tickets.pop(key, None)
+                self.attribution.for_strategy(_strategy).closed += 1
                 logger.warning("Force-closed {} ticket={} reason={}", symbol, ticket, reason)
             except Exception:  # noqa: BLE001
                 logger.exception("Failed force-close {} ticket={}", symbol, ticket)
         self._persist_state()
 
     def _manage_open_position(self, symbol: str, now: datetime) -> None:
-        ticket = self.open_tickets.get(symbol)
-        if ticket is None:
-            return
+        for key in list(self._keys_for_symbol(symbol)):
+            ticket = self.open_tickets.get(key)
+            if ticket is None:
+                continue
+            self._manage_one_ticket(symbol, key, ticket, now)
+
+    def _manage_one_ticket(self, symbol: str, key: str, ticket: int, now: datetime) -> None:
 
         positions = self.broker.get_open_positions(symbol)
         position = next((p for p in positions if p.ticket == ticket), None)
@@ -1277,8 +1440,10 @@ class TradingBot:
                     self.three_strikes.record_result(symbol, trade.pnl, at=now)
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
-                self.open_tickets.pop(symbol, None)
+                self.open_tickets.pop(key, None)
                 self._position_meta.pop(ticket, None)
+                _strat = parse_position_key(key)[1]
+                self.attribution.for_strategy(_strat).closed += 1
                 self._persist_state()
                 logger.info(
                     "Paper {} closed via {} pnl={:.2f}",
@@ -1371,7 +1536,7 @@ class TradingBot:
                 AlertLevel.INFO,
             )
 
-        self.open_tickets.pop(symbol, None)
+        self._drop_ticket(ticket)
         self._position_meta.pop(ticket, None)
         self._persist_state()
 
