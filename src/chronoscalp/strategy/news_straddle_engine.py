@@ -66,6 +66,7 @@ class StraddleSession:
     filled_position_ticket: int | None = None
     distance: float = 0.0
     volume: float = 0.0
+    dollar_risk: float = 0.0
 
 
 @dataclass
@@ -212,6 +213,7 @@ class DynamicNewsStraddleEngine:
         moment: datetime,
         upcoming: UpcomingNews,
         spread_pips: float,
+        risk_pct: float | None = None,
     ) -> StraddleTickResult:
         """Place dynamic Buy Stop & Sell Stop pending orders (spread-shield gated)."""
         session = self.sessions.get(symbol)
@@ -262,7 +264,7 @@ class DynamicNewsStraddleEngine:
             )
 
         equity = float(broker.get_balance())
-        volume = float(self.risk_manager.position_size_for(buy_sig, equity))
+        volume = float(self.risk_manager.position_size_for(buy_sig, equity, risk_pct=risk_pct))
         if volume <= 0:
             return StraddleTickResult(
                 symbol=symbol,
@@ -270,6 +272,12 @@ class DynamicNewsStraddleEngine:
                 action="zero_volume",
                 message="position_size_zero",
             )
+        allocated_pct = (
+            float(risk_pct)
+            if risk_pct is not None
+            else float(self.risk_manager.risk_cfg.get("active_risk_per_trade_pct", 1.0))
+        )
+        dollar_risk = max(0.0, equity * min(allocated_pct, 1.0) / 100.0)
 
         expiration = moment + timedelta(seconds=self.expiry_seconds)
         try:
@@ -314,6 +322,7 @@ class DynamicNewsStraddleEngine:
             expires_at=expiration,
             distance=distance,
             volume=volume,
+            dollar_risk=dollar_risk,
         )
         self.sessions[symbol] = session
         logger.info(
@@ -477,6 +486,7 @@ class DynamicNewsStraddleEngine:
         allow_place: bool = True,
         abort_pending: bool = False,
         placement_block_reason: str | None = None,
+        risk_pct: float | None = None,
     ) -> StraddleTickResult:
         """Drive pause → place → OCO → expiry for one symbol.
 
@@ -608,4 +618,5 @@ class DynamicNewsStraddleEngine:
             moment=now,
             upcoming=upcoming,
             spread_pips=spread_pips,
+            risk_pct=risk_pct,
         )

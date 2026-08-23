@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.strategy.live_gates import force_shadow_if_not_live_ready
 
 ENV_PATH = Path(".env")
 OVERRIDES_PATH = Path("config/runtime_overrides.yaml")
@@ -277,7 +278,7 @@ def apply_active_symbols(
 def apply_enabled_strategies(
     strategies: list[str],
     *,
-    overrides_path: Path = OVERRIDES_PATH,
+    overrides_path: Path | None = None,
     shadow: list[str] | None = None,
 ) -> list[str]:
     """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only.
@@ -286,6 +287,7 @@ def apply_enabled_strategies(
     (``shadow_only: true``). Shadow ids are also written to
     ``enabled_strategies`` so the engine actually runs.
     """
+    overrides_path = overrides_path or OVERRIDES_PATH
     known = set(KNOWN_STRATEGIES)
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -315,10 +317,21 @@ def apply_enabled_strategies(
     xau = dict(strategy.get("xau_vwap_pullback") or {})
     if "xau_vwap_pullback" in seen:
         xau["enabled"] = True
-        xau["shadow_only"] = "xau_vwap_pullback" in shadow_set
+        must_shadow = force_shadow_if_not_live_ready(
+            "xau_vwap_pullback",
+            strategy_cfg={"xau_vwap_pullback": xau},
+            requested_shadow="xau_vwap_pullback" in shadow_set,
+        )
+        xau["shadow_only"] = must_shadow
+        if must_shadow:
+            shadow_set.add("xau_vwap_pullback")
     else:
         xau["enabled"] = False
         xau["shadow_only"] = True
+    # UI/API must never flip the research gate.
+    xau.setdefault("live_ready", False)
+    if not xau.get("live_ready"):
+        xau["live_ready"] = False
     strategy["xau_vwap_pullback"] = xau
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)

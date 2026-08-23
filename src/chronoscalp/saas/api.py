@@ -276,7 +276,17 @@ def create_app() -> FastAPI:
     @app.post("/settings/strategies", dependencies=[Depends(_require_token)])
     def set_strategies(body: StrategiesRequest) -> dict[str, Any]:
         saved = apply_enabled_strategies(body.strategies)
-        return {"ok": True, "strategies": saved, "known": list(KNOWN_STRATEGIES)}
+        from chronoscalp.saas.broker_wizard import OVERRIDES_PATH, _load_overrides
+
+        overlay = _load_overrides(OVERRIDES_PATH)
+        xau = (overlay.get("strategy") or {}).get("xau_vwap_pullback") or {}
+        return {
+            "ok": True,
+            "strategies": saved,
+            "known": list(KNOWN_STRATEGIES),
+            "xau_vwap_pullback_shadow_only": bool(xau.get("shadow_only", True)),
+            "xau_vwap_pullback_live_ready": bool(xau.get("live_ready", False)),
+        }
 
     @app.post("/settings/hours", dependencies=[Depends(_require_token)])
     def set_hours(body: HoursRequest) -> dict[str, Any]:

@@ -130,6 +130,7 @@ strategy:
     # Research candidate. Not live-ready. Must stay off until OOS gates pass.
     enabled: false
     shadow_only: true
+    live_ready: false
     allowed_symbols: [XAUUSD]
     ema_slope_bars: 3
     impulse_lookback: 8

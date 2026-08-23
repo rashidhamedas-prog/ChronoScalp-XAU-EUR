@@ -128,6 +128,28 @@ def test_position_keys_are_per_strategy():
     assert position_key("XAUUSD", "delta") == "XAUUSD::delta"
 
 
+def test_paper_stop_does_not_fill_without_crossing_quote():
+    from chronoscalp.utils.types import PendingOrderSide
+
+    broker = PaperBroker(symbols_cfg=_symbols(), starting_balance=10_000)
+    broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.1,
+        price=2010.0,
+        stop_loss=1990.0,
+        take_profit=2050.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    assert broker.get_pending_orders("XAUUSD")
+    assert broker.get_open_positions("XAUUSD") == []
+    broker.set_quote("XAUUSD", 2008.0, 2009.0)
+    assert broker.get_open_positions("XAUUSD") == []
+    broker.set_quote("XAUUSD", 2010.0, 2010.5)
+    assert broker.get_open_positions("XAUUSD")
+
+
 def test_remaining_heat_is_allocated_not_winner_takes_all():
     first = allocate_risk_pct(requested_risk_pct=1.0, open_heat_pct=0.0, max_heat_pct=3.0)
     second = allocate_risk_pct(requested_risk_pct=1.0, open_heat_pct=1.0, max_heat_pct=3.0)

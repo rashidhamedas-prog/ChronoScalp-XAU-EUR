@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-22T16:40:00Z"
+    heartbeat_at: "2026-08-22T17:15:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"
@@ -50,7 +50,9 @@ tasks:
       - "src/chronoscalp/strategy/multi_timeframe.py"
       - "src/chronoscalp/strategy/news_skip_reasons.py"
       - "src/chronoscalp/strategy/news_straddle_engine.py"
+      - "src/chronoscalp/strategy/live_gates.py"
       - "src/chronoscalp/strategy/xau_vwap_pullback.py"
+      - "src/chronoscalp/orchestration/comparison_books.py"
       - "src/chronoscalp/telegram/control_bot.py"
       - "src/chronoscalp/telegram/keyboards.py"
       - "src/chronoscalp/utils/strategy_tags.py"
@@ -70,6 +72,10 @@ tasks:
       - "tests/test_backtest_engine.py"
       - "tests/test_risk.py"
       - "tests/test_account_mode.py"
+      - "tests/test_api.py"
+      - "tests/test_trading_bot_multistrat.py"
+      - "tests/test_live_gates.py"
+      - "tests/test_comparison_books.py"
     acceptance_criteria:
       - "Enabled strategies emit independent candidates; pick_best_signal is unused on live/paper/backtest paths."
       - "Open positions are keyed (symbol, strategy, ticket); one strategy cannot block another on the same symbol."

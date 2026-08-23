@@ -170,6 +170,7 @@ class OANDABroker:
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         raise NotImplementedError(
             "News straddle pending STOP orders require MT5 (or paper). "

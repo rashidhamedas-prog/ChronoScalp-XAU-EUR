@@ -18,8 +18,9 @@ winner-takes-all.
 3. **M1 pullback:** 30–65% retrace **or** touch of the broken level / session
    VWAP within 0.20 ATR(M1). Rejection body/range ≥ 0.45 and close in the 30%
    extreme. No close beyond impulse origin. M1 RVOL ≥ 1.10 is score-only.
-4. **Entry:** 1 tick beyond the rejection; cancel if unfilled 2 M1 bars; no
-   chase if price is > 0.25 ATR from the trigger.
+4. **Entry:** BUY_STOP / SELL_STOP one tick beyond the rejection (not a market
+   order). Cancel if unfilled after 2 M1 bars; no chase if price is > 0.25 ATR
+   from the trigger.
 5. **Geometry:** SL behind the pullback swing + 0.15 ATR(M1), clamped to
    `[max(0.70 ATR, 2×spread), 1.80 ATR]`. TP 2.0R. Gross floor remains 1.5R.
    Planned net R:R after spread+commission+slippage at **1.5× cost stress**
@@ -42,8 +43,10 @@ Forbidden: martingale, grid, averaging down, raising risk after a loss.
 
 ## Telegram control
 
-Open `تنظیمات → استراتژی‌ها`. `پولبک VWAP (طلا)` cycles **off → shadow → on**.
-Shadow records candidates and counters but places **no order**. Save, then
+Open `تنظیمات → استراتژی‌ها`. `پولبک VWAP (طلا)` cycles **off ↔ shadow** until
+`live_ready: true` in config after validation. Telegram, Streamlit, and the
+control API cannot persist a live enable while that gate is false. Shadow
+records candidates and counters but places **no order**. Save, then
 **Stop then Start** the trading process. Overlay source is shown on `/status`.
 
 ## Required validation before live use

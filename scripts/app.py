@@ -475,6 +475,7 @@ def page_control(settings) -> None:
 
     st.markdown(f"#### {_t('strategies_label')}")
     st.caption(_t("strategies_hint"))
+    st.caption("XAU VWAP pullback cannot be live-enabled until live_ready (validation gates).")
     selected_strats = st.multiselect(
         _t("strategies_label"),
         options=list(KNOWN_STRATEGIES),
@@ -484,7 +485,14 @@ def page_control(settings) -> None:
         key="active_strategies_ms",
     )
     if st.button(_t("strategies_save"), key="save_strategies_btn"):
-        saved = apply_enabled_strategies(selected_strats)
+        from chronoscalp.strategy.live_gates import is_strategy_live_ready
+
+        shadow: list[str] = []
+        if "xau_vwap_pullback" in selected_strats and not is_strategy_live_ready(
+            settings.strategy, "xau_vwap_pullback"
+        ):
+            shadow = ["xau_vwap_pullback"]
+        saved = apply_enabled_strategies(selected_strats, shadow=shadow)
         get_settings.cache_clear()
         st.success(", ".join(saved) if saved else "(MACD/trend only)")
         st.info(_t("need_restart"))
@@ -591,9 +599,7 @@ def page_control(settings) -> None:
         if st.button(_t("daily_loss_unlock"), key="daily_loss_unlock_btn"):
             user_cfg = UserConfigStore().config
             unlock_mode = (
-                user_cfg.broker.mode
-                if user_cfg.broker.mode in ("paper", "live")
-                else "live"
+                user_cfg.broker.mode if user_cfg.broker.mode in ("paper", "live") else "live"
             )
             reset_at = write_daily_reset_marker(Path("data/state"), unlock_mode)
             write_daily_reset_marker(

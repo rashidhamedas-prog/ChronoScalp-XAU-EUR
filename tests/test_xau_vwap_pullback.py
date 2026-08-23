@@ -192,7 +192,7 @@ def test_origin_break_and_no_chase_pending():
         bars_left=2,
         atr=4.0,
         reason="xau_vwap_pullback,pending",
-        emitted=True,
+        stop_emitted=True,
     )
     m1 = _m15("up").copy()
     m1["atr"] = 4.0
@@ -240,6 +240,7 @@ def test_default_config_is_shadow_only_not_live():
     xau = settings.strategy.get("xau_vwap_pullback") or {}
     assert xau.get("enabled") is False
     assert xau.get("shadow_only") is True
+    assert xau.get("live_ready") is False
     assert "xau_vwap_pullback" not in (settings.strategy.get("enabled_strategies") or [])
     assert is_shadow_only(settings.strategy, "xau_vwap_pullback") is True
 
@@ -337,3 +338,59 @@ def test_attribution_heat_block_counters():
     snap = ledger.snapshot()
     assert snap["xau_vwap_pullback"]["lost_arbitration"] == 1
     assert snap["xau_vwap_pullback"]["heat_blocked_by"]["delta"] == 1
+
+
+def test_stop_trigger_expires_after_two_m1_bars():
+    engine = XauVwapPullbackEngine(cfg=_cfg(), symbols_cfg={"XAUUSD": {"pip_size": 0.01}})
+    engine._impulse["XAUUSD"] = ImpulseState(
+        direction=TrendDirection.BULLISH,
+        origin=1990.0,
+        extreme=2020.0,
+        broken_level=2010.0,
+        started_at=datetime(2026, 7, 13, 12, tzinfo=UTC),
+        m1_bars=1,
+    )
+    from chronoscalp.strategy.xau_vwap_pullback import PendingTrigger
+
+    engine._pending["XAUUSD"] = PendingTrigger(
+        direction=TrendDirection.BULLISH,
+        entry=2010.0,
+        stop_loss=2000.0,
+        take_profit=2030.0,
+        rejection_high=2009.99,
+        rejection_low=2005.0,
+        score=6,
+        rvol=1.2,
+        created_at=datetime(2026, 7, 13, 13, tzinfo=UTC),
+        bars_left=2,
+        atr=4.0,
+        reason="xau_vwap_pullback,pending",
+        stop_emitted=True,
+    )
+    m1 = _m15("up").copy()
+    m1["atr"] = 4.0
+    m1["rvol"] = 1.2
+    m1.iloc[-1, m1.columns.get_loc("close")] = 2010.2
+    first = engine.evaluate(
+        "XAUUSD",
+        m1=m1,
+        m5=_m15("up"),
+        m15=_m15("up"),
+        spread_pips=20.0,
+        median_spread_pips=20.0,
+        broker_spread_cap_pips=35.0,
+    )
+    assert first.signal_type == SignalType.NONE
+    assert "awaiting_fill" in first.reason
+    assert engine.working_stop("XAUUSD") is not None
+    second = engine.evaluate(
+        "XAUUSD",
+        m1=m1,
+        m5=_m15("up"),
+        m15=_m15("up"),
+        spread_pips=20.0,
+        median_spread_pips=20.0,
+        broker_spread_cap_pips=35.0,
+    )
+    assert "trigger_expired" in second.reason
+    assert engine.working_stop("XAUUSD") is None

@@ -222,6 +222,7 @@ class MT5Broker:
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         _require_windows()
         import MetaTrader5 as mt5
@@ -278,6 +279,7 @@ class MT5Broker:
             take_profit=float(take_profit),
             comment=sanitize_mt5_comment(comment or "CS_News"),
             expiration=expiration,
+            strategy=strategy,
         )
 
     def cancel_pending_order(self, ticket: int) -> bool:

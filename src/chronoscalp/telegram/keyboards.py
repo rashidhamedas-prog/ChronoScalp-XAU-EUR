@@ -146,8 +146,14 @@ def cycle_strategy_selection(
     key: str,
     selected: list[str],
     shadow: list[str],
+    *,
+    allow_live: bool = True,
 ) -> tuple[list[str], list[str]]:
-    """Advance one strategy: off↔on, or off→shadow→on→off for shadow-capable ids."""
+    """Advance one strategy: off↔on, or off→shadow→on→off for shadow-capable ids.
+
+    ``allow_live=False`` skips the enabled state (off ↔ shadow only). Used when
+    ``live_ready`` is false so Telegram cannot live-enable a gated strategy.
+    """
     selected_l = [s for s in selected if s != key]
     shadow_l = [s for s in shadow if s != key]
     in_selected = key in selected
@@ -156,7 +162,9 @@ def cycle_strategy_selection(
         if not in_selected and not in_shadow:
             return [*selected_l, key], [*shadow_l, key]
         if in_shadow:
-            return [*selected_l, key], shadow_l
+            if allow_live:
+                return [*selected_l, key], shadow_l
+            return selected_l, shadow_l
         return selected_l, shadow_l
     if in_selected:
         return selected_l, shadow_l

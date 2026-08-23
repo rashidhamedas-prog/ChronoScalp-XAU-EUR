@@ -59,6 +59,7 @@ class Broker(Protocol):
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         """Place a BUY_STOP / SELL_STOP pending order (news straddle)."""
         ...

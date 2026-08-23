@@ -535,13 +535,13 @@ def test_strategies_menu_says_simultaneous_and_hides_xau_from_all(
     assert "xau_vwap_pullback" not in bot._pending[42]["selected"]
 
 
-def test_xau_vwap_cycles_shadow_then_enabled(bot: TelegramControlBot) -> None:
+def test_xau_vwap_cycles_shadow_then_off_when_not_live_ready(bot: TelegramControlBot) -> None:
     bot.handle(42, "استراتژی‌ها")
     bot.handle(42, "⬜ پولبک VWAP (طلا)")
     assert "xau_vwap_pullback" in bot._pending[42]["selected"]
     assert "xau_vwap_pullback" in bot._pending[42]["shadow"]
     bot.handle(42, "👁 پولبک VWAP (طلا)")
-    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
+    assert "xau_vwap_pullback" not in bot._pending[42]["selected"]
     assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
 
 

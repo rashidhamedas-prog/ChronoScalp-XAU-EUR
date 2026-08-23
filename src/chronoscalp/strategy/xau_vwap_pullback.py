@@ -82,7 +82,7 @@ class PendingTrigger:
     bars_left: int
     atr: float
     reason: str
-    emitted: bool = False
+    stop_emitted: bool = False
 
 
 @dataclass
@@ -97,6 +97,10 @@ class XauVwapPullbackEngine:
     def reset(self) -> None:
         self._impulse.clear()
         self._pending.clear()
+
+    def working_stop(self, symbol: str) -> PendingTrigger | None:
+        """Return the unfilled stop trigger, if any."""
+        return self._pending.get(symbol)
 
     def evaluate(
         self,
@@ -188,18 +192,19 @@ class XauVwapPullbackEngine:
 
         pending = self._pending.get(symbol)
         if pending is not None:
-            pending.bars_left -= 1
             chase_atr = float(cfg.get("no_chase_atr", 0.25))
             last_close = float(last_m1["close"])
             if abs(last_close - pending.entry) > chase_atr * pending.atr:
                 self._pending.pop(symbol, None)
                 return _none(symbol, "no_chase")
-            if pending.bars_left <= 0:
-                self._pending.pop(symbol, None)
-                return _none(symbol, "trigger_expired")
-            if pending.emitted:
+            if pending.stop_emitted:
+                pending.bars_left -= 1
+                if pending.bars_left <= 0:
+                    self._pending.pop(symbol, None)
+                    return _none(symbol, "trigger_expired")
                 return _none(symbol, "awaiting_fill")
-            return _none(symbol, "awaiting_trigger")
+            pending.stop_emitted = True
+            return self._signal_from_pending(symbol, pending, last_m1)
 
         vwap = session_vwap(m15) or session_vwap(m1)
         pullback = assess_m1_pullback(
@@ -261,8 +266,8 @@ class XauVwapPullbackEngine:
             bars_left=int(cfg.get("trigger_expire_m1_bars", 2)),
             atr=atr_m1,
             reason=reason,
+            stop_emitted=True,
         )
-        pending.emitted = True
         self._pending[symbol] = pending
         return self._signal_from_pending(symbol, pending, last_m1)
 
@@ -281,6 +286,7 @@ class XauVwapPullbackEngine:
             reason=pending.reason,
             timeframe=Timeframe.M1,
             strategy=STRATEGY_ID,
+            order_kind="stop",
         )
 
 

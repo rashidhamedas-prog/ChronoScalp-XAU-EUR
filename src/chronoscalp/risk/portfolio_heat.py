@@ -25,6 +25,29 @@ def resolve_max_portfolio_heat_pct(risk_cfg: dict) -> float:
     return min(requested, daily)
 
 
+def reconstruct_dollar_risk(
+    *,
+    entry: float | None,
+    stop: float | None,
+    volume: float | None,
+    pip_size: float,
+    pip_value: float,
+) -> float | None:
+    """Rebuild dollar risk from geometry. None when any input is unusable."""
+    try:
+        entry_f = float(entry) if entry is not None else 0.0
+        stop_f = float(stop) if stop is not None else 0.0
+        vol_f = float(volume) if volume is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if entry_f <= 0 or stop_f <= 0 or vol_f <= 0 or pip_size <= 0 or pip_value <= 0:
+        return None
+    risk_price = abs(entry_f - stop_f)
+    if risk_price <= 0:
+        return None
+    return risk_price / pip_size * pip_value * vol_f
+
+
 def position_heat_pct(position: Position, equity: float) -> float:
     """Open dollar risk as a percent of equity (stop distance * notional / equity)."""
     if equity <= 0:
@@ -32,9 +55,6 @@ def position_heat_pct(position: Position, equity: float) -> float:
     risk_price = abs(float(position.entry_price) - float(position.stop_loss))
     if risk_price <= 0:
         return 0.0
-    # Volume is lots; dollar risk is reconstructed from stored initial stop when
-    # callers pass ``risk_amount`` via meta. Fallback: treat stop distance as
-    # a fraction of entry (used when contract size is unknown).
     initial_sl = position.initial_stop_loss
     if initial_sl is not None:
         risk_price = abs(float(position.entry_price) - float(initial_sl))
@@ -97,6 +117,52 @@ def allocate_risk_pct(
             fitted,
             open_heat_pct,
             max_heat_pct,
+        )
+    return HeatAllocation(
+        allowed=True,
+        risk_pct=fitted,
+        remaining_heat_pct=remaining,
+        reason="",
+    )
+
+
+def allocate_batch_risk_pct(
+    *,
+    n: int,
+    requested_risk_pct: float,
+    open_heat_pct: float,
+    max_heat_pct: float,
+    per_trade_ceiling: float = HARD_MAX_RISK_PCT,
+) -> HeatAllocation:
+    """Split remaining heat equally across ``n`` simultaneous candidates.
+
+    Order of strategies must not consume the budget. Each share is still capped
+    at 1% per trade. If remaining heat cannot fund ``n`` shares above zero,
+    the whole batch is blocked.
+    """
+    if n <= 0:
+        return HeatAllocation(
+            allowed=False,
+            risk_pct=0.0,
+            remaining_heat_pct=max(0.0, max_heat_pct - open_heat_pct),
+            reason="portfolio_heat",
+        )
+    remaining = max_heat_pct - open_heat_pct
+    ceiling = min(max(requested_risk_pct, 0.0), per_trade_ceiling, HARD_MAX_RISK_PCT)
+    if remaining <= 1e-12:
+        return HeatAllocation(
+            allowed=False,
+            risk_pct=0.0,
+            remaining_heat_pct=0.0,
+            reason="portfolio_heat",
+        )
+    fitted = min(ceiling, remaining / float(n))
+    if fitted <= 1e-12:
+        return HeatAllocation(
+            allowed=False,
+            risk_pct=0.0,
+            remaining_heat_pct=remaining,
+            reason="portfolio_heat",
         )
     return HeatAllocation(
         allowed=True,

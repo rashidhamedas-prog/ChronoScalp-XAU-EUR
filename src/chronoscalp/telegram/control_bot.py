@@ -49,6 +49,7 @@ from chronoscalp.saas.process_control import (
     tail_logs,
 )
 from chronoscalp.saas.user_config import UserConfigStore
+from chronoscalp.strategy.live_gates import is_strategy_live_ready
 from chronoscalp.telegram.keyboards import (
     ALIASES,
     CONN_KEYBOARD,
@@ -1058,7 +1059,12 @@ class TelegramControlBot:
             return
         selected = list(self._strategies_menu_state(chat_id))
         shadow = list(self._strategies_shadow_state(chat_id))
-        selected, shadow = cycle_strategy_selection(key, selected, shadow)
+        selected, shadow = cycle_strategy_selection(
+            key,
+            selected,
+            shadow,
+            allow_live=is_strategy_live_ready(self.settings.strategy, key),
+        )
         self._pending[chat_id] = {
             "flow": "strategies_menu",
             "step": "pick",

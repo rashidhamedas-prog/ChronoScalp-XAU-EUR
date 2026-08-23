@@ -2,6 +2,37 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-22 TASK-002 review-fix complete (do not merge)
+
+- Time (UTC): 2026-08-22T17:15:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close merge-blocking findings on `6865d95` without live-enabling VWAP or loosening 1%/1.5R/3%.
+- Product changes:
+  - News pending: heat reserved **before** `news_straddle.tick`; dollar-risk capped to the allocated remainder; MT5 netting still fail-closed.
+  - Simultaneous candidates: equal batch split of remaining heat (still ≤1%/trade).
+  - `xau_vwap_pullback` places a stop pending; paper fills only from a **stored** crossing quote (never a synthetic quote from the pending price); expire after 2 M1 bars / engine `working_stop` None cancels.
+  - `live_ready: false` fail-closed on API / Streamlit / Telegram; live loop still refuses real orders.
+  - Comparison books: last quote cached onto newly created per-strategy PaperBrokers; R-normalized reports.
+  - Backtest HTF uses closed-bar mask (`index + duration <= t`); comparison books + stop pendings.
+  - `max_concurrent` re-checked after each fill and after stop reservation; harvest after stop place.
+  - Incomplete heat metadata: reconstruct from live geometry or `_heat_unknown` blocks new entries.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_full` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files after format → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent reviewer + security (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
+## 2026-08-22 TASK-002 review-fix (Changes Requested on 6865d95)
+
+- Time (UTC): 2026-08-22T16:55:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: fix merge-blocking findings without live-enabling VWAP or loosening 1%/1.5R/3%.
+- Scope: news heat reservation + netting; fair batch heat; VWAP stop-pending; live_ready fail-closed on API/Streamlit/Telegram; comparison books; HTF no-lookahead; max_concurrent after each reservation; reconstruct/fail-closed heat metadata; black `scripts/app.py`; ChronoScalp `TradingBot.tick` integration tests.
+- Exact next action: implement, pytest/ruff/black, commit+push, re-request independent review. Do **not** merge. Do **not** set `live_ready: true`.
+
 ## 2026-08-22 TASK-002 independent multi-strategy + xau_vwap_pullback
 
 - Time (UTC): 2026-08-22T16:40:00Z
