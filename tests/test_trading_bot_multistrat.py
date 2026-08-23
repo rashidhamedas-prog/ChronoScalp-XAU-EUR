@@ -82,6 +82,7 @@ def _make_bot(
     heat_pct: float = 3.0,
     strategies: list[str] | None = None,
     confirm_live: bool = False,
+    broker: PaperBroker | None = None,
 ) -> TradingBot:
     frames = _frames()
     settings = Settings()
@@ -118,12 +119,13 @@ def _make_bot(
         settings.secrets.chronoscalp_confirm_live = "yes"
 
     connector = FakeConnector(frames)
-    broker = PaperBroker(
-        symbols_cfg=settings.symbols_raw,
-        starting_balance=10_000.0,
-        slippage_pips=0.0,
-    )
-    broker.set_quote("XAUUSD", 1999.5, 2000.5)
+    if broker is None:
+        broker = PaperBroker(
+            symbols_cfg=settings.symbols_raw,
+            starting_balance=10_000.0,
+            slippage_pips=0.0,
+        )
+        broker.set_quote("XAUUSD", 1999.5, 2000.5)
 
     monkeypatch.setattr("chronoscalp.main.create_data_connector", lambda _s: connector)
     monkeypatch.setattr(
@@ -469,11 +471,14 @@ def test_tick_news_reservation_keeps_total_heat_at_cap(
     )
     bot.use_news_straddle = True
     monkeypatch.setattr(bot, "_manage_open_position", lambda *_a, **_k: None)
-    bot._heat_reservations[bot._open_key("XAUUSD", "liquidity_volume")] = {
-        "symbol": "XAUUSD",
-        "strategy": "liquidity_volume",
+    occupied = bot.broker.place_order(_signal("liquidity_volume"), 0.1)
+    bot._register_open("XAUUSD", "liquidity_volume", occupied.ticket)
+    bot._position_meta[occupied.ticket] = {
+        "initial_volume": occupied.volume,
+        "initial_stop_loss": occupied.stop_loss,
+        "entry_price": occupied.entry_price,
         "dollar_risk": 200.0,
-        "tickets": [],
+        "strategy": "liquidity_volume",
     }
     assert bot.max_concurrent >= 8
     assert bot._committed_heat_pct(10_000) == pytest.approx(2.0)
@@ -559,3 +564,168 @@ def test_tick_comparison_uses_independent_brokers(
     assert "delta" in reports
     assert "liquidity_volume" in reports
     assert "expectancy_r" in reports["delta"]
+
+
+def test_tick_restores_pending_heat_after_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    first = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    broker = first.broker
+    restarted = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta"],
+        heat_pct=3.0,
+        broker=broker,
+    )
+    assert restarted._heat_reservations == {}
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta")]
+        return []
+
+    monkeypatch.setattr(restarted.strategy, "evaluate_candidates", _eval)
+    restarted.tick()
+    reserved = restarted._heat_reservations.get(restarted._open_key("XAUUSD", "xau_vwap_pullback"))
+    assert reserved is not None
+    assert reserved["dollar_risk"] == pytest.approx(300.0)
+    assert restarted._committed_heat_pct(10_000) == pytest.approx(3.0)
+    assert not any(p.strategy == "delta" for p in restarted.broker.get_open_positions())
+
+
+def test_tick_unreadable_pending_heat_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    first = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=0.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    restarted = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta"],
+        heat_pct=3.0,
+        broker=first.broker,
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta")]
+        return []
+
+    monkeypatch.setattr(restarted.strategy, "evaluate_candidates", _eval)
+    restarted.tick()
+    assert restarted._heat_unknown
+    assert not any(p.strategy == "delta" for p in restarted.broker.get_open_positions())
+
+
+def test_tick_pending_list_failure_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    first = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    restarted = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta"],
+        heat_pct=3.0,
+        broker=first.broker,
+    )
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("pending list failed")
+
+    monkeypatch.setattr(restarted.broker, "get_pending_orders", _boom)
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta")]
+        return []
+
+    monkeypatch.setattr(restarted.strategy, "evaluate_candidates", _eval)
+    restarted.tick()
+    assert restarted._heat_unknown
+    assert restarted._pending_restore_failed
+    assert not any(p.strategy == "delta" for p in restarted.broker.get_open_positions())
+
+
+def test_tick_restores_news_oco_as_max_not_sum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    first = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_News_B",
+        strategy="news_straddle",
+    )
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.SELL_STOP,
+        volume=0.10,
+        price=1980.0,
+        stop_loss=2010.0,
+        take_profit=1920.0,
+        comment="CS_News_S",
+        strategy="news_straddle",
+    )
+    restarted = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta"],
+        heat_pct=3.0,
+        broker=first.broker,
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta")]
+        return []
+
+    monkeypatch.setattr(restarted.strategy, "evaluate_candidates", _eval)
+    restarted.tick()
+    reserved = restarted._heat_reservations.get(restarted._open_key("XAUUSD", "news_straddle"))
+    assert reserved is not None
+    assert reserved["dollar_risk"] == pytest.approx(300.0)
+    assert len(reserved["tickets"]) == 2
+    assert restarted._committed_heat_pct(10_000) == pytest.approx(3.0)
+    assert not any(p.strategy == "delta" for p in restarted.broker.get_open_positions())

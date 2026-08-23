@@ -2,6 +2,24 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 security follow-up: restore pending heat after restart
+
+- Time (UTC): 2026-08-23T10:30:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close the medium security finding that `_heat_reservations` were in-memory only after Stop/Start/crash.
+- Product changes:
+  - `_restore_pending_heat_reservations` scans broker pendings on every tick and after reconcile; rebuilds dollar risk from geometry.
+  - News OCO two legs reserve **max** (not sum).
+  - Unreadable CS_ comments, unusable SL/volume, or `get_pending_orders` failure set `_pending_restore_failed` / `_heat_unknown` so new entries cannot slip under the 3% cap.
+  - `_open_dollar_risks` keeps that fail-closed flag (does not clear it after a failed pending list).
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_heat` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent security + functional reviewer (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
 ## 2026-08-22 TASK-002 review-fix complete (do not merge)
 
 - Time (UTC): 2026-08-22T17:15:00Z

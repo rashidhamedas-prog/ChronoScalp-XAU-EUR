@@ -23,6 +23,9 @@ def test_strategy_from_reason_common_engines() -> None:
     assert resolve_strategy_tag(reason="", comment="CS_news_straddle") == "news_straddle"
     assert strategy_from_reason("delta,sweep_reclaim,trend=bullish") == "delta"
     assert normalize_strategy_tag("CS_delta") == "delta"
+    assert normalize_strategy_tag("CS_News_B") == "news_straddle"
+    assert normalize_strategy_tag("CS_News_S") == "news_straddle"
+    assert normalize_strategy_tag("CS_News") == "news_straddle"
 
 
 def test_mt5_comment_for_strategy_is_short() -> None:

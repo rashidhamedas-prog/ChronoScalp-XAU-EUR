@@ -94,7 +94,11 @@ from chronoscalp.strategy.multi_timeframe import (
 )
 from chronoscalp.strategy.news_skip_reasons import NewsSkipReason
 from chronoscalp.strategy.news_straddle_engine import DynamicNewsStraddleEngine
-from chronoscalp.utils.strategy_tags import mt5_comment_for_strategy, resolve_strategy_tag
+from chronoscalp.utils.strategy_tags import (
+    STRATEGY_UNKNOWN,
+    mt5_comment_for_strategy,
+    resolve_strategy_tag,
+)
 from chronoscalp.utils.types import PendingOrderSide, SignalType, Timeframe
 
 STANDARD_TIMEFRAMES = [Timeframe.M1, Timeframe.M3, Timeframe.M5, Timeframe.M10, Timeframe.M15]
@@ -294,6 +298,7 @@ class TradingBot:
             )
         self._heat_reservations: dict[str, dict] = {}
         self._heat_unknown = False
+        self._pending_restore_failed = False
         try:
             self._account_mode = self.broker.account_margin_mode()
         except Exception:  # noqa: BLE001
@@ -390,10 +395,15 @@ class TradingBot:
             if key in self.open_tickets:
                 continue
             try:
-                risks.append(float(reservation.get("dollar_risk") or 0.0))
+                value = float(reservation.get("dollar_risk") or 0.0)
             except (TypeError, ValueError):
                 complete = False
-        self._heat_unknown = not complete
+                continue
+            if value <= 0:
+                complete = False
+                continue
+            risks.append(value)
+        self._heat_unknown = (not complete) or self._pending_restore_failed
         return risks
 
     def _all_open_positions(self) -> list:
@@ -479,6 +489,115 @@ class TradingBot:
 
     def _release_heat(self, symbol: str, strategy: str) -> dict | None:
         return self._heat_reservations.pop(self._open_key(symbol, strategy), None)
+
+    def _execution_brokers(self) -> list:
+        brokers = [self.broker]
+        if self.comparison_books is not None:
+            for book in self.comparison_books._books.values():  # noqa: SLF001
+                brokers.append(book.broker)
+        unique: list = []
+        seen: set[int] = set()
+        for broker in brokers:
+            marker = id(broker)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            unique.append(broker)
+        return unique
+
+    def _strategy_for_pending(self, order: object) -> str | None:
+        """Return a canonical strategy, empty string to skip, or None to fail-closed."""
+        explicit = str(getattr(order, "strategy", "") or "")
+        comment = str(getattr(order, "comment", "") or "")
+        tag = resolve_strategy_tag(explicit=explicit, comment=comment, reason=comment)
+        if tag != STRATEGY_UNKNOWN:
+            return tag
+        if comment.upper().startswith("CS_"):
+            return None
+        return ""
+
+    def _restore_pending_heat_reservations(self) -> None:
+        """Rebuild in-memory heat from broker pendings after restart/reconcile.
+
+        Fail-closed: unreadable managed pendings mark heat unknown so new
+        entries cannot slip under an under-counted 3% cap.
+        """
+        grouped: dict[str, list] = {}
+        complete = True
+        self._pending_restore_failed = False
+        try:
+            pending: list = []
+            for broker in self._execution_brokers():
+                pending.extend(broker.get_pending_orders() or [])
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed listing pending orders while restoring heat")
+            self._pending_restore_failed = True
+            self._heat_unknown = True
+            return
+
+        for order in pending:
+            strategy = self._strategy_for_pending(order)
+            if strategy is None:
+                logger.error(
+                    "Managed pending ticket={} comment={!r} has no strategy — blocking new entries",
+                    getattr(order, "ticket", "?"),
+                    getattr(order, "comment", ""),
+                )
+                complete = False
+                continue
+            if not strategy:
+                continue
+            symbol = str(getattr(order, "symbol", "") or "")
+            if not symbol:
+                complete = False
+                continue
+            key = self._open_key(symbol, strategy)
+            grouped.setdefault(key, []).append(order)
+
+        rebuilt: dict[str, dict] = {}
+        for key, orders in grouped.items():
+            symbol, strategy = parse_position_key(key)
+            tickets = [int(order.ticket) for order in orders]
+            risks: list[float] = []
+            for order in orders:
+                rebuilt_risk = reconstruct_dollar_risk(
+                    entry=getattr(order, "price", None),
+                    stop=getattr(order, "stop_loss", None),
+                    volume=getattr(order, "volume", None),
+                    pip_size=float(
+                        (self.settings.symbols_raw.get(symbol) or {}).get("pip_size", 0.0) or 0.0
+                    ),
+                    pip_value=float(
+                        (self.settings.symbols_raw.get(symbol) or {}).get("pip_value_per_lot", 0.0)
+                        or 0.0
+                    ),
+                )
+                if rebuilt_risk is None or rebuilt_risk <= 0:
+                    logger.error(
+                        "Pending heat geometry unusable for {} ticket={} — blocking new entries",
+                        key,
+                        getattr(order, "ticket", "?"),
+                    )
+                    complete = False
+                    continue
+                risks.append(rebuilt_risk)
+            # News OCO places two legs; only one fills, so reserve the larger leg.
+            dollar_risk = max(risks) if risks else 0.0
+            rebuilt[key] = {
+                "symbol": symbol,
+                "strategy": strategy,
+                "dollar_risk": float(dollar_risk),
+                "tickets": tickets,
+            }
+        self._heat_reservations = rebuilt
+        if not complete:
+            self._pending_restore_failed = True
+            self._heat_unknown = True
+        elif rebuilt:
+            logger.info(
+                "Restored heat reservations from {} pending group(s)",
+                len(rebuilt),
+            )
 
     def _sync_quote(self, symbol: str, bid: float, ask: float, at: datetime) -> None:
         if hasattr(self.broker, "set_quote"):
@@ -656,6 +775,7 @@ class TradingBot:
         self.state_store.reconcile_open_tickets(broker_map, ticket_strategies=ticket_strategies)
         self.open_tickets = dict(self.state_store.state.open_tickets)
         self.trade_journal.sync_open_from_broker(managed, now=now)
+        self._restore_pending_heat_reservations()
         self._open_dollar_risks()
         self._write_broker_positions_snapshot()
 
@@ -900,6 +1020,7 @@ class TradingBot:
     def tick(self) -> None:
         now = datetime.now(tz=UTC)
         self._maybe_reconcile(now)
+        self._restore_pending_heat_reservations()
         self._check_data_health(now)
         tick_had_failure = False
         failure_context = ""
