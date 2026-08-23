@@ -566,6 +566,37 @@ def test_tick_comparison_uses_independent_brokers(
     assert "expectancy_r" in reports["delta"]
 
 
+def test_tick_comparison_keeps_independent_ticket_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta", "liquidity_volume"],
+        multi_strategy_mode="comparison",
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta"), _signal("liquidity_volume")]
+        return []
+
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", _eval)
+    bot.tick()
+    delta_pos = bot._broker_for("delta").get_open_positions("XAUUSD")[0]
+    liq_pos = bot._broker_for("liquidity_volume").get_open_positions("XAUUSD")[0]
+    assert delta_pos.ticket != liq_pos.ticket
+    opens = list(bot.trade_journal.open_trades.values())
+    assert {row.strategy for row in opens} == {"delta", "liquidity_volume"}
+    assert bot._lookup_meta("XAUUSD", "delta", delta_pos.ticket).get("strategy") == "delta"
+    assert bot._lookup_meta("XAUUSD", "liquidity_volume", liq_pos.ticket).get("strategy") == (
+        "liquidity_volume"
+    )
+    bot.tick()
+    assert len(bot._broker_for("delta").get_open_positions("XAUUSD")) == 1
+    assert len(bot.trade_journal.open_trades) == 2
+
+
 def test_tick_restores_pending_heat_after_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

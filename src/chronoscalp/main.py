@@ -222,16 +222,23 @@ class TradingBot:
             enabled=self.daily_loss_limit_enabled,
         )
         self.daily_dd_close_all = bool(risk_cfg.get("daily_drawdown_close_all", True))
-        self._position_meta: dict[int, dict] = {}
+        self._position_meta: dict[int | str, dict] = {}
 
         state_path = self.state_dir / f"trading_state_{mode}.json"
         self.state_store = TradingStateStore(state_path)
         self.state_store.load()
         for ticket_key, meta in (self.state_store.state.position_meta or {}).items():
+            payload = dict(meta)
             try:
-                self._position_meta[int(ticket_key)] = dict(meta)
+                as_int = int(ticket_key)
             except (TypeError, ValueError):
-                logger.warning("Skipping invalid position_meta key {!r}", ticket_key)
+                self._position_meta[str(ticket_key)] = payload
+            else:
+                self._position_meta[as_int] = payload
+            symbol = str(payload.get("symbol") or "")
+            strategy = str(payload.get("strategy") or "")
+            if symbol and strategy:
+                self._position_meta[self._meta_key(symbol, strategy)] = payload
 
         self.trade_journal = TradeJournal(
             journal_path_for(self.state_dir, mode),
@@ -356,19 +363,79 @@ class TradingBot:
     def _register_open(self, symbol: str, strategy: str, ticket: int) -> None:
         self.open_tickets[self._open_key(symbol, strategy)] = ticket
 
-    def _drop_ticket(self, ticket: int) -> None:
+    def _drop_ticket(
+        self, ticket: int, *, symbol: str | None = None, strategy: str | None = None
+    ) -> None:
+        if symbol is not None and strategy is not None:
+            self.open_tickets.pop(self._open_key(symbol, strategy), None)
+            return
         for key, value in list(self.open_tickets.items()):
-            if value == ticket:
-                self.open_tickets.pop(key, None)
+            if value != ticket:
+                continue
+            key_symbol, key_strategy = parse_position_key(key)
+            if symbol is not None and key_symbol != symbol:
+                continue
+            if strategy is not None and key_strategy != strategy:
+                continue
+            self.open_tickets.pop(key, None)
+
+    def _meta_key(self, symbol: str, strategy: str) -> str:
+        return self._open_key(symbol, strategy)
+
+    def _lookup_meta(self, symbol: str, strategy: str, ticket: int | None = None) -> dict:
+        meta = self._position_meta.get(self._meta_key(symbol, strategy))
+        if meta is None and ticket is not None:
+            meta = self._position_meta.get(ticket) or self._position_meta.get(str(ticket))
+        return dict(meta) if isinstance(meta, dict) else {}
+
+    def _store_meta(
+        self, symbol: str, strategy: str, meta: dict, ticket: int | None = None
+    ) -> None:
+        payload = dict(meta)
+        payload["symbol"] = symbol
+        payload["strategy"] = strategy
+        if ticket is not None:
+            payload["ticket"] = int(ticket)
+        self._position_meta[self._meta_key(symbol, strategy)] = payload
+        if ticket is None:
+            return
+        prior = self._position_meta.get(ticket)
+        prior_strategy = str((prior or {}).get("strategy") or "")
+        if prior is None or prior_strategy in {"", strategy}:
+            self._position_meta[ticket] = payload
+
+    def _clear_meta(self, symbol: str, strategy: str, ticket: int | None = None) -> None:
+        self._position_meta.pop(self._meta_key(symbol, strategy), None)
+        if ticket is None:
+            return
+        prior = self._position_meta.get(ticket)
+        if prior is None or str(prior.get("strategy") or "") in {"", strategy}:
+            self._position_meta.pop(ticket, None)
+            self._position_meta.pop(str(ticket), None)
+
+    def _position_matching(self, symbol: str, strategy: str, ticket: int):
+        tagged: list = []
+        untagged: list = []
+        for pos in self._all_open_positions():
+            if str(getattr(pos, "symbol", "")) != symbol or int(pos.ticket) != int(ticket):
+                continue
+            pos_strategy = resolve_strategy_tag(explicit=getattr(pos, "strategy", "") or "")
+            if pos_strategy == strategy:
+                tagged.append(pos)
+            elif not pos_strategy:
+                untagged.append(pos)
+        if len(tagged) == 1:
+            return tagged[0]
+        if len(untagged) == 1 and not tagged:
+            return untagged[0]
+        return tagged[0] if tagged else None
 
     def _open_dollar_risks(self) -> list[float]:
         risks: list[float] = []
         complete = True
-        positions_by_ticket: dict[int, object] = {}
-        for pos in self._all_open_positions():
-            positions_by_ticket[int(pos.ticket)] = pos
         for key, ticket in self.open_tickets.items():
-            meta = self._position_meta.get(ticket) or {}
+            symbol, strategy = parse_position_key(key)
+            meta = self._lookup_meta(symbol, strategy, ticket)
             stored = meta.get("dollar_risk")
             if stored is not None:
                 try:
@@ -376,9 +443,8 @@ class TradingBot:
                     continue
                 except (TypeError, ValueError):
                     pass
-            symbol, _strategy = parse_position_key(key)
             rebuilt = self._reconstruct_ticket_risk(
-                symbol, ticket, meta, positions_by_ticket.get(ticket)
+                symbol, ticket, meta, self._position_matching(symbol, strategy, ticket)
             )
             if rebuilt is None:
                 complete = False
@@ -389,7 +455,7 @@ class TradingBot:
                 )
                 continue
             meta["dollar_risk"] = rebuilt
-            self._position_meta[ticket] = meta
+            self._store_meta(symbol, strategy, meta, ticket)
             risks.append(rebuilt)
         for key, reservation in self._heat_reservations.items():
             if key in self.open_tickets:
@@ -713,16 +779,22 @@ class TradingBot:
                 continue
             self._register_open(symbol, strategy, filled.ticket)
             dollar_risk = float(reservation.get("dollar_risk") or 0.0)
-            self._position_meta[filled.ticket] = {
-                "initial_volume": filled.volume,
-                "initial_stop_loss": filled.stop_loss,
-                "entry_price": filled.entry_price,
-                "dollar_risk": dollar_risk,
-                "partial_taken": False,
-                "breakeven_moved": False,
-                "strategy": strategy,
-                "reason": strategy,
-            }
+            self._store_meta(
+                symbol,
+                strategy,
+                {
+                    "symbol": symbol,
+                    "initial_volume": filled.volume,
+                    "initial_stop_loss": filled.stop_loss,
+                    "entry_price": filled.entry_price,
+                    "dollar_risk": dollar_risk,
+                    "partial_taken": False,
+                    "breakeven_moved": False,
+                    "strategy": strategy,
+                    "reason": strategy,
+                },
+                filled.ticket,
+            )
             if not getattr(filled, "strategy", ""):
                 filled.strategy = strategy
             self.attribution.for_strategy(strategy).filled += 1
@@ -801,8 +873,8 @@ class TradingBot:
         # Match by (symbol, strategy), not raw ticket: comparison books can reuse ticket ids.
         for key, ticket in list(previous.items()):
             if broker_map.get(key) != ticket:
-                symbol, _strategy = parse_position_key(key)
-                self._on_position_closed_externally(symbol, ticket, now)
+                symbol, strategy = parse_position_key(key)
+                self._on_position_closed_externally(symbol, ticket, now, strategy=strategy)
         self.state_store.reconcile_open_tickets(broker_map, ticket_strategies=ticket_strategies)
         self.open_tickets = dict(self.state_store.state.open_tickets)
         self.trade_journal.sync_open_from_broker(managed, now=now)
@@ -863,7 +935,11 @@ class TradingBot:
             for row in rows:
                 ticket = int(row.get("ticket") or 0)
                 journal_open = self.trade_journal.open_trades.get(ticket)
-                meta = self._position_meta.get(ticket) or {}
+                meta = self._lookup_meta(
+                    str(row.get("symbol") or ""),
+                    str(row.get("strategy") or ""),
+                    ticket,
+                )
                 row["strategy"] = resolve_strategy_tag(
                     explicit=str(
                         row.get("strategy")
@@ -1313,16 +1389,22 @@ class TradingBot:
                                 if dollar_risk <= 0 and straddle_res.session is not None:
                                     dollar_risk = float(straddle_res.session.dollar_risk or 0.0)
                                 self._register_open(symbol, "news_straddle", position.ticket)
-                                self._position_meta[position.ticket] = {
-                                    "initial_volume": position.volume,
-                                    "initial_stop_loss": position.stop_loss,
-                                    "entry_price": position.entry_price,
-                                    "dollar_risk": dollar_risk,
-                                    "partial_taken": False,
-                                    "breakeven_moved": False,
-                                    "strategy": "news_straddle",
-                                    "reason": "news_straddle",
-                                }
+                                self._store_meta(
+                                    symbol,
+                                    "news_straddle",
+                                    {
+                                        "symbol": symbol,
+                                        "initial_volume": position.volume,
+                                        "initial_stop_loss": position.stop_loss,
+                                        "entry_price": position.entry_price,
+                                        "dollar_risk": dollar_risk,
+                                        "partial_taken": False,
+                                        "breakeven_moved": False,
+                                        "strategy": "news_straddle",
+                                        "reason": "news_straddle",
+                                    },
+                                    position.ticket,
+                                )
                                 self.attribution.for_strategy("news_straddle").filled += 1
                                 if not getattr(position, "strategy", ""):
                                     position.strategy = "news_straddle"
@@ -1726,16 +1808,22 @@ class TradingBot:
                     placed_any = True
                     self._register_open(symbol, strategy_tag, position.ticket)
                     position.strategy = strategy_tag
-                    self._position_meta[position.ticket] = {
-                        "initial_volume": position.volume,
-                        "initial_stop_loss": position.stop_loss,
-                        "entry_price": position.entry_price,
-                        "dollar_risk": dollar_risk,
-                        "partial_taken": False,
-                        "breakeven_moved": False,
-                        "strategy": strategy_tag,
-                        "reason": signal.reason or "",
-                    }
+                    self._store_meta(
+                        symbol,
+                        strategy_tag,
+                        {
+                            "symbol": symbol,
+                            "initial_volume": position.volume,
+                            "initial_stop_loss": position.stop_loss,
+                            "entry_price": position.entry_price,
+                            "dollar_risk": dollar_risk,
+                            "partial_taken": False,
+                            "breakeven_moved": False,
+                            "strategy": strategy_tag,
+                            "reason": signal.reason or "",
+                        },
+                        position.ticket,
+                    )
                     counters.filled += 1
                     self.trade_journal.record_open(
                         position, strategy=strategy_tag, reason=signal.reason or ""
@@ -1828,7 +1916,10 @@ class TradingBot:
         return result
 
     def _apply_position_meta(self, position) -> None:
-        meta = self._position_meta.get(position.ticket) or {}
+        strategy = resolve_strategy_tag(explicit=getattr(position, "strategy", "") or "")
+        meta = self._lookup_meta(
+            str(getattr(position, "symbol", "") or ""), strategy, position.ticket
+        )
         if meta.get("initial_volume") is not None:
             position.initial_volume = float(meta["initial_volume"])
         if meta.get("initial_stop_loss") is not None:
@@ -1839,8 +1930,8 @@ class TradingBot:
     def _estimate_unrealized_pnl(self) -> float:
         total = 0.0
         for key, ticket in list(self.open_tickets.items()):
-            symbol, _strategy = parse_position_key(key)
-            positions = self.broker.get_open_positions(symbol)
+            symbol, strategy = parse_position_key(key)
+            positions = self._broker_for(strategy).get_open_positions(symbol)
             position = next((p for p in positions if p.ticket == ticket), None)
             if position is None:
                 continue
@@ -1877,17 +1968,17 @@ class TradingBot:
 
     def _close_all_positions(self, now: datetime, *, reason: str) -> None:
         for key, ticket in list(self.open_tickets.items()):
-            symbol, _strategy = parse_position_key(key)
+            symbol, strategy = parse_position_key(key)
             try:
-                trade = self.broker.close_position(ticket)
+                trade = self._broker_for(strategy).close_position(ticket)
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 if self.three_strikes_enabled:
                     self.three_strikes.record_result(symbol, trade.pnl, at=now)
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
-                self._position_meta.pop(ticket, None)
+                self._clear_meta(symbol, strategy, ticket)
                 self.open_tickets.pop(key, None)
-                self.attribution.for_strategy(_strategy).closed += 1
+                self.attribution.for_strategy(strategy).closed += 1
                 logger.warning("Force-closed {} ticket={} reason={}", symbol, ticket, reason)
             except Exception:  # noqa: BLE001
                 logger.exception("Failed force-close {} ticket={}", symbol, ticket)
@@ -1907,7 +1998,7 @@ class TradingBot:
         positions = broker.get_open_positions(symbol)
         position = next((p for p in positions if p.ticket == ticket), None)
         if position is None:
-            self._on_position_closed_externally(symbol, ticket, now)
+            self._on_position_closed_externally(symbol, ticket, now, strategy=strategy)
             return
         self._apply_position_meta(position)
 
@@ -1939,7 +2030,7 @@ class TradingBot:
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
                 self.open_tickets.pop(key, None)
-                self._position_meta.pop(ticket, None)
+                self._clear_meta(symbol, strategy, ticket)
                 self.attribution.for_strategy(strategy).closed += 1
                 if self.comparison_books is not None:
                     self.comparison_books.for_strategy(strategy).record_close(trade, now)
@@ -1975,9 +2066,10 @@ class TradingBot:
                 trade = broker.close_partial(ticket, action.partial.close_volume)
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 self.trade_journal.record_close(trade, ticket=ticket)
-                meta = self._position_meta.setdefault(ticket, {})
+                meta = self._lookup_meta(symbol, strategy, ticket)
                 meta["partial_taken"] = True
                 meta["breakeven_moved"] = True
+                self._store_meta(symbol, strategy, meta, ticket)
                 position.partial_taken = True
                 position.breakeven_moved = True
                 if action.partial.new_stop_loss is not None and broker.modify_sl_tp(
@@ -2005,15 +2097,21 @@ class TradingBot:
         if new_sl is not None and broker.modify_sl_tp(ticket, new_sl, position.take_profit):
             if abs(new_sl - position.entry_price) < pip_size * 2:
                 position.breakeven_moved = True
-                self._position_meta.setdefault(ticket, {})["breakeven_moved"] = True
+                meta = self._lookup_meta(symbol, strategy, ticket)
+                meta["breakeven_moved"] = True
+                self._store_meta(symbol, strategy, meta, ticket)
             position.stop_loss = new_sl
 
-    def _on_position_closed_externally(self, symbol: str, ticket: int, now: datetime) -> None:
+    def _on_position_closed_externally(
+        self, symbol: str, ticket: int, now: datetime, *, strategy: str | None = None
+    ) -> None:
         pnl: float | None = None
         if self.mode == "live" and isinstance(self.broker, (MT5Broker, OANDABroker)):
             pnl = self.broker.fetch_closed_pnl(ticket)
 
-        closed = self.trade_journal.record_external_close(ticket, symbol, pnl, at=now)
+        closed = self.trade_journal.record_external_close(
+            ticket, symbol, pnl, at=now, strategy=strategy
+        )
 
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)
@@ -2035,8 +2133,11 @@ class TradingBot:
                 AlertLevel.INFO,
             )
 
-        self._drop_ticket(ticket)
-        self._position_meta.pop(ticket, None)
+        self._drop_ticket(ticket, symbol=symbol, strategy=strategy)
+        if strategy:
+            self._clear_meta(symbol, strategy, ticket)
+        else:
+            self._position_meta.pop(ticket, None)
         self._persist_state()
 
 

@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-23T10:50:00Z"
+    heartbeat_at: "2026-08-23T11:15:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"

@@ -2,6 +2,24 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 Bugbot follow-up: comparison ticket collision
+
+- Time (UTC): 2026-08-23T11:15:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Finding closed: [Bugbot](1a3f5f30-0524-4857-bd14-da9f8ed030cf) high — paper comparison books all started at ticket 1, so shared journal/meta/heat maps keyed by bare ticket collided.
+- Product changes:
+  - Each comparison `PaperBroker` gets a disjoint `first_ticket` origin (1, 1_000_001, …).
+  - `_position_meta` is stored under `(symbol, strategy)` with a ticket alias only when that ticket is unique to the strategy.
+  - `TradeJournal.open_trades` uses composite keys; int lookup remains for unique-ticket unit tests.
+  - Heat reconstruction and force-close/unrealized PnL resolve the book via `_broker_for(strategy)`.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_tickets_full` → passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `.venv\Scripts\python.exe -m black --check` on touched files → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent functional review of this follow-up + `44b62a2`. **Do not merge. Do not live-enable VWAP.**
+
 ## 2026-08-23 TASK-002 independent security: restart-heat medium closed
 
 - Time (UTC): 2026-08-23T10:50:00Z

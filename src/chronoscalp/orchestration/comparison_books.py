@@ -89,6 +89,7 @@ class ComparisonBooks:
         self.slippage_pips = float(slippage_pips)
         self._books: dict[str, StrategyBook] = {}
         self._last_quotes: dict[str, tuple[float, float, datetime | None]] = {}
+        self._next_ticket_origin = 1
 
     def for_strategy(self, strategy: str) -> StrategyBook:
         tag = (strategy or "unknown").strip() or "unknown"
@@ -98,7 +99,9 @@ class ComparisonBooks:
                 symbols_cfg=self.symbols_cfg,
                 starting_balance=self.starting_balance,
                 slippage_pips=self.slippage_pips,
+                first_ticket=self._next_ticket_origin,
             )
+            self._next_ticket_origin += 1_000_000
             for symbol, (bid, ask, at) in self._last_quotes.items():
                 broker.set_quote(symbol, bid, ask, at)
             book = StrategyBook(strategy=tag, broker=broker)

@@ -24,6 +24,8 @@ def test_comparison_books_have_independent_equity():
     assert a.get_balance() == 10_000
     a.balance = 9_500
     assert b.get_balance() == 10_000
+    assert a._next_ticket != b._next_ticket
+    assert {a._next_ticket, b._next_ticket} == {1, 1_000_001}
 
 
 def test_r_normalized_stats_rank_by_r_not_dollars():

@@ -29,7 +29,11 @@ class PaperBroker:
     satisfies `Broker` by having matching methods."""
 
     def __init__(
-        self, symbols_cfg: dict, starting_balance: float = 10_000.0, slippage_pips: float = 0.5
+        self,
+        symbols_cfg: dict,
+        starting_balance: float = 10_000.0,
+        slippage_pips: float = 0.5,
+        first_ticket: int = 1,
     ) -> None:
         self.symbols_cfg = symbols_cfg
         self.balance = starting_balance
@@ -37,7 +41,7 @@ class PaperBroker:
         self._positions: dict[int, Position] = {}
         self._pending: dict[int, PendingOrder] = {}
         self._quotes: dict[str, Quote] = {}
-        self._next_ticket = 1
+        self._next_ticket = max(1, int(first_ticket))
 
     def connect(self) -> bool:
         logger.info("PaperBroker ready (starting_balance={:.2f})", self.balance)
