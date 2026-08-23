@@ -2,6 +2,16 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 pin fair-batch test (finding 4)
+
+- Time (UTC): 2026-08-23T12:55:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Why: independent functional review of `378a5e5` marked findings 1–3, 5–6 closed but finding 4's test residual — `dollar_risk=50` would still pass if News were omitted from `n`.
+- Test change only: `test_tick_news_and_delta_share_batch_when_heat_tight` now spies `allocate_batch_risk_pct(n=…)`, requires `n==2`, and sizes News from `risk_pct` so a 1.5% remainder must split to 0.75% / $75. Omitting News from the batch would yield `n==1` and 1.0% / $100.
+- Gates: `pytest tests/test_trading_bot_multistrat.py::test_tick_news_and_delta_share_batch_when_heat_tight` passed; ruff+black clean on that file.
+- Exact next action: re-review finding 4. **Do not merge. Do not deploy. VWAP stays shadow.**
+
 ## 2026-08-23 TASK-002 independent-review fixes (do not merge)
 
 - Time (UTC): 2026-08-23T12:35:00Z

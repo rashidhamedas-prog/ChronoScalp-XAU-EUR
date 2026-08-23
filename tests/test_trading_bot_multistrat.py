@@ -1032,14 +1032,28 @@ def test_tick_news_and_delta_share_batch_when_heat_tight(
         phase=StraddlePhase.PENDING,
         buy_ticket=21,
         sell_ticket=22,
-        dollar_risk=50.0,
+        dollar_risk=0.0,
         volume=0.05,
     )
     captured: list[bool] = []
+    placed_risk_pct: list[float] = []
+    batch_ns: list[int] = []
+    import chronoscalp.main as main_mod
+
+    real_alloc = main_mod.allocate_batch_risk_pct
+
+    def _alloc_spy(**kwargs):
+        batch_ns.append(int(kwargs["n"]))
+        return real_alloc(**kwargs)
+
+    monkeypatch.setattr(main_mod, "allocate_batch_risk_pct", _alloc_spy)
 
     def _news_tick(*_a, **kwargs):
         captured.append(bool(kwargs.get("allow_place")))
         if kwargs.get("allow_place"):
+            risk_pct = float(kwargs.get("risk_pct") or 0.0)
+            placed_risk_pct.append(risk_pct)
+            session.dollar_risk = 10_000.0 * risk_pct / 100.0
             bot.broker.place_pending_stop(
                 symbol="XAUUSD",
                 side=PendingOrderSide.BUY_STOP,
@@ -1069,10 +1083,13 @@ def test_tick_news_and_delta_share_batch_when_heat_tight(
     bot.tick()
     assert True in captured
     assert False in captured
+    assert batch_ns == [2]
+    assert placed_risk_pct
+    assert placed_risk_pct[-1] == pytest.approx(0.75, abs=1e-9)
     heat = bot._committed_heat_pct(10_000)
     assert heat <= 3.0 + 1e-9
     assert bot._heat_reservations.get(bot._open_key("XAUUSD", "news_straddle")) is not None
     news_risk = float(
         bot._heat_reservations[bot._open_key("XAUUSD", "news_straddle")]["dollar_risk"]
     )
-    assert news_risk <= 150.0 + 1e-9
+    assert news_risk == pytest.approx(75.0, abs=1e-6)
