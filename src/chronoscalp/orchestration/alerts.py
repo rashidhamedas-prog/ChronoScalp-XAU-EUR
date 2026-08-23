@@ -148,7 +148,11 @@ class AlertNotifier:
                     (response.text or "")[:300],
                 )
         except requests.RequestException as exc:
-            logger.warning("Telegram alert failed chat_id={}: {}", chat_id, exc)
+            logger.warning(
+                "Telegram alert failed chat_id={}: {}",
+                chat_id,
+                type(exc).__name__,
+            )
 
     def _send_discord(self, content: str) -> None:
         import requests

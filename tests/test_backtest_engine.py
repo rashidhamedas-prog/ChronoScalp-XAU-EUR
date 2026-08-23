@@ -5,7 +5,12 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 
-from chronoscalp.backtest.engine import LIVE_ONLY_GATES, _to_utc_timestamp, run_backtest
+from chronoscalp.backtest.engine import (
+    LIVE_ONLY_GATES,
+    _as_of_closed,
+    _to_utc_timestamp,
+    run_backtest,
+)
 from chronoscalp.config import Settings
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.indicators.technical import enrich_with_indicators
@@ -76,6 +81,8 @@ def test_run_backtest_returns_summary_without_error():
     assert not session.is_within_session(first_bar, "XAUUSD")
     # Off-session synthetic start → zero trades under london_ny (not an engine bug).
     assert summary["total_trades"] == 0
+    assert "strategy_reports" in summary
+    assert isinstance(summary["strategy_reports"], dict)
 
 
 def test_run_backtest_in_session_fixture_completes():
@@ -140,3 +147,25 @@ def test_run_backtest_accepts_timezone_aware_start_end():
     assert summary["symbol"] == "XAUUSD"
     assert isinstance(summary["total_trades"], int)
     assert summary["total_trades"] >= 0
+
+
+def test_htf_as_of_excludes_forming_bar():
+    """M5 bar that is still forming at an M1 timestamp must not be visible."""
+    m5 = pd.DataFrame(
+        {
+            "open": [0.0, 1.0, 2.0],
+            "high": [0.1, 1.1, 2.1],
+            "low": [-0.1, 0.9, 1.9],
+            "close": [0.05, 1.05, 2.05],
+        },
+        index=pd.DatetimeIndex(
+            ["2026-01-05 07:55", "2026-01-05 08:00", "2026-01-05 08:05"],
+            tz="UTC",
+        ),
+    )
+    t = pd.Timestamp("2026-01-05 08:04", tz="UTC")
+    closed = _as_of_closed(m5, t, Timeframe.M5, is_trigger=False)
+    assert len(closed) == 1
+    assert closed.index[-1] == pd.Timestamp("2026-01-05 07:55", tz="UTC")
+    trigger = _as_of_closed(m5, t, Timeframe.M5, is_trigger=True)
+    assert list(trigger.index.astype(str))[-1].startswith("2026-01-05 08:00")

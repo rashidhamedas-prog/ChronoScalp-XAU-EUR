@@ -13,7 +13,14 @@ from chronoscalp.risk.position_sizing import HARD_MAX_RISK_PCT
 
 HARD_MIN_GROSS_RR = 1.5
 KNOWN_STRATEGIES = frozenset(
-    {"smc_confluence", "liquidity_volume", "ultra_scalp", "news_straddle", "delta"}
+    {
+        "smc_confluence",
+        "liquidity_volume",
+        "ultra_scalp",
+        "news_straddle",
+        "delta",
+        "xau_vwap_pullback",
+    }
 )
 KNOWN_BROKERS = frozenset({"paper", "mt5", "oanda"})
 KNOWN_HOURS = frozenset({"london_ny", "always_on_24h"})
@@ -30,7 +37,6 @@ UNENFORCED_OVERRIDE_KEYS: tuple[str, ...] = (
     "news_filter.max_calendar_age_minutes",
     "risk.cooldown_after_loss_minutes",
     "risk.max_monthly_loss_pct",
-    "risk.max_portfolio_heat_pct",
     "risk.max_trades_per_symbol_day",
     "risk.max_trades_portfolio_day",
     "risk.max_weekly_loss_pct",
@@ -129,6 +135,7 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
             "use_ultra_scalp",
             "use_news_straddle",
             "use_delta",
+            "use_xau_vwap_pullback",
         ):
             if flag in strategy:
                 strategy[flag] = _as_bool(strategy[flag], f"strategy.{flag}")
@@ -242,10 +249,10 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
                     raise RuntimeOverridesValidationError(f"risk.{key} must be >= 0")
         if (
             "max_portfolio_heat_pct" in risk
-            and risk["max_portfolio_heat_pct"] > HARD_MAX_RISK_PCT + 1e-12
+            and risk["max_portfolio_heat_pct"] > float(risk.get("max_daily_loss_pct", 3.0)) + 1e-12
         ):
             raise RuntimeOverridesValidationError(
-                "risk.max_portfolio_heat_pct cannot exceed hard 1% portfolio heat ceiling"
+                "risk.max_portfolio_heat_pct cannot exceed max_daily_loss_pct"
             )
         for key in (
             "max_concurrent_positions",

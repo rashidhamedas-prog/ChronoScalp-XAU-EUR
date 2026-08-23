@@ -1,0 +1,32 @@
+{
+  "strategy": "xau_vwap_pullback",
+  "live_ready": false,
+  "enabled": false,
+  "shadow_only": true,
+  "broker": "UNKNOWN",
+  "symbol": "XAUUSD",
+  "date_range": "UNKNOWN",
+  "folds": "UNKNOWN",
+  "trial_count": "UNKNOWN",
+  "metrics": {
+    "trade_count": "UNKNOWN",
+    "expectancy_r": "UNKNOWN",
+    "profit_factor_net": "UNKNOWN",
+    "max_drawdown": "UNKNOWN",
+    "sharpe": "UNKNOWN",
+    "sortino": "UNKNOWN",
+    "dsr": "UNKNOWN",
+    "pbo": "UNKNOWN",
+    "avg_spread": "UNKNOWN",
+    "avg_slippage": "UNKNOWN",
+    "avg_commission": "UNKNOWN"
+  },
+  "gates": {
+    "two_year_broker_native": "UNKNOWN",
+    "walk_forward": "UNKNOWN",
+    "cost_stress_1_5x": "UNKNOWN",
+    "demo_forward": "UNKNOWN",
+    "independent_review": "UNKNOWN"
+  },
+  "notes": "Empty template. Do not invent pass numbers."
+}

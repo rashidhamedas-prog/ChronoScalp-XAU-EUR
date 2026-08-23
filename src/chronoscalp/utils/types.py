@@ -88,6 +88,7 @@ class Signal:
     reason: str = ""
     timeframe: Timeframe = Timeframe.M1
     strategy: str = ""
+    order_kind: str = "market"
 
     @property
     def risk_reward_ratio(self) -> float:
@@ -167,3 +168,4 @@ class PendingOrder:
     take_profit: float
     comment: str = ""
     expiration: datetime | None = None
+    strategy: str = ""

@@ -30,6 +30,7 @@ def test_session_filter_from_config():
             "new_york": {"start": "13:30", "end": "16:30"},
         },
         "trade_outside_sessions": False,
+        "market_timezones": {"london": "UTC", "new_york": "UTC"},
     }
     session_filter = SessionFilter.from_config(cfg)
 
@@ -68,6 +69,7 @@ def test_trading_hours_mode_london_ny_blocks_outside_all_symbols():
             "new_york": {"start": "13:30", "end": "16:30"},
         },
         "always_on_symbols": ["BTCUSD"],
+        "market_timezones": {"london": "UTC", "new_york": "UTC"},
     }
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(9, 0), symbol="BTCUSD")
@@ -84,3 +86,39 @@ def test_trading_hours_mode_always_on_24h():
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(3, 0), symbol="EURUSD")
     assert session_filter.active_session_name(_dt(3, 0)) == "always_on_24h"
+
+
+def test_session_windows_follow_dst():
+    cfg = {
+        "windows": {
+            "london": {"start": "08:00", "end": "11:00"},
+            "new_york": {"start": "08:30", "end": "11:30"},
+        },
+        "market_timezones": {
+            "london": "Europe/London",
+            "new_york": "America/New_York",
+        },
+        "trading_hours_mode": "london_ny",
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    # 11 Jul 2026 is BST/EDT: 07:00 UTC = 08:00 London (in); winter GMT would be out.
+    july = datetime(2026, 7, 11, 7, 0, tzinfo=UTC)
+    january = datetime(2026, 1, 15, 7, 0, tzinfo=UTC)
+    assert session_filter.is_within_session(july)
+    assert not session_filter.is_within_session(january)
+    # NY local 10:00 in July is 14:00 UTC (EDT).
+    assert session_filter.is_within_session(datetime(2026, 7, 11, 14, 0, tzinfo=UTC))
+    assert (
+        session_filter.active_session_name(datetime(2026, 7, 11, 14, 0, tzinfo=UTC)) == "new_york"
+    )
+
+
+def test_invalid_timezone_fails_closed():
+    cfg = {
+        "windows": {"london": {"start": "08:00", "end": "11:00"}},
+        "market_timezones": {"london": "Not/AZone"},
+        "trading_hours_mode": "london_ny",
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    assert session_filter.timezone_ok is False
+    assert not session_filter.is_within_session(_dt(9, 0))

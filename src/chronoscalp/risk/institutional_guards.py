@@ -23,32 +23,46 @@ class ThreeStrikesGuard:
     _streak: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     _paused_until: dict[str, datetime] = field(default_factory=dict)
 
-    def record_result(self, symbol: str, pnl: float, at: datetime | None = None) -> None:
+    @staticmethod
+    def _key(symbol: str, strategy: str = "") -> str:
+        tag = (strategy or "").strip()
+        return f"{symbol}::{tag}" if tag else symbol
+
+    def record_result(
+        self,
+        symbol: str,
+        pnl: float,
+        at: datetime | None = None,
+        *,
+        strategy: str = "",
+    ) -> None:
         now = at or datetime.now(tz=UTC)
+        key = self._key(symbol, strategy)
         if pnl > 0:
-            self._streak[symbol] = 0
-            self._paused_until.pop(symbol, None)
+            self._streak[key] = 0
+            self._paused_until.pop(key, None)
             return
         if pnl < 0:
-            self._streak[symbol] = self._streak.get(symbol, 0) + 1
-            if self._streak[symbol] >= self.max_losses:
+            self._streak[key] = self._streak.get(key, 0) + 1
+            if self._streak[key] >= self.max_losses:
                 until = now + timedelta(hours=self.pause_hours)
-                self._paused_until[symbol] = until
+                self._paused_until[key] = until
                 logger.warning(
                     "{} paused until {} after {} consecutive losses",
-                    symbol,
+                    key,
                     until.isoformat(),
-                    self._streak[symbol],
+                    self._streak[key],
                 )
 
-    def is_paused(self, symbol: str, at: datetime | None = None) -> bool:
+    def is_paused(self, symbol: str, at: datetime | None = None, *, strategy: str = "") -> bool:
         now = at or datetime.now(tz=UTC)
-        until = self._paused_until.get(symbol)
+        key = self._key(symbol, strategy)
+        until = self._paused_until.get(key)
         if until is None:
             return False
         if now >= until:
-            self._paused_until.pop(symbol, None)
-            self._streak[symbol] = 0
+            self._paused_until.pop(key, None)
+            self._streak[key] = 0
             return False
         return True
 

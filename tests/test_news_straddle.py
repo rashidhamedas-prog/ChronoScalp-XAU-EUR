@@ -88,14 +88,11 @@ def _engine(events: list[NewsEvent], **cfg) -> DynamicNewsStraddleEngine:
 
 
 def test_resolve_enabled_strategies_includes_news_straddle():
-    smc, liq, scalp, news, delta = resolve_enabled_strategies(
-        {"enabled_strategies": ["ultra_scalp", "news_straddle"]}
-    )
-    assert not smc and not liq and scalp and news and not delta
-    _, _, _, news2, _ = resolve_enabled_strategies(
-        {"use_news_straddle": True, "use_ultra_scalp": False}
-    )
-    assert news2 is True
+    enabled = resolve_enabled_strategies({"enabled_strategies": ["ultra_scalp", "news_straddle"]})
+    assert not enabled.smc and not enabled.liquidity and enabled.ultra_scalp
+    assert enabled.news_straddle and not enabled.delta
+    flags = resolve_enabled_strategies({"use_news_straddle": True, "use_ultra_scalp": False})
+    assert flags.news_straddle is True
 
 
 def test_spread_shield_blocks_wide_spread():
@@ -282,6 +279,7 @@ def test_dual_fill_closes_orphan_leg():
         stop_loss=1995.0,
         take_profit=1980.0,
         open_time=datetime.now(tz=UTC),
+        strategy="news_straddle",
     )
     broker._positions[orphan.ticket] = orphan
     broker._next_ticket += 1

@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from chronoscalp.execution.account_mode import AccountMarginMode
 from chronoscalp.utils.types import (
     PendingOrder,
     PendingOrderSide,
@@ -58,6 +59,7 @@ class Broker(Protocol):
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         """Place a BUY_STOP / SELL_STOP pending order (news straddle)."""
         ...
@@ -83,4 +85,8 @@ class Broker(Protocol):
 
     def close_partial(self, ticket: int, volume: float) -> TradeResult:
         """Close part of an open position at market; leave remainder open."""
+        ...
+
+    def account_margin_mode(self) -> AccountMarginMode:
+        """Hedging vs netting. Paper is always independent-capable."""
         ...

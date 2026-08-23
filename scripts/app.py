@@ -466,26 +466,18 @@ def page_control(settings) -> None:
         "liquidity_volume": _t("strategy_liq"),
         "ultra_scalp": _t("strategy_scalp"),
         "news_straddle": _t("strategy_news"),
+        "xau_vwap_pullback": "XAU VWAP pullback",
     }
-    use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(
-        settings.strategy
-    )
-    default_strats: list[str] = []
-    if use_delta:
-        default_strats.append("delta")
-    if use_smc:
-        default_strats.append("smc_confluence")
-    if use_liq:
-        default_strats.append("liquidity_volume")
-    if use_scalp:
-        default_strats.append("ultra_scalp")
-    if use_news:
-        default_strats.append("news_straddle")
+    enabled = resolve_enabled_strategies(settings.strategy)
+    default_strats = enabled.names()
     if not default_strats:
         default_strats = [s for s in KNOWN_STRATEGIES if s != "news_straddle"]
 
     st.markdown(f"#### {_t('strategies_label')}")
     st.caption(_t("strategies_hint"))
+    st.caption(
+        "XAU VWAP pullback is live_ready. 1% / 1.5R / 3% heat still apply. Restart after save."
+    )
     selected_strats = st.multiselect(
         _t("strategies_label"),
         options=list(KNOWN_STRATEGIES),
@@ -495,7 +487,14 @@ def page_control(settings) -> None:
         key="active_strategies_ms",
     )
     if st.button(_t("strategies_save"), key="save_strategies_btn"):
-        saved = apply_enabled_strategies(selected_strats)
+        from chronoscalp.strategy.live_gates import is_strategy_live_ready
+
+        shadow: list[str] = []
+        if "xau_vwap_pullback" in selected_strats and not is_strategy_live_ready(
+            settings.strategy, "xau_vwap_pullback"
+        ):
+            shadow = ["xau_vwap_pullback"]
+        saved = apply_enabled_strategies(selected_strats, shadow=shadow)
         get_settings.cache_clear()
         st.success(", ".join(saved) if saved else "(MACD/trend only)")
         st.info(_t("need_restart"))
@@ -602,9 +601,7 @@ def page_control(settings) -> None:
         if st.button(_t("daily_loss_unlock"), key="daily_loss_unlock_btn"):
             user_cfg = UserConfigStore().config
             unlock_mode = (
-                user_cfg.broker.mode
-                if user_cfg.broker.mode in ("paper", "live")
-                else "live"
+                user_cfg.broker.mode if user_cfg.broker.mode in ("paper", "live") else "live"
             )
             reset_at = write_daily_reset_marker(Path("data/state"), unlock_mode)
             write_daily_reset_marker(

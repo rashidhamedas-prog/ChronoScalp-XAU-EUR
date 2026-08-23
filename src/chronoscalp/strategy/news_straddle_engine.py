@@ -23,6 +23,12 @@ from chronoscalp.filters.news_calendar import (
 from chronoscalp.indicators.technical import atr as atr_series
 from chronoscalp.logging_setup import logger
 from chronoscalp.risk.position_sizing import RiskManager
+from chronoscalp.strategy.news_skip_reasons import (
+    NEWS_SKIP_REASONS,
+    NewsSkipReason,
+    idle_calendar_skip,
+)
+from chronoscalp.utils.strategy_tags import normalize_strategy_tag
 from chronoscalp.utils.types import (
     PendingOrder,
     PendingOrderSide,
@@ -60,6 +66,7 @@ class StraddleSession:
     filled_position_ticket: int | None = None
     distance: float = 0.0
     volume: float = 0.0
+    dollar_risk: float = 0.0
 
 
 @dataclass
@@ -114,6 +121,10 @@ class DynamicNewsStraddleEngine:
     @property
     def tp_distance_fraction(self) -> float:
         return float(self.cfg.get("tp_distance_fraction", 1.8))
+
+    @property
+    def require_session(self) -> bool:
+        return bool(self.cfg.get("require_session", False))
 
     @property
     def comment_prefix(self) -> str:
@@ -176,6 +187,7 @@ class DynamicNewsStraddleEngine:
             confidence=0.9,
             reason="news_straddle,buy_stop",
             timeframe=Timeframe.M1,
+            strategy="news_straddle",
         )
         sell = Signal(
             symbol=symbol,
@@ -187,6 +199,7 @@ class DynamicNewsStraddleEngine:
             confidence=0.9,
             reason="news_straddle,sell_stop",
             timeframe=Timeframe.M1,
+            strategy="news_straddle",
         )
         return buy, sell
 
@@ -200,6 +213,7 @@ class DynamicNewsStraddleEngine:
         moment: datetime,
         upcoming: UpcomingNews,
         spread_pips: float,
+        risk_pct: float | None = None,
     ) -> StraddleTickResult:
         """Place dynamic Buy Stop & Sell Stop pending orders (spread-shield gated)."""
         session = self.sessions.get(symbol)
@@ -215,7 +229,10 @@ class DynamicNewsStraddleEngine:
             msg = f"spread_too_high:{spread_pips:.2f}>{self.max_spread_pips:.2f}"
             logger.warning("[STRADDLE CANCELLED] {} {}", symbol, msg)
             return StraddleTickResult(
-                symbol=symbol, phase=StraddlePhase.PAUSED, action="spread_block", message=msg
+                symbol=symbol,
+                phase=StraddlePhase.PAUSED,
+                action=NewsSkipReason.SPREAD_BLOCK.value,
+                message=msg,
             )
 
         distance = self.atr_distance(m1_df)
@@ -242,12 +259,12 @@ class DynamicNewsStraddleEngine:
             return StraddleTickResult(
                 symbol=symbol,
                 phase=StraddlePhase.PAUSED,
-                action="risk_reject",
+                action=NewsSkipReason.RISK_REJECTED.value,
                 message="buy_leg_risk_reject",
             )
 
         equity = float(broker.get_balance())
-        volume = float(self.risk_manager.position_size_for(buy_sig, equity))
+        volume = float(self.risk_manager.position_size_for(buy_sig, equity, risk_pct=risk_pct))
         if volume <= 0:
             return StraddleTickResult(
                 symbol=symbol,
@@ -255,6 +272,12 @@ class DynamicNewsStraddleEngine:
                 action="zero_volume",
                 message="position_size_zero",
             )
+        allocated_pct = (
+            float(risk_pct)
+            if risk_pct is not None
+            else float(self.risk_manager.risk_cfg.get("active_risk_per_trade_pct", 1.0))
+        )
+        dollar_risk = max(0.0, equity * min(allocated_pct, 1.0) / 100.0)
 
         expiration = moment + timedelta(seconds=self.expiry_seconds)
         try:
@@ -299,6 +322,7 @@ class DynamicNewsStraddleEngine:
             expires_at=expiration,
             distance=distance,
             volume=volume,
+            dollar_risk=dollar_risk,
         )
         self.sessions[symbol] = session
         logger.info(
@@ -326,7 +350,12 @@ class DynamicNewsStraddleEngine:
             phase = session.phase if session else StraddlePhase.IDLE
             return StraddleTickResult(symbol=symbol, phase=phase, action="noop", session=session)
 
-        positions = list(broker.get_open_positions(symbol) or [])
+        positions = [
+            p
+            for p in (broker.get_open_positions(symbol) or [])
+            if normalize_strategy_tag(getattr(p, "strategy", "") or "") == "news_straddle"
+            or p.ticket == session.filled_position_ticket
+        ]
         pending = broker.get_pending_orders(symbol, comment_prefix=self.comment_prefix) or []
         our_tickets = {t for t in (session.buy_ticket, session.sell_ticket) if t is not None}
         pending_ours = [o for o in pending if o.ticket in our_tickets]
@@ -456,6 +485,8 @@ class DynamicNewsStraddleEngine:
         already_open: bool,
         allow_place: bool = True,
         abort_pending: bool = False,
+        placement_block_reason: str | None = None,
+        risk_pct: float | None = None,
     ) -> StraddleTickResult:
         """Drive pause → place → OCO → expiry for one symbol.
 
@@ -501,9 +532,10 @@ class DynamicNewsStraddleEngine:
             )
 
         if not allow_place:
-            return StraddleTickResult(
-                symbol=symbol, phase=StraddlePhase.IDLE, action="place_blocked"
-            )
+            action = placement_block_reason or "place_blocked"
+            if action not in NEWS_SKIP_REASONS and action != "place_blocked":
+                action = "place_blocked"
+            return StraddleTickResult(symbol=symbol, phase=StraddlePhase.IDLE, action=action)
 
         paused, upcoming = self.calendar.is_scalp_paused(
             now,
@@ -512,11 +544,24 @@ class DynamicNewsStraddleEngine:
             currency=currency,
         )
         if not paused or upcoming is None:
-            return StraddleTickResult(symbol=symbol, phase=StraddlePhase.IDLE, action="idle")
+            unfiltered = self.calendar.next_event(now, currency=None)
+            reason = idle_calendar_skip(
+                events_loaded=bool(self.calendar.news_filter.events),
+                unfiltered_upcoming=unfiltered is not None,
+                currency=currency,
+            )
+            return StraddleTickResult(
+                symbol=symbol,
+                phase=StraddlePhase.IDLE,
+                action=reason.value,
+            )
 
         if not event_matches_straddle_titles(upcoming.event, self._title_filter()):
             return StraddleTickResult(
-                symbol=symbol, phase=StraddlePhase.IDLE, action="title_skip", message=upcoming.title
+                symbol=symbol,
+                phase=StraddlePhase.IDLE,
+                action=NewsSkipReason.TITLE_SKIP.value,
+                message=upcoming.title,
             )
 
         # Avoid duplicate arming for the same event timestamp.
@@ -543,7 +588,7 @@ class DynamicNewsStraddleEngine:
             return StraddleTickResult(
                 symbol=symbol,
                 phase=StraddlePhase.PAUSED,
-                action="paused",
+                action=NewsSkipReason.OUTSIDE_PLACEMENT_WINDOW.value,
                 session=self.sessions[symbol],
                 message=f"eta={upcoming.seconds_until:.0f}s {upcoming.title}",
             )
@@ -552,7 +597,7 @@ class DynamicNewsStraddleEngine:
             return StraddleTickResult(
                 symbol=symbol,
                 phase=StraddlePhase.PAUSED,
-                action="already_open",
+                action=NewsSkipReason.ALREADY_OPEN_SAME_STRATEGY.value,
                 message="skip_place_existing_position",
             )
 
@@ -573,4 +618,5 @@ class DynamicNewsStraddleEngine:
             moment=now,
             upcoming=upcoming,
             spread_pips=spread_pips,
+            risk_pct=risk_pct,
         )

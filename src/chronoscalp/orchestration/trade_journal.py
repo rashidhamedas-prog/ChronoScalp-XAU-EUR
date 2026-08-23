@@ -422,6 +422,73 @@ def _max_streak(closed: list[ClosedTradeRecord], *, winning: bool) -> int:
     return best
 
 
+def _open_trade_key(symbol: str, strategy: str, ticket: int) -> str:
+    tag = resolve_strategy_tag(explicit=strategy)
+    return f"{symbol}::{tag}::{int(ticket)}"
+
+
+class OpenTradesMap(dict):
+    """Open rows keyed by symbol::strategy::ticket, with unique-ticket int lookup."""
+
+    def store(self, record: OpenTradeRecord) -> None:
+        dict.__setitem__(
+            self, _open_trade_key(record.symbol, record.strategy, record.ticket), record
+        )
+
+    def keys_for(
+        self,
+        ticket: int,
+        *,
+        symbol: str | None = None,
+        strategy: str | None = None,
+    ) -> list:
+        tag = resolve_strategy_tag(explicit=strategy) if strategy else ""
+        matches: list = []
+        for key, rec in dict.items(self):
+            if int(rec.ticket) != int(ticket):
+                continue
+            if symbol is not None and rec.symbol != symbol:
+                continue
+            if tag and rec.strategy != tag:
+                continue
+            matches.append(key)
+        if not matches and dict.__contains__(self, ticket):
+            matches.append(ticket)
+        return matches
+
+    def __contains__(self, key: object) -> bool:
+        if dict.__contains__(self, key):
+            return True
+        if isinstance(key, int):
+            return any(rec.ticket == key for rec in dict.values(self))
+        return False
+
+    def __getitem__(self, key: object) -> OpenTradeRecord:
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
+        if isinstance(key, int):
+            matches = [rec for rec in dict.values(self) if rec.ticket == key]
+            if len(matches) == 1:
+                return matches[0]
+        raise KeyError(key)
+
+    def get(self, key, default=None):  # noqa: ANN001
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def pop(self, key, default=None):  # noqa: ANN001
+        if dict.__contains__(self, key):
+            return dict.pop(self, key)
+        if isinstance(key, int):
+            matches = self.keys_for(key)
+            if len(matches) == 1:
+                return dict.pop(self, matches[0])
+            return default
+        return dict.pop(self, key, default)
+
+
 class TradeJournal:
     """JSON-backed journal of open + closed trades for one bot mode."""
 
@@ -434,22 +501,22 @@ class TradeJournal:
         self.path = Path(path)
         self.mode = mode
         self.symbols_cfg = symbols_cfg
-        self.open_trades: dict[int, OpenTradeRecord] = {}
+        self.open_trades: OpenTradesMap = OpenTradesMap()
         self.closed_trades: list[ClosedTradeRecord] = []
 
     def load(self) -> None:
         if not self.path.exists():
-            self.open_trades = {}
+            self.open_trades = OpenTradesMap()
             self.closed_trades = []
             return
         with self.path.open(encoding="utf-8-sig") as f:
             raw = json.load(f)
         self.mode = str(raw.get("mode") or self.mode)
-        self.open_trades = {
-            int(row["ticket"]): OpenTradeRecord.from_dict(row)
-            for row in (raw.get("open_trades") or [])
-            if row.get("ticket") is not None
-        }
+        self.open_trades = OpenTradesMap()
+        for row in raw.get("open_trades") or []:
+            if row.get("ticket") is None:
+                continue
+            self.open_trades.store(OpenTradeRecord.from_dict(row))
         self.closed_trades = [
             ClosedTradeRecord.from_dict(row) for row in (raw.get("closed_trades") or [])
         ]
@@ -471,6 +538,18 @@ class TradeJournal:
         with self.path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
+    def _pop_open(
+        self,
+        ticket: int,
+        *,
+        symbol: str | None = None,
+        strategy: str | None = None,
+    ) -> OpenTradeRecord | None:
+        keys = self.open_trades.keys_for(ticket, symbol=symbol, strategy=strategy)
+        if len(keys) == 1:
+            return dict.pop(self.open_trades, keys[0])
+        return None
+
     def record_open(
         self,
         position: Position,
@@ -485,21 +564,24 @@ class TradeJournal:
             record.strategy = resolve_strategy_tag(explicit=record.strategy, reason=reason)
         if reason is not None:
             record.reason = str(reason)
-        self.open_trades[record.ticket] = record
+        self.open_trades.store(record)
         self.save()
         return record
 
     def record_close(self, trade: TradeResult, ticket: int | None = None) -> ClosedTradeRecord:
         resolved_ticket = ticket
         if resolved_ticket is None:
-            # Match by symbol among open rows when ticket unknown
-            for open_ticket, open_rec in list(self.open_trades.items()):
+            for open_rec in list(self.open_trades.values()):
                 if open_rec.symbol == trade.symbol:
-                    resolved_ticket = open_ticket
+                    resolved_ticket = open_rec.ticket
                     break
         resolved_ticket = int(resolved_ticket or 0)
 
-        open_rec = self.open_trades.pop(resolved_ticket, None)
+        open_rec = self._pop_open(
+            resolved_ticket,
+            symbol=getattr(trade, "symbol", None),
+            strategy=getattr(trade, "strategy", None) or None,
+        )
         direction = (
             trade.direction.value
             if isinstance(trade.direction, SignalType)
@@ -569,6 +651,7 @@ class TradeJournal:
         pnl: float | None,
         *,
         at: datetime | None = None,
+        strategy: str | None = None,
     ) -> ClosedTradeRecord | None:
         """Record a broker-side close matched to a journal open row.
 
@@ -578,7 +661,7 @@ class TradeJournal:
         ``symbols_cfg``; missing specs or implausible |R|>10 yield ``r_multiple=0``
         with a ``data_quality`` flag rather than a price-distance fallback.
         """
-        open_rec = self.open_trades.pop(ticket, None)
+        open_rec = self._pop_open(ticket, symbol=symbol, strategy=strategy)
         if open_rec is None:
             logger.warning(
                 "Journal: orphan external close ticket={} symbol={} pnl={} — skipped",
@@ -675,31 +758,50 @@ class TradeJournal:
         ``order_send`` or during MT5 reconnect hiccups).
         """
         changed = False
-        broker_tickets = {position.ticket for position in positions}
         as_of = now or datetime.now(tz=UTC)
-        for ticket in list(self.open_trades):
-            if ticket in broker_tickets:
+
+        def _identity(symbol: str, strategy: str, ticket: int) -> tuple[str, str, int]:
+            return (symbol, resolve_strategy_tag(explicit=strategy), int(ticket))
+
+        broker_ids = {
+            _identity(pos.symbol, getattr(pos, "strategy", "") or "", pos.ticket)
+            for pos in positions
+        }
+        for key, open_rec in list(self.open_trades.items()):
+            rec_id = _identity(open_rec.symbol, open_rec.strategy, open_rec.ticket)
+            if rec_id in broker_ids:
                 continue
-            open_rec = self.open_trades.get(ticket)
-            opened_at = _parse_iso(open_rec.open_time if open_rec else "")
+            ticket_hits = [pos for pos in positions if int(pos.ticket) == int(open_rec.ticket)]
+            if len(ticket_hits) == 1 and ticket_hits[0].symbol == open_rec.symbol:
+                continue
+            opened_at = _parse_iso(open_rec.open_time)
             if opened_at is not None and ghost_grace_seconds > 0:
                 age = (as_of - opened_at).total_seconds()
                 if age < ghost_grace_seconds:
                     logger.debug(
                         "Journal: keeping recent open ticket={} age={:.1f}s < grace={:.0f}s",
-                        ticket,
+                        open_rec.ticket,
                         age,
                         ghost_grace_seconds,
                     )
                     continue
-            self.open_trades.pop(ticket, None)
+            self.open_trades.pop(key, None)
             changed = True
-            logger.info("Journal: dropping ghost open ticket={} (not on broker)", ticket)
+            logger.info(
+                "Journal: dropping ghost open ticket={} strategy={} (not on broker)",
+                open_rec.ticket,
+                open_rec.strategy,
+            )
         for position in positions:
-            if position.ticket not in self.open_trades:
-                self.open_trades[position.ticket] = OpenTradeRecord.from_position(
-                    position, self.mode
-                )
+            rec_id = _identity(
+                position.symbol, getattr(position, "strategy", "") or "", position.ticket
+            )
+            exists = any(
+                _identity(rec.symbol, rec.strategy, rec.ticket) == rec_id
+                for rec in self.open_trades.values()
+            )
+            if not exists:
+                self.open_trades.store(OpenTradeRecord.from_position(position, self.mode))
                 changed = True
         if changed:
             self.save()

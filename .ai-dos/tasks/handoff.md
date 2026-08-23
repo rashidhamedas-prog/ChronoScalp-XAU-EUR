@@ -2,6 +2,174 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 operator confirmed merge/deploy/VWAP live
+
+- Time (UTC): 2026-08-23T13:20:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Operator confirmation: Merge, Deploy, live-enable VWAP.
+- Product: `config/settings.yaml` sets `xau_vwap_pullback` `enabled: true`, `shadow_only: false`, `live_ready: true`, and lists it on `enabled_strategies`. `apply_enabled_strategies` copies `live_ready` from committed settings.yaml so Telegram/API save cannot drop the gate to false. Fail-closed path remains when `live_ready` is false.
+- Unchanged: 1%/1.5R/3% heat, `CHRONOSCALP_CONFIRM_LIVE`.
+- Exact next action: pytest/ruff/black, commit, merge to main, deploy VPS, confirm overlay.
+
+## 2026-08-23 TASK-002 pin fair-batch test (finding 4)
+
+- Time (UTC): 2026-08-23T12:55:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Why: independent functional review of `378a5e5` marked findings 1–3, 5–6 closed but finding 4's test residual — `dollar_risk=50` would still pass if News were omitted from `n`.
+- Test change only: `test_tick_news_and_delta_share_batch_when_heat_tight` now spies `allocate_batch_risk_pct(n=…)`, requires `n==2`, and sizes News from `risk_pct` so a 1.5% remainder must split to 0.75% / $75. Omitting News from the batch would yield `n==1` and 1.0% / $100.
+- Gates: `pytest tests/test_trading_bot_multistrat.py::test_tick_news_and_delta_share_batch_when_heat_tight` passed; ruff+black clean on that file.
+- Exact next action: re-review finding 4. **Do not merge. Do not deploy. VWAP stays shadow.**
+
+## 2026-08-23 TASK-002 independent-review fixes (do not merge)
+
+- Time (UTC): 2026-08-23T12:35:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close the six independent-review findings without merge, deploy, or live-enabling VWAP.
+- Product changes:
+  1. `_restore_pending_heat_reservations` harvests fills before overwriting reservations, then merges so heat never shrinks (in-flight fill keeps prior; open + leftover pending keeps leftover; `max(prior, rebuilt)`). `_open_dollar_risks` still counts leftover live pendings even when a position already exists.
+  2. `_recover_news_oco_from_broker` reconstructs News OCO after restart, or fail-closed cancels the leftover opposite pending and re-lists to verify. Open + leftover pending both stay in heat until cancel is confirmed.
+  3. Comparison mode: `_at_capacity(strategy)`, per-book `DailyDrawdownGuard`, and Three-Strikes are isolated per strategy book. Hitting daily DD closes that book only.
+  4. Same-tick News joins `allocate_batch_risk_pct` with other ready signals so remaining heat is split fairly (code order is not the winner).
+  5. Telegram `RequestException` is logged via `telegram_error_summary` (type + optional status only). Token/URL are stripped before re-raise; poll/send do not interpolate the request URL.
+- Tests (via `TradingBot.tick` except Telegram `run_forever` poll):
+  - `test_tick_pending_fill_between_reconciles_keeps_heat`
+  - `test_tick_restart_news_oco_cancels_leftover_or_counts_both`
+  - `test_tick_comparison_limits_are_per_book`
+  - `test_tick_comparison_daily_dd_is_per_book`
+  - `test_tick_news_and_delta_share_batch_when_heat_tight`
+  - `test_telegram_poll_error_omits_token`
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002` → exit 0 (full suite)
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `.venv\Scripts\python.exe -m black --check` on `src/chronoscalp/main.py`, `src/chronoscalp/risk/institutional_guards.py`, `src/chronoscalp/telegram/control_bot.py`, `src/chronoscalp/orchestration/alerts.py`, `tests/test_trading_bot_multistrat.py`, `tests/test_telegram_control_bot.py` → 6 files would be left unchanged
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `xau_vwap_pullback` still `live_ready: false` / `shadow_only: true`.
+- Exact next action: independent functional + security review (distinct from implementer). **Do not merge. Do not deploy. Do not live-enable VWAP.**
+
+## 2026-08-23 TASK-002 Bugbot follow-up: comparison ticket collision
+
+- Time (UTC): 2026-08-23T11:15:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Finding closed: [Bugbot](1a3f5f30-0524-4857-bd14-da9f8ed030cf) high — paper comparison books all started at ticket 1, so shared journal/meta/heat maps keyed by bare ticket collided.
+- Product changes:
+  - Each comparison `PaperBroker` gets a disjoint `first_ticket` origin (1, 1_000_001, …).
+  - `_position_meta` is stored under `(symbol, strategy)` with a ticket alias only when that ticket is unique to the strategy.
+  - `TradeJournal.open_trades` uses composite keys; int lookup remains for unique-ticket unit tests.
+  - Heat reconstruction and force-close/unrealized PnL resolve the book via `_broker_for(strategy)`.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_tickets_full` → passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `.venv\Scripts\python.exe -m black --check` on touched files → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent functional review of this follow-up + `44b62a2`. **Do not merge. Do not live-enable VWAP.**
+
+## 2026-08-23 TASK-002 independent security: restart-heat medium closed
+
+- Time (UTC): 2026-08-23T10:50:00Z
+- Task / owner / role: TASK-002 / independent security (distinct from implementer)
+- Branch: `ai/TASK-002-xau-vwap-multistrat` @ `5f6672f` (later `44b62a2` still on the branch)
+- Finding: prior medium (pending heat lost after restart) is **closed**. No new medium+ security issues in that diff. `xau_vwap_pullback` still cannot live-enable via API/Telegram/Streamlit while `live_ready: false`.
+- Residual (below medium): magic-filtered MT5 pendings with empty/non-`CS_` comments are skipped rather than fail-closed.
+- Process: security no longer blocks on restart-heat. **Do not merge** until independent functional review of `44b62a2`. **Do not live-enable VWAP.**
+
+## 2026-08-23 TASK-002 bugbot follow-up: comparison reconcile, cancel heat, VWAP M1 expiry
+
+- Time (UTC): 2026-08-23T10:45:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close [Bugbot](8b0c1f17-3636-4f43-945d-bd2b77136098) highs/medium without live-enabling VWAP.
+- Product changes:
+  - `_reconcile_state_with_broker` loads positions from comparison books and matches by `(symbol, strategy)` so virtual fills are not dropped.
+  - `_cancel_strategy_pendings` keeps heat reserved until re-list shows no leftover (then harvest, then release).
+  - VWAP `bars_left` decrements only when the last M1 timestamp changes, not on every poll.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_bugbot` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files after format → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent reviewer + security (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
+## 2026-08-23 TASK-002 security follow-up: restore pending heat after restart
+
+- Time (UTC): 2026-08-23T10:30:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close the medium security finding that `_heat_reservations` were in-memory only after Stop/Start/crash.
+- Product changes:
+  - `_restore_pending_heat_reservations` scans broker pendings on every tick and after reconcile; rebuilds dollar risk from geometry.
+  - News OCO two legs reserve **max** (not sum).
+  - Unreadable CS_ comments, unusable SL/volume, or `get_pending_orders` failure set `_pending_restore_failed` / `_heat_unknown` so new entries cannot slip under the 3% cap.
+  - `_open_dollar_risks` keeps that fail-closed flag (does not clear it after a failed pending list).
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_heat` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent security + functional reviewer (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
+## 2026-08-22 TASK-002 review-fix complete (do not merge)
+
+- Time (UTC): 2026-08-22T17:15:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close merge-blocking findings on `6865d95` without live-enabling VWAP or loosening 1%/1.5R/3%.
+- Product changes:
+  - News pending: heat reserved **before** `news_straddle.tick`; dollar-risk capped to the allocated remainder; MT5 netting still fail-closed.
+  - Simultaneous candidates: equal batch split of remaining heat (still ≤1%/trade).
+  - `xau_vwap_pullback` places a stop pending; paper fills only from a **stored** crossing quote (never a synthetic quote from the pending price); expire after 2 M1 bars / engine `working_stop` None cancels.
+  - `live_ready: false` fail-closed on API / Streamlit / Telegram; live loop still refuses real orders.
+  - Comparison books: last quote cached onto newly created per-strategy PaperBrokers; R-normalized reports.
+  - Backtest HTF uses closed-bar mask (`index + duration <= t`); comparison books + stop pendings.
+  - `max_concurrent` re-checked after each fill and after stop reservation; harvest after stop place.
+  - Incomplete heat metadata: reconstruct from live geometry or `_heat_unknown` blocks new entries.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_full` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files after format → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent reviewer + security (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
+## 2026-08-22 TASK-002 review-fix (Changes Requested on 6865d95)
+
+- Time (UTC): 2026-08-22T16:55:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: fix merge-blocking findings without live-enabling VWAP or loosening 1%/1.5R/3%.
+- Scope: news heat reservation + netting; fair batch heat; VWAP stop-pending; live_ready fail-closed on API/Streamlit/Telegram; comparison books; HTF no-lookahead; max_concurrent after each reservation; reconstruct/fail-closed heat metadata; black `scripts/app.py`; ChronoScalp `TradingBot.tick` integration tests.
+- Exact next action: implement, pytest/ruff/black, commit+push, re-request independent review. Do **not** merge. Do **not** set `live_ready: true`.
+
+## 2026-08-22 TASK-002 independent multi-strategy + xau_vwap_pullback
+
+- Time (UTC): 2026-08-22T16:40:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer and security remain distinct identities — **not done**)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: independent candidates, (symbol, strategy, ticket) state, 3% live heat, DST sessions, `xau_vwap_pullback` shadow-only, Telegram simultaneous-OR, tests + validation template.
+- Product changes (this session):
+  - Kernel: `evaluate_candidates`, composite tickets, heat allocation, MT5 hedging/netting fail-closed, news OCO twin-only, DST `SessionFilter`, spread shield, comparison vs live books.
+  - `xau_vwap_pullback` module + `enabled: false` / `shadow_only: true`. Not on `enabled_strategies`. Not live-enabled.
+  - Backtest processes all candidates (comparison books), SL-first, LIVE_ONLY_GATES includes live shared heat + netting.
+  - Telegram off/shadow/on for VWAP pullback; status source; per-strategy PnL.
+  - Docs: `STRATEGY_XAU_VWAP_PULLBACK.md`, validation templates with UNKNOWN metrics, ROADMAP, TELEGRAM_BOT_FA.
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; Delta not rewritten.
+- Exact next action: independent reviewer + security (distinct from implementer) before merge. Do **not** live-enable `xau_vwap_pullback`. Do not merge to `main` until those reviews land.
+- Validation: `pytest -q` passed; `ruff check src tests` passed; `black --check` on touched files passed.
+
+## 2026-08-22 TASK-002 claim + reclaim stale TASK-001 overlap
+
+- Time (UTC): 2026-08-22T15:26:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / orchestrator + implementer
+- Branch: ai/TASK-002-xau-vwap-multistrat
+- Objective: independent multi-strategy execution + `xau_vwap_pullback` (disabled, shadow_only).
+- Verified context and decisions:
+  - TASK-001 heartbeat 2026-08-17 is stale vs 24h; owner `cursor:grok-4.5` is not this session.
+  - Overlapping live/paper/telegram/risk/backtest files reclaimed into TASK-002. TASK-001 keeps Delta, research scripts, forensic docs.
+  - Live heat cap 3.0% (matches daily loss); per-trade 1% and min 1.5 R:R unchanged. Comparison/paper uses independent virtual books.
+  - `xau_vwap_pullback` will not be live-enabled this cycle. `CHRONOSCALP_CONFIRM_LIVE` untouched. Delta not rewritten.
+- Exact next action: implement kernel (position keys, heat, account mode, DST sessions, candidate fan-out) then the strategy module and Telegram.
+
 ## 2026-08-17 deploy trade-open copy to VPS (TASK-001)
 
 - Time (UTC): 2026-08-17T12:32:00Z

@@ -91,6 +91,30 @@ def test_delta_is_a_valid_runtime_strategy() -> None:
     assert out["strategy"]["use_delta"] is True
 
 
+def test_xau_vwap_is_a_valid_runtime_strategy() -> None:
+    out = validate_runtime_overrides(
+        {
+            "strategy": {
+                "enabled_strategies": ["xau_vwap_pullback"],
+                "use_xau_vwap_pullback": True,
+            }
+        }
+    )
+    assert out["strategy"]["enabled_strategies"] == ["xau_vwap_pullback"]
+    assert out["strategy"]["use_xau_vwap_pullback"] is True
+
+
+def test_heat_may_reach_daily_loss_but_not_exceed_it() -> None:
+    out = validate_runtime_overrides(
+        {"risk": {"max_daily_loss_pct": 3.0, "max_portfolio_heat_pct": 3.0}}
+    )
+    assert out["risk"]["max_portfolio_heat_pct"] == 3.0
+    with pytest.raises(RuntimeOverridesValidationError, match="max_portfolio_heat_pct"):
+        validate_runtime_overrides(
+            {"risk": {"max_daily_loss_pct": 3.0, "max_portfolio_heat_pct": 4.0}}
+        )
+
+
 def test_mistake_memory_nested_validation() -> None:
     out = validate_runtime_overrides(
         {

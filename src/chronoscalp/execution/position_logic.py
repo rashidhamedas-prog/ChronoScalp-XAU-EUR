@@ -29,7 +29,11 @@ class SlTpHit:
 
 
 def check_sl_tp_hit(position: Position, bar_high: float, bar_low: float) -> SlTpHit:
-    """Return whether ``bar_high``/``bar_low`` pierced SL or TP for ``position``."""
+    """Return whether ``bar_high``/``bar_low`` pierced SL or TP for ``position``.
+
+    If both SL and TP sit inside the same OHLC bar, SL is recorded as hit.
+    ``exit_price_for_hit`` then uses the stop — conservative SL-first fills.
+    """
     if position.direction == SignalType.BUY:
         hit_sl = bar_low <= position.stop_loss
         hit_tp = bar_high >= position.take_profit

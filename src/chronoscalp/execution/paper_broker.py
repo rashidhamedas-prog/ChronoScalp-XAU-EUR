@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from chronoscalp.execution.account_mode import AccountMarginMode
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import (
@@ -28,7 +29,11 @@ class PaperBroker:
     satisfies `Broker` by having matching methods."""
 
     def __init__(
-        self, symbols_cfg: dict, starting_balance: float = 10_000.0, slippage_pips: float = 0.5
+        self,
+        symbols_cfg: dict,
+        starting_balance: float = 10_000.0,
+        slippage_pips: float = 0.5,
+        first_ticket: int = 1,
     ) -> None:
         self.symbols_cfg = symbols_cfg
         self.balance = starting_balance
@@ -36,11 +41,15 @@ class PaperBroker:
         self._positions: dict[int, Position] = {}
         self._pending: dict[int, PendingOrder] = {}
         self._quotes: dict[str, Quote] = {}
-        self._next_ticket = 1
+        self._next_ticket = max(1, int(first_ticket))
 
     def connect(self) -> bool:
         logger.info("PaperBroker ready (starting_balance={:.2f})", self.balance)
         return True
+
+    def account_margin_mode(self) -> AccountMarginMode:
+        """Paper books are independent; treated as hedging-capable."""
+        return AccountMarginMode.PAPER
 
     def get_balance(self) -> float:
         return self.balance
@@ -98,6 +107,7 @@ class PaperBroker:
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         order = PendingOrder(
             ticket=self._next_ticket,
@@ -109,6 +119,7 @@ class PaperBroker:
             take_profit=float(take_profit),
             comment=comment,
             expiration=expiration,
+            strategy=strategy,
         )
         self._pending[order.ticket] = order
         self._next_ticket += 1
@@ -140,20 +151,26 @@ class PaperBroker:
         return orders
 
     def _maybe_fill_pendings(self, symbol: str) -> None:
-        """Convert at most one stop pending into a position per quote update.
+        """Fill triggered stop pendings without letting a news twin double-fill.
 
-        News straddles are OCO: filling both BUY_STOP and SELL_STOP on the same
-        spike would leave a hedged orphan. If a position is already open on the
-        symbol, leave remaining stops for the engine to cancel.
+        Independent strategies (e.g. VWAP pullback) may fill on the same quote
+        as a news leg. A second *news* fill is skipped so OCO can cancel it.
         """
-        if any(p.symbol == symbol for p in self._positions.values()):
-            return
-        quote = self.get_quote(symbol)
+        news_already_open = any(
+            p.symbol == symbol and (p.strategy or "") == "news_straddle"
+            for p in self._positions.values()
+        )
+        # Only a stored quote may trigger a fill. Synthesizing from the pending
+        # price itself would fill every stop the first time it is inspected.
+        quote = self._quotes.get(symbol)
         if quote is None:
             return
+        filled_news = news_already_open
         for ticket, order in list(self._pending.items()):
             if order.symbol != symbol:
                 continue
+            comment = order.comment or ""
+            is_news = comment.startswith("CS_News")
             filled = False
             direction = SignalType.BUY
             fill_price = order.price
@@ -167,7 +184,13 @@ class PaperBroker:
                 fill_price = min(order.price, quote.bid)
             if not filled:
                 continue
+            if is_news and filled_news:
+                continue
             self._pending.pop(ticket, None)
+            tag = resolve_strategy_tag(explicit=order.strategy, comment=comment, reason=comment)
+            if is_news:
+                tag = "news_straddle"
+                filled_news = True
             position = Position(
                 ticket=self._next_ticket,
                 symbol=symbol,
@@ -179,18 +202,18 @@ class PaperBroker:
                 open_time=datetime.now(tz=UTC),
                 initial_volume=order.volume,
                 initial_stop_loss=order.stop_loss,
+                strategy=tag,
             )
             self._positions[position.ticket] = position
             self._next_ticket += 1
             logger.info(
-                "[paper] Pending filled {} {} @ {:.5f} (was order {})",
+                "[paper] Pending filled {} {} @ {:.5f} (was order {} strategy={})",
                 symbol,
                 direction.value,
                 fill_price,
                 ticket,
+                tag,
             )
-            # One fill per quote — remaining stop is left for OCO cancel.
-            return
 
     def place_order(
         self, signal: Signal, volume: float, fill_price: float | None = None

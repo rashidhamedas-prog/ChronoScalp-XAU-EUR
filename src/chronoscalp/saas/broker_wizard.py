@@ -8,9 +8,22 @@ from pathlib import Path
 import yaml
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.strategy.live_gates import force_shadow_if_not_live_ready
 
 ENV_PATH = Path(".env")
 OVERRIDES_PATH = Path("config/runtime_overrides.yaml")
+
+
+def _committed_xau_live_ready() -> bool:
+    """Read live_ready from git-tracked settings.yaml, not from overlay."""
+    from chronoscalp.config import CONFIG_DIR
+
+    path = CONFIG_DIR / "settings.yaml"
+    if not path.exists():
+        return False
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    block = (data.get("strategy") or {}).get("xau_vwap_pullback") or {}
+    return bool(block.get("live_ready"))
 
 
 @dataclass
@@ -197,6 +210,7 @@ KNOWN_STRATEGIES: tuple[str, ...] = (
     "liquidity_volume",
     "ultra_scalp",
     "news_straddle",
+    "xau_vwap_pullback",
 )
 
 
@@ -276,9 +290,16 @@ def apply_active_symbols(
 def apply_enabled_strategies(
     strategies: list[str],
     *,
-    overrides_path: Path = OVERRIDES_PATH,
+    overrides_path: Path | None = None,
+    shadow: list[str] | None = None,
 ) -> list[str]:
-    """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only."""
+    """Persist enabled strategy modes; sync boolean flags. Empty = MACD/trend only.
+
+    ``shadow`` lists strategies that evaluate but must not place orders
+    (``shadow_only: true``). Shadow ids are also written to
+    ``enabled_strategies`` so the engine actually runs.
+    """
+    overrides_path = overrides_path or OVERRIDES_PATH
     known = set(KNOWN_STRATEGIES)
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -287,6 +308,14 @@ def apply_enabled_strategies(
         if name in known and name not in seen:
             seen.add(name)
             cleaned.append(name)
+    shadow_set: set[str] = set()
+    for raw in shadow or []:
+        name = str(raw).strip().lower()
+        if name in known:
+            shadow_set.add(name)
+            if name not in seen:
+                seen.add(name)
+                cleaned.append(name)
 
     payload = _load_overrides(overrides_path)
     strategy = dict(payload.get("strategy") or {})
@@ -296,6 +325,24 @@ def apply_enabled_strategies(
     strategy["use_ultra_scalp"] = "ultra_scalp" in seen
     strategy["use_news_straddle"] = "news_straddle" in seen
     strategy["use_delta"] = "delta" in seen
+    strategy["use_xau_vwap_pullback"] = "xau_vwap_pullback" in seen
+    xau = dict(strategy.get("xau_vwap_pullback") or {})
+    # Research gate lives in committed settings.yaml; UI/API cannot flip it.
+    xau["live_ready"] = _committed_xau_live_ready()
+    if "xau_vwap_pullback" in seen:
+        xau["enabled"] = True
+        must_shadow = force_shadow_if_not_live_ready(
+            "xau_vwap_pullback",
+            strategy_cfg={"xau_vwap_pullback": xau},
+            requested_shadow="xau_vwap_pullback" in shadow_set,
+        )
+        xau["shadow_only"] = must_shadow
+        if must_shadow:
+            shadow_set.add("xau_vwap_pullback")
+    else:
+        xau["enabled"] = False
+        xau["shadow_only"] = True
+    strategy["xau_vwap_pullback"] = xau
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)
     logger.info("Enabled strategies saved: {}", ",".join(cleaned) or "(none)")

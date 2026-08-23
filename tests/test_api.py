@@ -89,3 +89,45 @@ def test_journal_and_strategy_stats_endpoints(tmp_path: Path, monkeypatch):
     positions = client.get("/positions")
     assert positions.status_code == 200
     assert positions.json()["account"]["equity"] == 10000
+
+
+def test_settings_strategies_cannot_live_enable_xau_when_gate_closed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CHRONOSCALP_ENV", "development")
+    monkeypatch.delenv("CHRONOSCALP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "chronoscalp.saas.broker_wizard._committed_xau_live_ready",
+        lambda: False,
+    )
+    overrides = tmp_path / "runtime_overrides.yaml"
+    monkeypatch.setattr("chronoscalp.saas.broker_wizard.OVERRIDES_PATH", overrides)
+    client = TestClient(create_app())
+    resp = client.post("/settings/strategies", json={"strategies": ["delta", "xau_vwap_pullback"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "xau_vwap_pullback" in body["strategies"]
+    assert body["xau_vwap_pullback_shadow_only"] is True
+    assert body["xau_vwap_pullback_live_ready"] is False
+    import yaml
+
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["strategy"]["xau_vwap_pullback"]["shadow_only"] is True
+    assert data["strategy"]["xau_vwap_pullback"].get("live_ready") is False
+
+
+def test_settings_strategies_live_enables_xau_when_gate_open(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CHRONOSCALP_ENV", "development")
+    monkeypatch.delenv("CHRONOSCALP_API_TOKEN", raising=False)
+    overrides = tmp_path / "runtime_overrides.yaml"
+    monkeypatch.setattr("chronoscalp.saas.broker_wizard.OVERRIDES_PATH", overrides)
+    client = TestClient(create_app())
+    resp = client.post("/settings/strategies", json={"strategies": ["delta", "xau_vwap_pullback"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "xau_vwap_pullback" in body["strategies"]
+    assert body["xau_vwap_pullback_shadow_only"] is False
+    assert body["xau_vwap_pullback_live_ready"] is True
+    import yaml
+
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    assert data["strategy"]["xau_vwap_pullback"]["shadow_only"] is False
+    assert data["strategy"]["xau_vwap_pullback"].get("live_ready") is True

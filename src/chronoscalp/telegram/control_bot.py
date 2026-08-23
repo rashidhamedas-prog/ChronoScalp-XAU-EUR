@@ -49,6 +49,7 @@ from chronoscalp.saas.process_control import (
     tail_logs,
 )
 from chronoscalp.saas.user_config import UserConfigStore
+from chronoscalp.strategy.live_gates import is_strategy_live_ready
 from chronoscalp.telegram.keyboards import (
     ALIASES,
     CONN_KEYBOARD,
@@ -59,6 +60,7 @@ from chronoscalp.telegram.keyboards import (
     SETTINGS_KEYBOARD,
     STRATEGY_LABEL_TO_KEY,
     STRATEGY_LABELS,
+    cycle_strategy_selection,
     hours_keyboard,
     parse_toggle_label,
     risk_keyboard,
@@ -69,6 +71,15 @@ from chronoscalp.telegram.keyboards import (
 
 API = "https://api.telegram.org/bot{token}/{method}"
 DEFAULT_MT5_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+
+
+def telegram_error_summary(exc: BaseException) -> str:
+    """Describe a Telegram HTTP failure without URL, token, or request body."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    name = type(exc).__name__
+    if status is not None:
+        return f"{name} status={status}"
+    return name
 
 
 class TelegramControlBot:
@@ -136,16 +147,19 @@ class TelegramControlBot:
         """POST to Telegram Bot API with explicit UTF-8 JSON (Persian-safe)."""
         url = API.format(token=self.token, method=method)
         body = json.dumps(params, ensure_ascii=False).encode("utf-8")
-        response = requests.post(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=max(35.0, self.timeout),
-        )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = requests.post(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=max(35.0, self.timeout),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            raise requests.RequestException(telegram_error_summary(exc)) from None
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API rejected the request")
         return data
 
     def send(
@@ -165,9 +179,14 @@ class TelegramControlBot:
             payload["reply_markup"] = reply_markup
         try:
             self._api("sendMessage", **payload)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Telegram sendMessage failed chat_id={} {}",
+                chat_id,
+                telegram_error_summary(exc),
+            )
         except Exception:  # noqa: BLE001
             logger.exception("Telegram sendMessage failed chat_id={}", chat_id)
-            raise
 
     def _authorized(self, chat_id: str | int) -> bool:
         if not self.allowed_chat:
@@ -332,6 +351,10 @@ class TelegramControlBot:
         strategies = ", ".join(self._current_strategies()) or "(MACD/trend only)"
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
         mm = "on" if self._mistake_memory_enabled() else "off"
+        source = self._settings_source()
+        xau_cfg = self.settings.strategy.get("xau_vwap_pullback") or {}
+        xau_shadow = "on" if xau_cfg.get("shadow_only", True) else "off"
+        ms_mode = self.settings.execution.get("multi_strategy_mode", "comparison")
         user = UserConfigStore().config
         lines = [
             "وضعیت ChronoScalp",
@@ -341,6 +364,9 @@ class TelegramControlBot:
             f"بروکر اجرا: {broker}",
             f"نمادها: {symbols}",
             f"استراتژی‌ها: {strategies}",
+            f"منبع تنظیم: {source} (بعد از Stop/Start)",
+            f"multi_strategy_mode={ms_mode}",
+            f"xau_vwap_pullback shadow_only={xau_shadow}",
             f"kill_switch: {ks}",
             f"دلیل: {reason}",
             f"تأیید Live (.env): {live_ok}",
@@ -352,16 +378,22 @@ class TelegramControlBot:
         mode = self._detect_mode()
         snap = load_journal_snapshot(self.state_dir, mode, reference_equity=self.reference_equity)
         s = snap.stats
-        self.send(
-            chat_id,
-            (
-                f"P&L ({mode})\n"
-                f"net={s.net_pnl:+.2f}  today={s.today_pnl:+.2f}\n"
-                f"closed={s.closed_trades}  open={s.open_trades}\n"
-                f"win_rate={s.win_rate_pct:.1f}%  avg={s.avg_pnl:+.2f}\n"
-                f"PF={s.profit_factor}  expectancy={s.expectancy:+.2f}"
-            ),
-        )
+        lines = [
+            f"P&L ({mode})",
+            f"net={s.net_pnl:+.2f}  today={s.today_pnl:+.2f}",
+            f"closed={s.closed_trades}  open={s.open_trades}",
+            f"win_rate={s.win_rate_pct:.1f}%  avg={s.avg_pnl:+.2f}",
+            f"PF={s.profit_factor}  expectancy={s.expectancy:+.2f}",
+            "— مقایسه بر اساس R (نه حجم دلار) —",
+        ]
+        rows = list(getattr(snap, "strategy_stats", None) or [])
+        rows.sort(key=lambda r: float(getattr(r, "avg_pnl", 0.0) or 0.0), reverse=True)
+        for row in rows:
+            lines.append(
+                f"{row.strategy}: n={row.trades} WR={row.win_rate_pct:.1f}% "
+                f"net={row.net_pnl:+.2f} open={row.open_trades}"
+            )
+        self.send(chat_id, "\n".join(lines))
 
     def _cmd_open(self, chat_id: int, _text: str = "") -> None:
         rows, account = self._load_live_open_positions()
@@ -631,6 +663,20 @@ class TelegramControlBot:
             + "\n\nکنترل / Control\n"
             + f"symbols={symbols}\n"
             + f"strategies={','.join(strats) or '(MACD/trend only)'}\n"
+            + f"source={self._settings_source()} (restart required)\n"
+            + f"multi_strategy_mode={self.settings.execution.get('multi_strategy_mode', 'comparison')}\n"
+            + (
+                "xau_vwap_pullback="
+                + (
+                    "shadow"
+                    if (self.settings.strategy.get("xau_vwap_pullback") or {}).get(
+                        "shadow_only", True
+                    )
+                    and "xau_vwap_pullback" in strats
+                    else ("on" if "xau_vwap_pullback" in strats else "off")
+                )
+                + "\n"
+            )
             + f"trading_hours={hours}\n"
             + f"risk_effective={risk}%\n"
             + f"daily_loss_limit={daily_loss}"
@@ -848,21 +894,16 @@ class TelegramControlBot:
     def _current_strategies(self) -> list[str]:
         from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
 
-        use_smc, use_liq, use_scalp, use_news, use_delta = resolve_enabled_strategies(
-            self.settings.strategy
-        )
-        out: list[str] = []
-        if use_delta:
-            out.append("delta")
-        if use_smc:
-            out.append("smc_confluence")
-        if use_liq:
-            out.append("liquidity_volume")
-        if use_scalp:
-            out.append("ultra_scalp")
-        if use_news:
-            out.append("news_straddle")
-        return out
+        return resolve_enabled_strategies(self.settings.strategy).names()
+
+    def _settings_source(self) -> str:
+
+        from chronoscalp.config import CONFIG_DIR
+
+        overlay = CONFIG_DIR / "runtime_overrides.yaml"
+        if overlay.exists():
+            return "runtime_overrides.yaml"
+        return "settings.yaml"
 
     def _symbols_menu_state(self, chat_id: int) -> list[str]:
         pending = self._pending.get(chat_id)
@@ -870,11 +911,26 @@ class TelegramControlBot:
             return list(pending.get("selected") or [])
         return list(self.settings.symbols)
 
+    def _current_shadow_strategies(self) -> list[str]:
+        from chronoscalp.strategy.multi_timeframe import is_shadow_only
+
+        return [
+            name
+            for name in self._current_strategies()
+            if is_shadow_only(self.settings.strategy, name)
+        ]
+
     def _strategies_menu_state(self, chat_id: int) -> list[str]:
         pending = self._pending.get(chat_id)
         if pending and pending.get("flow") == "strategies_menu":
             return list(pending.get("selected") or [])
         return self._current_strategies()
+
+    def _strategies_shadow_state(self, chat_id: int) -> list[str]:
+        pending = self._pending.get(chat_id)
+        if pending and pending.get("flow") == "strategies_menu":
+            return list(pending.get("shadow") or [])
+        return self._current_shadow_strategies()
 
     def _send_symbols_menu(self, chat_id: int, *, note: str = "") -> None:
         catalog = self._symbol_catalog()
@@ -895,21 +951,26 @@ class TelegramControlBot:
 
     def _send_strategies_menu(self, chat_id: int, *, note: str = "") -> None:
         selected = self._strategies_menu_state(chat_id)
+        shadow = self._strategies_shadow_state(chat_id)
         self._pending[chat_id] = {
             "flow": "strategies_menu",
             "step": "pick",
             "selected": selected,
+            "shadow": shadow,
         }
         labels = [STRATEGY_LABELS.get(k, k) for k in selected]
         active = ", ".join(labels) if labels else "(فقط MACD/trend)"
         msg = (
-            "استراتژی‌ها — روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره استراتژی‌ها».\n"
-            f"دلتا (طلا) · SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبری\n"
+            "استراتژی‌ها — انتخاب چندتایی یعنی اجرای هم‌زمان همه (نه بهترین سیگنال).\n"
+            "روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره استراتژی‌ها».\n"
+            "پولبک VWAP: ⬜ خاموش → 👁 shadow (بدون سفارش) → ✅ فعال.\n"
+            "تغییر فقط بعد از Stop سپس Start روی ربات معاملاتی اعمال می‌شود.\n"
+            f"دلتا (طلا) · SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبر · پولبک VWAP\n"
             f"انتخاب فعلی: {active}"
         )
         if note:
             msg = f"{note}\n\n{msg}"
-        self.send(chat_id, msg, reply_markup=strategies_keyboard(selected))
+        self.send(chat_id, msg, reply_markup=strategies_keyboard(selected, shadow))
 
     def _cmd_symbols_menu(self, chat_id: int, _text: str = "") -> None:
         self._reload_settings()
@@ -950,24 +1011,31 @@ class TelegramControlBot:
         )
 
     def _cmd_strategies_all(self, chat_id: int, _text: str = "") -> None:
+        live_keys = [k for k in STRATEGY_LABELS if k != "xau_vwap_pullback"]
         self._pending[chat_id] = {
             "flow": "strategies_menu",
             "step": "pick",
-            "selected": list(STRATEGY_LABELS.keys()),
+            "selected": live_keys,
+            "shadow": [],
         }
-        self._send_strategies_menu(chat_id, note="همه استراتژی‌ها انتخاب شدند.")
+        self._send_strategies_menu(
+            chat_id,
+            note="همه استراتژی‌های زنده انتخاب شدند. پولبک VWAP پیش‌فرض خاموش می‌ماند.",
+        )
 
     def _cmd_strategies_none(self, chat_id: int, _text: str = "") -> None:
         self._pending[chat_id] = {
             "flow": "strategies_menu",
             "step": "pick",
             "selected": [],
+            "shadow": [],
         }
         self._send_strategies_menu(chat_id, note="فقط MACD/trend (بدون confluence).")
 
     def _cmd_strategies_save(self, chat_id: int, _text: str = "") -> None:
         selected = self._strategies_menu_state(chat_id)
-        saved = apply_enabled_strategies(selected)
+        shadow = self._strategies_shadow_state(chat_id)
+        saved = apply_enabled_strategies(selected, shadow=shadow)
         self._reload_settings()
         self._pending.pop(chat_id, None)
         label = (
@@ -1007,14 +1075,18 @@ class TelegramControlBot:
             self._send_strategies_menu(chat_id, note=f"استراتژی ناشناخته: {label_or_key}")
             return
         selected = list(self._strategies_menu_state(chat_id))
-        if key in selected:
-            selected = [s for s in selected if s != key]
-        else:
-            selected.append(key)
+        shadow = list(self._strategies_shadow_state(chat_id))
+        selected, shadow = cycle_strategy_selection(
+            key,
+            selected,
+            shadow,
+            allow_live=is_strategy_live_ready(self.settings.strategy, key),
+        )
         self._pending[chat_id] = {
             "flow": "strategies_menu",
             "step": "pick",
             "selected": selected,
+            "shadow": shadow,
         }
         self._send_strategies_menu(chat_id)
 
@@ -1587,7 +1659,7 @@ class TelegramControlBot:
                     except Exception:  # noqa: BLE001
                         logger.exception("Failed handling telegram message")
             except requests.RequestException as exc:
-                logger.warning("Telegram poll error: {}", exc)
+                logger.warning("Telegram poll error: {}", telegram_error_summary(exc))
                 time.sleep(5)
             except Exception:  # noqa: BLE001
                 logger.exception("Telegram bot loop error")

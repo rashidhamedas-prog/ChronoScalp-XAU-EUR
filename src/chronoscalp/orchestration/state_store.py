@@ -9,6 +9,28 @@ from pathlib import Path
 from typing import Any
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.orchestration.position_keys import (
+    is_composite_key,
+    parse_position_key,
+    position_key,
+)
+from chronoscalp.utils.strategy_tags import normalize_strategy_tag
+
+
+def _normalize_ticket_map(raw: dict[str, Any] | None) -> dict[str, int]:
+    """Accept legacy ``{symbol: ticket}`` and composite ``{symbol::strategy: ticket}``."""
+    out: dict[str, int] = {}
+    for key, value in (raw or {}).items():
+        try:
+            ticket = int(value)
+        except (TypeError, ValueError):
+            continue
+        if is_composite_key(str(key)):
+            symbol, strategy = parse_position_key(str(key))
+            out[position_key(symbol, strategy)] = ticket
+        else:
+            out[position_key(str(key), "unknown")] = ticket
+    return out
 
 
 @dataclass
@@ -32,7 +54,7 @@ class TradingState:
     def from_dict(cls, data: dict[str, Any]) -> TradingState:
         raw_meta = data.get("position_meta") or {}
         return cls(
-            open_tickets={str(k): int(v) for k, v in (data.get("open_tickets") or {}).items()},
+            open_tickets=_normalize_ticket_map(data.get("open_tickets") or {}),
             processed_signals=list(data.get("processed_signals") or []),
             last_evaluated_bars={
                 str(k): str(v) for k, v in (data.get("last_evaluated_bars") or {}).items()
@@ -72,17 +94,36 @@ class TradingStateStore:
         with self.path.open("w", encoding="utf-8") as f:
             json.dump(self.state.to_dict(), f, indent=2)
 
-    def reconcile_open_tickets(self, broker_tickets_by_symbol: dict[str, int]) -> None:
-        """Sync in-memory tickets with broker reality after startup."""
-        stale = [sym for sym in self.state.open_tickets if sym not in broker_tickets_by_symbol]
-        for sym in stale:
-            logger.warning("Reconcile: dropping stale ticket for {} (not on broker)", sym)
-            self.state.open_tickets.pop(sym, None)
+    def reconcile_open_tickets(
+        self,
+        broker_tickets: dict[str, int],
+        *,
+        ticket_strategies: dict[int, str] | None = None,
+    ) -> None:
+        """Sync in-memory tickets with broker reality after startup.
 
-        for sym, ticket in broker_tickets_by_symbol.items():
-            if sym not in self.state.open_tickets:
-                logger.info("Reconcile: adopting broker position {} ticket={}", sym, ticket)
-            self.state.open_tickets[sym] = ticket
+        ``broker_tickets`` maps composite ``symbol::strategy`` keys to tickets.
+        Legacy ``{symbol: ticket}`` maps are upgraded using ``ticket_strategies``.
+        """
+        strategies = ticket_strategies or {}
+        normalized: dict[str, int] = {}
+        for key, ticket in broker_tickets.items():
+            if is_composite_key(key):
+                symbol, strategy = parse_position_key(key)
+                normalized[position_key(symbol, strategy)] = int(ticket)
+            else:
+                tag = normalize_strategy_tag(strategies.get(int(ticket), "unknown"))
+                normalized[position_key(str(key), tag)] = int(ticket)
 
-        if stale or broker_tickets_by_symbol:
+        stale = [k for k in self.state.open_tickets if k not in normalized]
+        for key in stale:
+            logger.warning("Reconcile: dropping stale ticket {} (not on broker)", key)
+            self.state.open_tickets.pop(key, None)
+
+        for key, ticket in normalized.items():
+            if key not in self.state.open_tickets:
+                logger.info("Reconcile: adopting broker position {} ticket={}", key, ticket)
+            self.state.open_tickets[key] = ticket
+
+        if stale or normalized:
             self.save()

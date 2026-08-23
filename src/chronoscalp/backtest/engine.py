@@ -33,19 +33,26 @@ from chronoscalp.execution.position_logic import (
 )
 from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
+from chronoscalp.filters.spread_shield import RollingMedianSpread
 from chronoscalp.logging_setup import logger
+from chronoscalp.orchestration.comparison_books import ComparisonBooks
 from chronoscalp.risk.position_sizing import RiskManager
-from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
-from chronoscalp.utils.types import SignalType, Timeframe, TradeResult
+from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy, is_shadow_only
+from chronoscalp.utils.strategy_tags import mt5_comment_for_strategy, resolve_strategy_tag
+from chronoscalp.utils.types import PendingOrderSide, SignalType, Timeframe, TradeResult
 
 # Entry guards that main.py applies but this engine does not simulate. Each one
 # can only remove trades, so backtest counts bound live counts from above.
+# Heat, per-strategy already_open, and spread-median shields *are* modelled
+# for comparison books; live shared 3% heat and MT5 netting remain live-only.
 LIVE_ONLY_GATES: tuple[str, ...] = (
     "circuit_breaker",
     "correlation_guard",
     "daily_loss_limit",
     "kill_switch",
     "mistake_memory",
+    "mt5_netting_fail_closed",
+    "portfolio_heat_live_shared",
     "spread_ma_guard",
     "stale_stops",
     "three_strikes",
@@ -60,6 +67,7 @@ class BacktestResult:
     equity_curve: list[tuple[datetime, float]] = field(default_factory=list)
     starting_equity: float = 0.0
     final_equity: float = 0.0
+    strategy_reports: dict[str, dict] = field(default_factory=dict)
 
     @property
     def total_trades(self) -> int:
@@ -111,13 +119,35 @@ class BacktestResult:
                 else 0.0
             ),
             "live_only_gates_not_modelled": list(LIVE_ONLY_GATES),
+            "strategy_reports": dict(self.strategy_reports),
         }
 
 
 def _as_of(df: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
-    """All bars with index <= t (no look-ahead)."""
+    """All bars with index <= t (no look-ahead on the trigger frame)."""
     idx = df.index.searchsorted(t, side="right")
     return df.iloc[:idx]
+
+
+def _as_of_closed(
+    df: pd.DataFrame,
+    t: pd.Timestamp,
+    tf: Timeframe,
+    *,
+    is_trigger: bool,
+) -> pd.DataFrame:
+    """Timeframe-aware slice: HTF bars must have fully closed before ``t``.
+
+    Trigger bars include the current closed bar at ``t``. Higher timeframes
+    exclude the forming bar whose open is still inside the current trigger bar.
+    """
+    if df is None or df.empty:
+        return df
+    if is_trigger:
+        return _as_of(df, t)
+    duration = pd.Timedelta(seconds=int(tf.seconds))
+    close_at = df.index + duration
+    return df.loc[close_at <= t]
 
 
 def _to_utc_timestamp(value: datetime | pd.Timestamp) -> pd.Timestamp:
@@ -179,56 +209,135 @@ def run_backtest(
     result = BacktestResult(symbol=symbol, starting_equity=starting_equity)
     warmup = max(50, settings.indicators.get("ema_period_trend", 50) + 5)
 
-    open_ticket: int | None = None
+    books = ComparisonBooks(
+        symbols_cfg=settings.symbols_raw,
+        starting_balance=starting_equity,
+        slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+    )
+    open_tickets: dict[str, int] = {}
+    spread_median = RollingMedianSpread()
 
     for i in range(warmup, len(trigger_df)):
         t = trigger_df.index[i]
         bar = trigger_df.iloc[i]
+        moment = t.to_pydatetime()
 
-        # --- manage any open position first: did SL/TP get hit on this bar? ---
-        if open_ticket is not None:
-            open_ticket = _manage_open_position(broker, risk_manager, open_ticket, bar, t, result)
+        books.set_quote(symbol, float(bar["low"]), float(bar["high"]), moment)
+        broker.set_quote(symbol, float(bar["low"]), float(bar["high"]), moment)
 
-        if open_ticket is not None:
-            continue  # only one position at a time in this simplified engine
+        for tag, ticket in list(open_tickets.items()):
+            strat_broker = books.broker_for(tag)
+            remaining = _manage_open_position(
+                strat_broker, risk_manager, ticket, bar, t, result, books, tag
+            )
+            if remaining is None:
+                open_tickets.pop(tag, None)
 
-        if not session_filter.is_within_session(t.to_pydatetime()):
+        for tag, book in list(books._books.items()):  # noqa: SLF001
+            if tag in open_tickets:
+                continue
+            filled = book.broker.get_open_positions(symbol)
+            if filled:
+                open_tickets[tag] = filled[0].ticket
+                book.mark_equity(moment)
+
+        if not session_filter.is_within_session(moment):
             continue
-        if news_filter.is_blackout(t.to_pydatetime()):
+        if news_filter.is_blackout(moment):
             continue
 
-        sliced = {tf: _as_of(df, t) for tf, df in data_by_timeframe.items()}
-        signal = strategy.evaluate(
+        spread_pips = broker.get_current_spread_pips(symbol)
+        spread_median.observe(symbol, spread_pips)
+        median = spread_median.median(symbol)
+        cap = None
+        spread_map = settings.spread_filter.get("max_spread_pips") or {}
+        if isinstance(spread_map, dict):
+            cap = spread_map.get(symbol)
+
+        sliced = {
+            tf: _as_of_closed(df, t, tf, is_trigger=tf == trigger_timeframe)
+            for tf, df in data_by_timeframe.items()
+        }
+        candidates = strategy.evaluate_candidates(
             symbol=symbol,
             data_by_timeframe=sliced,
             higher_timeframes=higher_timeframes,
             trigger_timeframe=trigger_timeframe,
+            spread_pips=spread_pips,
+            median_spread_pips=median,
+            broker_spread_cap_pips=float(cap) if cap is not None else None,
         )
-        if signal.signal_type == SignalType.NONE:
-            continue
+        if strategy.xau_vwap_engine.working_stop(symbol) is None:
+            xau_broker = books.broker_for("xau_vwap_pullback")
+            prefix = mt5_comment_for_strategy("xau_vwap_pullback")
+            for order in xau_broker.get_pending_orders(symbol, comment_prefix=prefix) or []:
+                xau_broker.cancel_pending_order(order.ticket)
 
-        spread_pips = broker.get_current_spread_pips(symbol)
-        if not risk_manager.validate_signal(signal, spread_pips):
-            continue
+        for signal in candidates:
+            if signal.signal_type == SignalType.NONE or not signal.is_actionable:
+                continue
+            tag = resolve_strategy_tag(
+                explicit=getattr(signal, "strategy", "") or "", reason=signal.reason
+            )
+            if tag in open_tickets:
+                continue
+            if is_shadow_only(settings.strategy, tag):
+                continue
+            if not risk_manager.validate_signal(signal, spread_pips):
+                continue
 
-        equity = broker.get_balance()
-        volume = risk_manager.position_size_for(signal, equity)
-        if volume <= 0:
-            continue
+            strat_broker = books.broker_for(tag)
+            if strat_broker.get_pending_orders(
+                symbol, comment_prefix=mt5_comment_for_strategy(tag)
+            ):
+                continue
+            equity = strat_broker.get_balance()
+            volume = risk_manager.position_size_for(signal, equity)
+            if volume <= 0:
+                continue
 
-        position = broker.place_order(signal, volume, fill_price=bar["close"])
-        open_ticket = position.ticket
-        result.equity_curve.append((t.to_pydatetime(), broker.get_balance()))
+            if str(getattr(signal, "order_kind", "market") or "market") == "stop":
+                side = (
+                    PendingOrderSide.BUY_STOP
+                    if signal.signal_type == SignalType.BUY
+                    else PendingOrderSide.SELL_STOP
+                )
+                strat_broker.place_pending_stop(
+                    symbol=symbol,
+                    side=side,
+                    volume=volume,
+                    price=signal.entry_price,
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                    comment=mt5_comment_for_strategy(tag),
+                    strategy=tag,
+                )
+                continue
 
-    if open_ticket is not None:
-        last_bar = trigger_df.iloc[-1]
-        trade = broker.close_position(
-            open_ticket, exit_price=last_bar["close"], reason="backtest_end"
+            position = strat_broker.place_order(signal, volume, fill_price=bar["close"])
+            open_tickets[tag] = position.ticket
+            books.for_strategy(tag).mark_equity(moment)
+            result.equity_curve.append((moment, strat_broker.get_balance()))
+
+    last_bar = trigger_df.iloc[-1]
+    last_t = trigger_df.index[-1].to_pydatetime()
+    for tag, ticket in list(open_tickets.items()):
+        strat_broker = books.broker_for(tag)
+        trade = strat_broker.close_position(
+            ticket, exit_price=last_bar["close"], reason="backtest_end"
         )
         result.trades.append(trade)
+        books.for_strategy(tag).record_close(trade, last_t)
         risk_manager.daily_tracker.record_trade_pnl(trade.pnl)
+        open_tickets.pop(tag, None)
 
-    result.final_equity = broker.get_balance()
+    reports = books.reports()
+    result.strategy_reports = reports
+    portfolio_eq = sum(book.broker.get_balance() for book in books._books.values())  # noqa: SLF001
+    if books._books:  # noqa: SLF001
+        result.final_equity = portfolio_eq / len(books._books)  # noqa: SLF001
+    else:
+        result.final_equity = starting_equity
     if not result.equity_curve:
         result.equity_curve.append((trigger_df.index[0].to_pydatetime(), starting_equity))
     result.equity_curve.append((trigger_df.index[-1].to_pydatetime(), result.final_equity))
@@ -251,6 +360,8 @@ def _manage_open_position(
     bar: pd.Series,
     t: pd.Timestamp,
     result: BacktestResult,
+    books: ComparisonBooks | None = None,
+    tag: str = "",
 ) -> int | None:
     position = broker._positions.get(
         ticket
@@ -267,6 +378,8 @@ def _manage_open_position(
         result.trades.append(trade)
         risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=t.to_pydatetime())
         result.equity_curve.append((t.to_pydatetime(), broker.get_balance()))
+        if books is not None and tag:
+            books.for_strategy(tag).record_close(trade, t.to_pydatetime())
         return None
 
     atr_value = float(bar["atr"]) if "atr" in bar and not pd.isna(bar["atr"]) else None

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 import requests
 
+from chronoscalp.execution.account_mode import AccountMarginMode
 from chronoscalp.execution.oanda_utils import (
     api_base_url,
     signed_units,
@@ -69,6 +70,10 @@ class OANDABroker:
         self._connected = True
         logger.info("OANDABroker connected (account={})", self._account_id)
         return True
+
+    def account_margin_mode(self) -> AccountMarginMode:
+        """OANDA nets per instrument — independent same-symbol live fills are not real."""
+        return AccountMarginMode.NETTING
 
     def get_balance(self) -> float:
         url = f"{self._base_url}/v3/accounts/{self._account_id}/summary"
@@ -165,6 +170,7 @@ class OANDABroker:
         take_profit: float,
         expiration: datetime | None = None,
         comment: str = "",
+        strategy: str = "",
     ) -> PendingOrder:
         raise NotImplementedError(
             "News straddle pending STOP orders require MT5 (or paper). "
@@ -225,9 +231,7 @@ class OANDABroker:
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             open_time=signal.timestamp if signal.timestamp else datetime.now(tz=UTC),
-            strategy=resolve_strategy_tag(
-                explicit=signal.strategy, reason=signal.reason
-            ),
+            strategy=resolve_strategy_tag(explicit=signal.strategy, reason=signal.reason),
         )
 
     def modify_sl_tp(self, ticket: int, stop_loss: float, take_profit: float) -> bool:

@@ -9,6 +9,7 @@ STRATEGY_NEWS_STRADDLE = "news_straddle"
 STRATEGY_SMC = "smc_confluence"
 STRATEGY_LIQUIDITY = "liquidity_volume"
 STRATEGY_DELTA = "delta"
+STRATEGY_XAU_VWAP_PULLBACK = "xau_vwap_pullback"
 STRATEGY_UNKNOWN = "unknown"
 
 # Display order for strategy P&L tables.
@@ -19,6 +20,7 @@ STRATEGY_REPORT_ORDER: tuple[str, ...] = (
     STRATEGY_SMC,
     STRATEGY_LIQUIDITY,
     STRATEGY_DELTA,
+    STRATEGY_XAU_VWAP_PULLBACK,
     STRATEGY_UNKNOWN,
 )
 
@@ -36,13 +38,16 @@ def normalize_strategy_tag(raw: str | None) -> str:
     head = text.split(",")[0].strip("._ ")
 
     checks: tuple[tuple[str, tuple[str, ...]], ...] = (
-        (STRATEGY_NEWS_STRADDLE, ("news_straddle", "newsstraddle")),
+        (STRATEGY_NEWS_STRADDLE, ("news_straddle", "newsstraddle", "news_b", "news_s")),
         (STRATEGY_ULTRA_SCALP, ("ultra_scalp", "ultrascalp", "ultra_scalp_v3")),
         (STRATEGY_INSTITUTIONAL, ("institutional_entry", "institutional")),
         (STRATEGY_SMC, ("smc_confluence", "smc")),
         (STRATEGY_LIQUIDITY, ("liquidity_volume", "liquidity_sweep", "liquidity")),
         (STRATEGY_DELTA, ("delta",)),
+        (STRATEGY_XAU_VWAP_PULLBACK, ("xau_vwap_pullback", "xauvwappullback")),
     )
+    if head == "news":
+        return STRATEGY_NEWS_STRADDLE
     blob = f"{head}|{text}"
     for canonical, needles in checks:
         for needle in needles:
@@ -55,6 +60,7 @@ def normalize_strategy_tag(raw: str | None) -> str:
         STRATEGY_SMC,
         STRATEGY_LIQUIDITY,
         STRATEGY_DELTA,
+        STRATEGY_XAU_VWAP_PULLBACK,
     }:
         return head
     return STRATEGY_UNKNOWN
