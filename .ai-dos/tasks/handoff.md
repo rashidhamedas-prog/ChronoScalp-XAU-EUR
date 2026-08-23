@@ -2,6 +2,15 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 independent security: restart-heat medium closed
+
+- Time (UTC): 2026-08-23T10:50:00Z
+- Task / owner / role: TASK-002 / independent security (distinct from implementer)
+- Branch: `ai/TASK-002-xau-vwap-multistrat` @ `5f6672f` (later `44b62a2` still on the branch)
+- Finding: prior medium (pending heat lost after restart) is **closed**. No new medium+ security issues in that diff. `xau_vwap_pullback` still cannot live-enable via API/Telegram/Streamlit while `live_ready: false`.
+- Residual (below medium): magic-filtered MT5 pendings with empty/non-`CS_` comments are skipped rather than fail-closed.
+- Process: security no longer blocks on restart-heat. **Do not merge** until independent functional review of `44b62a2`. **Do not live-enable VWAP.**
+
 ## 2026-08-23 TASK-002 bugbot follow-up: comparison reconcile, cancel heat, VWAP M1 expiry
 
 - Time (UTC): 2026-08-23T10:45:00Z
