@@ -2,6 +2,23 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 bugbot follow-up: comparison reconcile, cancel heat, VWAP M1 expiry
+
+- Time (UTC): 2026-08-23T10:45:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close [Bugbot](8b0c1f17-3636-4f43-945d-bd2b77136098) highs/medium without live-enabling VWAP.
+- Product changes:
+  - `_reconcile_state_with_broker` loads positions from comparison books and matches by `(symbol, strategy)` so virtual fills are not dropped.
+  - `_cancel_strategy_pendings` keeps heat reserved until re-list shows no leftover (then harvest, then release).
+  - VWAP `bars_left` decrements only when the last M1 timestamp changes, not on every poll.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002_bugbot` → all passed
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `black --check` on touched files after format → clean
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `live_ready` still false.
+- Exact next action: independent reviewer + security (distinct from implementer). **Do not merge. Do not live-enable VWAP.**
+
 ## 2026-08-23 TASK-002 security follow-up: restore pending heat after restart
 
 - Time (UTC): 2026-08-23T10:30:00Z

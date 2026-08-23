@@ -83,6 +83,7 @@ class PendingTrigger:
     atr: float
     reason: str
     stop_emitted: bool = False
+    last_m1_time: datetime | None = None
 
 
 @dataclass
@@ -198,7 +199,12 @@ class XauVwapPullbackEngine:
                 self._pending.pop(symbol, None)
                 return _none(symbol, "no_chase")
             if pending.stop_emitted:
-                pending.bars_left -= 1
+                bar_ts = _bar_time(last_m1)
+                if pending.last_m1_time is None:
+                    pending.last_m1_time = bar_ts
+                elif bar_ts != pending.last_m1_time:
+                    pending.bars_left -= 1
+                    pending.last_m1_time = bar_ts
                 if pending.bars_left <= 0:
                     self._pending.pop(symbol, None)
                     return _none(symbol, "trigger_expired")
@@ -267,6 +273,7 @@ class XauVwapPullbackEngine:
             atr=atr_m1,
             reason=reason,
             stop_emitted=True,
+            last_m1_time=_bar_time(last_m1),
         )
         self._pending[symbol] = pending
         return self._signal_from_pending(symbol, pending, last_m1)

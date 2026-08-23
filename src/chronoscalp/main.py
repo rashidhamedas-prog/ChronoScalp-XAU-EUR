@@ -633,21 +633,59 @@ class TradingBot:
             return False
         return not independent_same_symbol_allowed(self._account_mode)
 
+    def _positions_for_reconcile(self) -> list:
+        """Open positions that own live/paper state, including comparison books."""
+        if self.mode == "live" and isinstance(self.broker, MT5Broker):
+            try:
+                return list(self.broker.get_managed_positions() or [])
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed listing managed live positions for reconcile")
+        found: list = []
+        for broker in self._execution_brokers():
+            with contextlib.suppress(Exception):
+                found.extend(broker.get_open_positions() or [])
+        return found
+
     def _cancel_strategy_pendings(self, symbol: str, strategy: str) -> None:
-        reservation = self._release_heat(symbol, strategy)
-        tickets = list((reservation or {}).get("tickets") or [])
+        """Cancel working stops; keep heat reserved until the broker no longer holds them."""
+        key = self._open_key(symbol, strategy)
+        reservation = self._heat_reservations.get(key)
+        tickets = [int(t) for t in (reservation or {}).get("tickets") or []]
         broker = self._broker_for(strategy)
         prefix = mt5_comment_for_strategy(strategy)
         try:
             for order in broker.get_pending_orders(symbol, comment_prefix=prefix) or []:
                 tickets.append(int(order.ticket))
         except Exception:  # noqa: BLE001
-            pass
+            logger.exception(
+                "Failed listing {} pendings on {} — keeping heat reserved",
+                strategy,
+                symbol,
+            )
+            return
         for ticket in dict.fromkeys(tickets):
             try:
                 broker.cancel_pending_order(int(ticket))
             except Exception:  # noqa: BLE001
                 logger.warning("Failed cancelling {} pending ticket={}", strategy, ticket)
+        try:
+            leftover = broker.get_pending_orders(symbol, comment_prefix=prefix) or []
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed re-listing {} pendings on {} after cancel — keeping heat reserved",
+                strategy,
+                symbol,
+            )
+            self._heat_unknown = True
+            self._pending_restore_failed = True
+            return
+        if leftover:
+            if reservation is not None:
+                reservation["tickets"] = [int(order.ticket) for order in leftover]
+            return
+        self._harvest_pending_fills(symbol, datetime.now(tz=UTC))
+        if key not in self.open_tickets:
+            self._release_heat(symbol, strategy)
 
     def _harvest_pending_fills(self, symbol: str, now: datetime) -> None:
         """Promote filled stop orders into open tickets and drop their heat reservation."""
@@ -751,27 +789,20 @@ class TradingBot:
 
     def _reconcile_state_with_broker(self, *, alert_on_change: bool = False) -> None:
         previous = dict(self.open_tickets)
-        if self.mode == "live":
-            if isinstance(self.broker, MT5Broker):
-                managed = self.broker.get_managed_positions()
-            else:
-                managed = self.broker.get_open_positions()
-        else:
-            managed = self.broker.get_open_positions()
-
-        managed_tickets = {p.ticket for p in managed}
+        managed = self._positions_for_reconcile()
         now = datetime.now(tz=UTC)
-        for key, ticket in list(previous.items()):
-            if ticket not in managed_tickets:
-                symbol, _strategy = parse_position_key(key)
-                self._on_position_closed_externally(symbol, ticket, now)
-
         broker_map: dict[str, int] = {}
         ticket_strategies: dict[int, str] = {}
         for pos in managed:
             tag = resolve_strategy_tag(explicit=getattr(pos, "strategy", "") or "")
-            broker_map[position_key(pos.symbol, tag)] = pos.ticket
+            key = position_key(pos.symbol, tag)
+            broker_map[key] = pos.ticket
             ticket_strategies[pos.ticket] = tag
+        # Match by (symbol, strategy), not raw ticket: comparison books can reuse ticket ids.
+        for key, ticket in list(previous.items()):
+            if broker_map.get(key) != ticket:
+                symbol, _strategy = parse_position_key(key)
+                self._on_position_closed_externally(symbol, ticket, now)
         self.state_store.reconcile_open_tickets(broker_map, ticket_strategies=ticket_strategies)
         self.open_tickets = dict(self.state_store.state.open_tickets)
         self.trade_journal.sync_open_from_broker(managed, now=now)

@@ -729,3 +729,83 @@ def test_tick_restores_news_oco_as_max_not_sum(
     assert len(reserved["tickets"]) == 2
     assert restarted._committed_heat_pct(10_000) == pytest.approx(3.0)
     assert not any(p.strategy == "delta" for p in restarted.broker.get_open_positions())
+
+
+def test_tick_comparison_reconcile_keeps_virtual_positions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta", "liquidity_volume"],
+        multi_strategy_mode="comparison",
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta"), _signal("liquidity_volume")]
+        return []
+
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", _eval)
+    bot.tick()
+    before = dict(bot.open_tickets)
+    assert len(before) == 2
+    bot._reconcile_state_with_broker()
+    assert bot.open_tickets == before
+    bot.tick()
+    delta_broker = bot._broker_for("delta")
+    liq_broker = bot._broker_for("liquidity_volume")
+    assert len(delta_broker.get_open_positions("XAUUSD")) == 1
+    assert len(liq_broker.get_open_positions("XAUUSD")) == 1
+
+
+def test_failed_pending_cancel_keeps_heat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    bot = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    order = bot.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    bot._reserve_heat("XAUUSD", "xau_vwap_pullback", 300.0, [order.ticket])
+    monkeypatch.setattr(bot.broker, "cancel_pending_order", lambda *_a, **_k: False)
+    bot._cancel_strategy_pendings("XAUUSD", "xau_vwap_pullback")
+    assert bot.broker.get_pending_orders("XAUUSD")
+    assert bot._heat_reservations.get(bot._open_key("XAUUSD", "xau_vwap_pullback")) is not None
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta")]
+        return []
+
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", _eval)
+    bot.tick()
+    assert not any(p.strategy == "delta" for p in bot.broker.get_open_positions())
+
+
+def test_successful_pending_cancel_releases_heat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    bot = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    order = bot.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    bot._reserve_heat("XAUUSD", "xau_vwap_pullback", 300.0, [order.ticket])
+    bot._cancel_strategy_pendings("XAUUSD", "xau_vwap_pullback")
+    assert not bot.broker.get_pending_orders("XAUUSD")
+    assert bot._open_key("XAUUSD", "xau_vwap_pullback") not in bot._heat_reservations

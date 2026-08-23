@@ -340,8 +340,30 @@ def test_attribution_heat_block_counters():
     assert snap["xau_vwap_pullback"]["heat_blocked_by"]["delta"] == 1
 
 
-def test_stop_trigger_expires_after_two_m1_bars():
-    engine = XauVwapPullbackEngine(cfg=_cfg(), symbols_cfg={"XAUUSD": {"pip_size": 0.01}})
+def _append_m1(df: pd.DataFrame, close: float) -> pd.DataFrame:
+    nxt = df.index[-1] + pd.Timedelta(minutes=1)
+    row = df.iloc[-1].copy()
+    row["open"] = close
+    row["high"] = close + 0.2
+    row["low"] = close - 0.2
+    row["close"] = close
+    row.name = nxt
+    return pd.concat([df, row.to_frame().T])
+
+
+def _eval_pending(engine, m1):
+    return engine.evaluate(
+        "XAUUSD",
+        m1=m1,
+        m5=_m15("up"),
+        m15=_m15("up"),
+        spread_pips=20.0,
+        median_spread_pips=20.0,
+        broker_spread_cap_pips=35.0,
+    )
+
+
+def _seed_emitted_stop(engine) -> pd.DataFrame:
     engine._impulse["XAUUSD"] = ImpulseState(
         direction=TrendDirection.BULLISH,
         origin=1990.0,
@@ -371,26 +393,32 @@ def test_stop_trigger_expires_after_two_m1_bars():
     m1["atr"] = 4.0
     m1["rvol"] = 1.2
     m1.iloc[-1, m1.columns.get_loc("close")] = 2010.2
-    first = engine.evaluate(
-        "XAUUSD",
-        m1=m1,
-        m5=_m15("up"),
-        m15=_m15("up"),
-        spread_pips=20.0,
-        median_spread_pips=20.0,
-        broker_spread_cap_pips=35.0,
-    )
+    return m1
+
+
+def test_stop_trigger_same_m1_bar_does_not_expire():
+    engine = XauVwapPullbackEngine(cfg=_cfg(), symbols_cfg={"XAUUSD": {"pip_size": 0.01}})
+    m1 = _seed_emitted_stop(engine)
+    first = _eval_pending(engine, m1)
+    second = _eval_pending(engine, m1)
     assert first.signal_type == SignalType.NONE
     assert "awaiting_fill" in first.reason
+    assert "awaiting_fill" in second.reason
     assert engine.working_stop("XAUUSD") is not None
-    second = engine.evaluate(
-        "XAUUSD",
-        m1=m1,
-        m5=_m15("up"),
-        m15=_m15("up"),
-        spread_pips=20.0,
-        median_spread_pips=20.0,
-        broker_spread_cap_pips=35.0,
-    )
-    assert "trigger_expired" in second.reason
+    assert engine.working_stop("XAUUSD").bars_left == 2
+
+
+def test_stop_trigger_expires_after_two_m1_bars():
+    engine = XauVwapPullbackEngine(cfg=_cfg(), symbols_cfg={"XAUUSD": {"pip_size": 0.01}})
+    m1 = _seed_emitted_stop(engine)
+    first = _eval_pending(engine, m1)
+    assert first.signal_type == SignalType.NONE
+    assert "awaiting_fill" in first.reason
+    m1 = _append_m1(m1, 2010.2)
+    mid = _eval_pending(engine, m1)
+    assert "awaiting_fill" in mid.reason
+    assert engine.working_stop("XAUUSD") is not None
+    m1 = _append_m1(m1, 2010.2)
+    expired = _eval_pending(engine, m1)
+    assert "trigger_expired" in expired.reason
     assert engine.working_stop("XAUUSD") is None
