@@ -79,7 +79,6 @@ from chronoscalp.risk.institutional_guards import (
 from chronoscalp.risk.mistake_memory import MistakeMemory
 from chronoscalp.risk.portfolio_heat import (
     allocate_batch_risk_pct,
-    allocate_risk_pct,
     open_heat_from_dollar_risks,
     reconstruct_dollar_risk,
     resolve_max_portfolio_heat_pct,
@@ -93,7 +92,14 @@ from chronoscalp.strategy.multi_timeframe import (
     resolve_enabled_strategies,
 )
 from chronoscalp.strategy.news_skip_reasons import NewsSkipReason
-from chronoscalp.strategy.news_straddle_engine import DynamicNewsStraddleEngine
+from chronoscalp.strategy.news_straddle_engine import (
+    COMMENT_PREFIX as NEWS_COMMENT_PREFIX,
+)
+from chronoscalp.strategy.news_straddle_engine import (
+    DynamicNewsStraddleEngine,
+    StraddlePhase,
+    StraddleSession,
+)
 from chronoscalp.utils.strategy_tags import (
     STRATEGY_UNKNOWN,
     mt5_comment_for_strategy,
@@ -222,6 +228,8 @@ class TradingBot:
             enabled=self.daily_loss_limit_enabled,
         )
         self.daily_dd_close_all = bool(risk_cfg.get("daily_drawdown_close_all", True))
+        self._book_dd_guards: dict[str, DailyDrawdownGuard] = {}
+        self._book_dd_blocked: set[str] = set()
         self._position_meta: dict[int | str, dict] = {}
 
         state_path = self.state_dir / f"trading_state_{mode}.json"
@@ -458,7 +466,7 @@ class TradingBot:
             self._store_meta(symbol, strategy, meta, ticket)
             risks.append(rebuilt)
         for key, reservation in self._heat_reservations.items():
-            if key in self.open_tickets:
+            if key in self.open_tickets and not self._reservation_has_live_pendings(reservation):
                 continue
             try:
                 value = float(reservation.get("dollar_risk") or 0.0)
@@ -528,13 +536,387 @@ class TradingBot:
             return self.comparison_books.broker_for(strategy)
         return self.broker
 
-    def _occupied_count(self) -> int:
+    def _occupied_count(self, strategy: str | None = None) -> int:
         keys = set(self.open_tickets)
         keys.update(self._heat_reservations)
-        return len(keys)
+        if strategy is None or not self._is_comparison_book():
+            return len(keys)
+        return sum(1 for key in keys if parse_position_key(key)[1] == strategy)
 
-    def _at_capacity(self) -> bool:
-        return self._occupied_count() >= self.max_concurrent
+    def _at_capacity(self, strategy: str | None = None) -> bool:
+        return self._occupied_count(strategy) >= self.max_concurrent
+
+    def _strategy_pendings(self, symbol: str, strategy: str) -> list | None:
+        """List live pendings for a strategy. ``None`` means the list failed (fail-closed)."""
+        broker = self._broker_for(strategy)
+        prefix = mt5_comment_for_strategy(strategy)
+        try:
+            try:
+                orders = broker.get_pending_orders(symbol, comment_prefix=prefix) or []
+            except TypeError:
+                orders = broker.get_pending_orders(symbol) or []
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed listing {} pendings on {}", strategy, symbol)
+            return None
+        matched: list = []
+        for order in orders:
+            tag = self._strategy_for_pending(order)
+            comment = str(getattr(order, "comment", "") or "")
+            if tag == strategy or comment.startswith(prefix):
+                matched.append(order)
+        return matched
+
+    def _reservation_has_live_pendings(self, reservation: dict) -> bool:
+        symbol = str(reservation.get("symbol") or "")
+        strategy = str(reservation.get("strategy") or "")
+        if not symbol or not strategy:
+            return True
+        leftover = self._strategy_pendings(symbol, strategy)
+        if leftover is None:
+            return True
+        reserved_tickets = {int(t) for t in reservation.get("tickets") or []}
+        if not reserved_tickets:
+            return bool(leftover)
+        return any(int(order.ticket) in reserved_tickets for order in leftover)
+
+    def _sync_heat_after_fill(self, symbol: str, strategy: str, prior: dict | None) -> None:
+        leftover = self._strategy_pendings(symbol, strategy)
+        if leftover is None:
+            if prior:
+                self._heat_reservations[self._open_key(symbol, strategy)] = dict(prior)
+            self._heat_unknown = True
+            self._pending_restore_failed = True
+            return
+        if not leftover:
+            self._release_heat(symbol, strategy)
+            return
+        tickets = [int(order.ticket) for order in leftover]
+        spec = self.settings.symbols_raw.get(symbol) or {}
+        risks: list[float] = []
+        for order in leftover:
+            rebuilt = reconstruct_dollar_risk(
+                entry=getattr(order, "price", None),
+                stop=getattr(order, "stop_loss", None),
+                volume=getattr(order, "volume", None),
+                pip_size=float(spec.get("pip_size", 0.0) or 0.0),
+                pip_value=float(spec.get("pip_value_per_lot", 0.0) or 0.0),
+            )
+            if rebuilt is not None and rebuilt > 0:
+                risks.append(rebuilt)
+        risk = max(risks) if risks else 0.0
+        if risk <= 0 and prior:
+            try:
+                risk = float(prior.get("dollar_risk") or 0.0)
+            except (TypeError, ValueError):
+                risk = 0.0
+        if risk <= 0:
+            self._heat_unknown = True
+            self._pending_restore_failed = True
+            if prior:
+                self._reserve_heat(
+                    symbol, strategy, float(prior.get("dollar_risk") or 0.0), tickets
+                )
+            return
+        self._reserve_heat(symbol, strategy, risk, tickets)
+
+    def _harvest_all_reserved_fills(self, now: datetime) -> None:
+        symbols = {parse_position_key(key)[0] for key in list(self._heat_reservations)}
+        for symbol in symbols:
+            self._harvest_pending_fills(symbol, now)
+
+    def _daily_dd_guard_for(self, strategy: str) -> DailyDrawdownGuard:
+        guard = self._book_dd_guards.get(strategy)
+        if guard is None:
+            try:
+                starting = float(self._broker_for(strategy).get_balance())
+            except Exception:  # noqa: BLE001
+                starting = float(self.daily_dd_guard.starting_equity or 0.0)
+            guard = DailyDrawdownGuard(
+                max_daily_loss_pct=float(self.daily_dd_guard.max_daily_loss_pct),
+                starting_equity=starting,
+                enabled=self.daily_loss_limit_enabled,
+            )
+            self._book_dd_guards[strategy] = guard
+        return guard
+
+    def _book_realized_today(self, strategy: str, now: datetime) -> float:
+        if self.comparison_books is None:
+            return 0.0
+        book = self.comparison_books.for_strategy(strategy)
+        day = now.astimezone(UTC).date() if now.tzinfo else now.date()
+        total = 0.0
+        for trade in book.trades:
+            close_at = getattr(trade, "close_time", None)
+            if close_at is None:
+                total += float(getattr(trade, "pnl", 0.0) or 0.0)
+                continue
+            close_day = (
+                close_at.astimezone(UTC).date()
+                if getattr(close_at, "tzinfo", None)
+                else close_at.date()
+            )
+            if close_day == day:
+                total += float(getattr(trade, "pnl", 0.0) or 0.0)
+        return total
+
+    def _close_strategy_positions(self, now: datetime, strategy: str, *, reason: str) -> None:
+        for key, ticket in list(self.open_tickets.items()):
+            symbol, tag = parse_position_key(key)
+            if tag != strategy:
+                continue
+            try:
+                trade = self._broker_for(tag).close_position(ticket)
+                self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
+                if self.three_strikes_enabled:
+                    self.three_strikes.record_result(symbol, trade.pnl, at=now, strategy=tag)
+                closed = self.trade_journal.record_close(trade, ticket=ticket)
+                self._record_mistake_memory(closed, at=now)
+                self._clear_meta(symbol, tag, ticket)
+                self.open_tickets.pop(key, None)
+                self.attribution.for_strategy(tag).closed += 1
+                if self.comparison_books is not None:
+                    self.comparison_books.for_strategy(tag).record_close(trade, now)
+                logger.warning(
+                    "Force-closed {} ticket={} strategy={} reason={}",
+                    symbol,
+                    ticket,
+                    tag,
+                    reason,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed force-close {} ticket={}", symbol, ticket)
+        self._persist_state()
+
+    def _apply_comparison_book_guards(self, now: datetime) -> None:
+        if not self._is_comparison_book() or self.comparison_books is None:
+            return
+        blocked: set[str] = set()
+        names = set(self.comparison_books._books)  # noqa: SLF001
+        names.update(parse_position_key(key)[1] for key in self.open_tickets)
+        names.update(parse_position_key(key)[1] for key in self._heat_reservations)
+        for strategy in names:
+            if not strategy:
+                continue
+            guard = self._daily_dd_guard_for(strategy)
+            try:
+                equity = float(self._broker_for(strategy).get_balance())
+            except Exception:  # noqa: BLE001
+                equity = float(guard.starting_equity or 0.0)
+            realized = self._book_realized_today(strategy, now)
+            unrealized = self._estimate_unrealized_pnl(strategy=strategy)
+            if guard.check(equity, realized, unrealized, at=now):
+                blocked.add(strategy)
+                if self.daily_dd_close_all:
+                    self._close_strategy_positions(
+                        now, strategy, reason=f"daily_drawdown:{strategy}"
+                    )
+        self._book_dd_blocked = blocked
+
+    def _recover_news_oco_from_broker(self) -> None:
+        """Rebuild News OCO state after restart, or fail-closed cancel leftovers."""
+        broker = self._broker_for("news_straddle")
+        prefix = NEWS_COMMENT_PREFIX
+        try:
+            prefix = str(self.news_straddle.comment_prefix or NEWS_COMMENT_PREFIX)
+        except Exception:  # noqa: BLE001
+            prefix = NEWS_COMMENT_PREFIX
+        try:
+            try:
+                pendings = list(broker.get_pending_orders(comment_prefix=prefix) or [])
+            except TypeError:
+                pendings = [
+                    order
+                    for order in (broker.get_pending_orders() or [])
+                    if str(getattr(order, "comment", "") or "").startswith(prefix)
+                ]
+            positions = list(broker.get_open_positions() or [])
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed listing news OCO state after restart")
+            self._heat_unknown = True
+            self._pending_restore_failed = True
+            return
+
+        def _is_news_position(pos: object) -> bool:
+            tag = resolve_strategy_tag(explicit=str(getattr(pos, "strategy", "") or ""))
+            comment = str(getattr(pos, "comment", "") or "")
+            return tag == "news_straddle" or comment.startswith(prefix)
+
+        news_positions = [pos for pos in positions if _is_news_position(pos)]
+        symbols = {str(getattr(order, "symbol", "") or "") for order in pendings}
+        symbols.update(str(getattr(pos, "symbol", "") or "") for pos in news_positions)
+        symbols.discard("")
+        now = datetime.now(tz=UTC)
+        for symbol in symbols:
+            symbol_pendings = [
+                order for order in pendings if str(getattr(order, "symbol", "") or "") == symbol
+            ]
+            symbol_positions = [
+                pos for pos in news_positions if str(getattr(pos, "symbol", "") or "") == symbol
+            ]
+            session = self.news_straddle.sessions.get(symbol)
+            if symbol_positions and symbol_pendings:
+                leftover_tickets = [int(order.ticket) for order in symbol_pendings]
+                for ticket in leftover_tickets:
+                    try:
+                        broker.cancel_pending_order(ticket)
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "Failed cancelling leftover news pending ticket={} on {}",
+                            ticket,
+                            symbol,
+                        )
+                try:
+                    try:
+                        still = broker.get_pending_orders(symbol, comment_prefix=prefix) or []
+                    except TypeError:
+                        still = [
+                            order
+                            for order in (broker.get_pending_orders(symbol) or [])
+                            if str(getattr(order, "comment", "") or "").startswith(prefix)
+                        ]
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed verifying news leftover cancel on {}", symbol)
+                    self._heat_unknown = True
+                    self._pending_restore_failed = True
+                    still = symbol_pendings
+                if still:
+                    logger.error(
+                        "News leftover pending remains on {} after cancel — fail-closed heat",
+                        symbol,
+                    )
+                    self._heat_unknown = True
+                    self._pending_restore_failed = True
+                    prior = self._heat_reservations.get(self._open_key(symbol, "news_straddle"))
+                    self._sync_heat_after_fill(symbol, "news_straddle", prior)
+                filled = symbol_positions[0]
+                self.news_straddle.sessions[symbol] = StraddleSession(
+                    symbol=symbol,
+                    event_title=getattr(session, "event_title", "") if session else "recovered",
+                    event_time=getattr(session, "event_time", now) if session else now,
+                    phase=StraddlePhase.FILLED,
+                    buy_ticket=None if not still else getattr(session, "buy_ticket", None),
+                    sell_ticket=None if not still else getattr(session, "sell_ticket", None),
+                    filled_position_ticket=int(filled.ticket),
+                    volume=float(getattr(filled, "volume", 0.0) or 0.0),
+                    dollar_risk=float(
+                        self._lookup_meta(symbol, "news_straddle", int(filled.ticket)).get(
+                            "dollar_risk"
+                        )
+                        or 0.0
+                    ),
+                )
+                continue
+            if symbol_pendings and not symbol_positions:
+                buy_ticket = None
+                sell_ticket = None
+                for order in symbol_pendings:
+                    comment = str(getattr(order, "comment", "") or "")
+                    side = getattr(order, "side", None)
+                    is_buy = "News_B" in comment or side in (
+                        PendingOrderSide.BUY_STOP,
+                        getattr(PendingOrderSide, "BUY", None),
+                    )
+                    if is_buy:
+                        buy_ticket = int(order.ticket)
+                    else:
+                        sell_ticket = int(order.ticket)
+                self.news_straddle.sessions[symbol] = StraddleSession(
+                    symbol=symbol,
+                    event_title=getattr(session, "event_title", "") if session else "recovered",
+                    event_time=getattr(session, "event_time", now) if session else now,
+                    phase=StraddlePhase.PENDING,
+                    buy_ticket=buy_ticket,
+                    sell_ticket=sell_ticket,
+                    volume=float(getattr(symbol_pendings[0], "volume", 0.0) or 0.0),
+                )
+                continue
+            if symbol_positions and not symbol_pendings:
+                filled = symbol_positions[0]
+                self.news_straddle.sessions[symbol] = StraddleSession(
+                    symbol=symbol,
+                    event_title=getattr(session, "event_title", "") if session else "recovered",
+                    event_time=getattr(session, "event_time", now) if session else now,
+                    phase=StraddlePhase.FILLED,
+                    filled_position_ticket=int(filled.ticket),
+                    volume=float(getattr(filled, "volume", 0.0) or 0.0),
+                )
+
+    def _place_deferred_news(
+        self,
+        symbol: str,
+        now: datetime,
+        *,
+        spread_pips: float,
+        currency: str | None,
+        risk_pct: float,
+    ) -> None:
+        """Place a news bracket after the same-tick fair batch has been allocated."""
+        news_broker = self._broker_for("news_straddle")
+        news_already = self._has_open_strategy(symbol, "news_straddle")
+        m1_for_straddle = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
+        if m1_for_straddle is None or getattr(m1_for_straddle, "empty", True):
+            m1_for_straddle = pd.DataFrame()
+        else:
+            atr_period = int(
+                (self.settings.strategy.get("news_straddle") or {}).get("atr_period", 14)
+            )
+            m1_for_straddle = enrich_with_indicators(m1_for_straddle, atr_period=atr_period)
+        news_key = self._open_key(symbol, "news_straddle")
+        allocated = float(news_broker.get_balance()) * float(risk_pct) / 100.0
+        if news_key not in self._heat_reservations:
+            self._reserve_heat(symbol, "news_straddle", allocated, [])
+        straddle_res = self.news_straddle.tick(
+            news_broker,
+            symbol=symbol,
+            moment=now,
+            m1_df=m1_for_straddle,
+            spread_pips=spread_pips,
+            currency=currency,
+            already_open=news_already,
+            allow_place=True,
+            abort_pending=False,
+            placement_block_reason=None,
+            risk_pct=risk_pct,
+        )
+        if straddle_res.action == "placed" and straddle_res.session is not None:
+            sess = straddle_res.session
+            tickets = [t for t in (sess.buy_ticket, sess.sell_ticket) if t is not None]
+            reserved = self._heat_reservations.get(news_key) or {}
+            cap = float(reserved.get("dollar_risk") or allocated)
+            risk = float(sess.dollar_risk or cap)
+            if cap > 0 and risk > cap + 1e-9:
+                risk = cap
+            self._reserve_heat(symbol, "news_straddle", risk, tickets)
+        elif straddle_res.action in ("expired", "aborted"):
+            self._release_heat(symbol, "news_straddle")
+        if straddle_res.opened_position is not None:
+            position = straddle_res.opened_position
+            already = (
+                self.open_tickets.get(self._open_key(symbol, "news_straddle")) == position.ticket
+            )
+            if not already:
+                reserved = dict(self._heat_reservations.get(news_key) or {})
+                dollar_risk = float(reserved.get("dollar_risk") or 0.0)
+                if dollar_risk <= 0 and straddle_res.session is not None:
+                    dollar_risk = float(straddle_res.session.dollar_risk or 0.0)
+                self._register_open(symbol, "news_straddle", position.ticket)
+                self._store_meta(
+                    symbol,
+                    "news_straddle",
+                    {
+                        "symbol": symbol,
+                        "initial_volume": position.volume,
+                        "initial_stop_loss": position.stop_loss,
+                        "entry_price": position.entry_price,
+                        "dollar_risk": dollar_risk,
+                        "partial_taken": False,
+                        "breakeven_moved": False,
+                        "strategy": "news_straddle",
+                        "reason": "news_straddle",
+                    },
+                    position.ticket,
+                )
+                self._sync_heat_after_fill(symbol, "news_straddle", reserved)
 
     def _committed_heat_pct(self, equity: float) -> float:
         return open_heat_from_dollar_risks(self._open_dollar_risks(), equity)
@@ -585,12 +967,16 @@ class TradingBot:
     def _restore_pending_heat_reservations(self) -> None:
         """Rebuild in-memory heat from broker pendings after restart/reconcile.
 
-        Fail-closed: unreadable managed pendings mark heat unknown so new
-        entries cannot slip under an under-counted 3% cap.
+        Harvest fills *before* overwriting reservations so a fill between
+        reconciles cannot drop heat. Fail-closed: listing failure keeps prior
+        reservations and blocks new entries.
         """
+        prior = {key: dict(value) for key, value in self._heat_reservations.items()}
+        now = datetime.now(tz=UTC)
+        self._harvest_all_reserved_fills(now)
+        prior_after_harvest = {key: dict(value) for key, value in self._heat_reservations.items()}
         grouped: dict[str, list] = {}
         complete = True
-        self._pending_restore_failed = False
         try:
             pending: list = []
             for broker in self._execution_brokers():
@@ -599,6 +985,8 @@ class TradingBot:
             logger.exception("Failed listing pending orders while restoring heat")
             self._pending_restore_failed = True
             self._heat_unknown = True
+            if not self._heat_reservations and prior:
+                self._heat_reservations = prior
             return
 
         for order in pending:
@@ -647,7 +1035,9 @@ class TradingBot:
                     complete = False
                     continue
                 risks.append(rebuilt_risk)
-            # News OCO places two legs; only one fills, so reserve the larger leg.
+            # News OCO places two legs; only one fills, so reserve the larger leg
+            # until the leftover is cancelled. Leftover + open is counted in
+            # ``_open_dollar_risks``.
             dollar_risk = max(risks) if risks else 0.0
             rebuilt[key] = {
                 "symbol": symbol,
@@ -655,15 +1045,34 @@ class TradingBot:
                 "dollar_risk": float(dollar_risk),
                 "tickets": tickets,
             }
-        self._heat_reservations = rebuilt
+
+        merged: dict[str, dict] = dict(rebuilt)
+        for key, reservation in prior_after_harvest.items():
+            if key in merged:
+                with contextlib.suppress(TypeError, ValueError):
+                    merged[key]["dollar_risk"] = max(
+                        float(merged[key].get("dollar_risk") or 0.0),
+                        float(reservation.get("dollar_risk") or 0.0),
+                    )
+                continue
+            if key in self.open_tickets:
+                if self._reservation_has_live_pendings(reservation):
+                    merged[key] = reservation
+                continue
+            # Pending vanished and no open yet — fill in flight. Never drop heat.
+            merged[key] = reservation
+        self._heat_reservations = merged
         if not complete:
             self._pending_restore_failed = True
             self._heat_unknown = True
-        elif rebuilt:
-            logger.info(
-                "Restored heat reservations from {} pending group(s)",
-                len(rebuilt),
-            )
+        else:
+            self._pending_restore_failed = False
+            if rebuilt:
+                logger.info(
+                    "Restored heat reservations from {} pending group(s)",
+                    len(rebuilt),
+                )
+        self._recover_news_oco_from_broker()
 
     def _sync_quote(self, symbol: str, bid: float, ask: float, at: datetime) -> None:
         if hasattr(self.broker, "set_quote"):
@@ -800,7 +1209,7 @@ class TradingBot:
             self.attribution.for_strategy(strategy).filled += 1
             self.trade_journal.record_open(filled, strategy=strategy, reason=strategy)
             self._last_trade_opened_at = now
-            self._release_heat(symbol, strategy)
+            self._sync_heat_after_fill(symbol, strategy, reservation)
             if self.comparison_books is not None:
                 self.comparison_books.for_strategy(strategy).mark_equity(now)
             self._persist_state()
@@ -1150,17 +1559,24 @@ class TradingBot:
         equity_now = self.broker.get_balance()
         unrealized = self._estimate_unrealized_pnl()
         realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
-        daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
+        comparison_mode = self._is_comparison_book()
+        daily_dd_hit = False
+        if not comparison_mode:
+            daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
         # Keep DailyRiskTracker base equity aligned with the DD guard day seed.
         if self.daily_dd_guard.starting_equity > 0:
             self.risk_manager.daily_tracker.starting_equity = float(
                 self.daily_dd_guard.starting_equity
             )
-        daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
-            at=now
-        )
+        daily_limit_hit = False
+        if not comparison_mode:
+            daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
+                at=now
+            )
         if daily_dd_hit and self.daily_dd_close_all:
             self._close_all_positions(now, reason="daily_drawdown")
+        if comparison_mode:
+            self._apply_comparison_book_guards(now)
         if daily_limit_hit and self._alert_on_daily_loss and not self._daily_loss_alerted:
             self.alerts.notify(
                 "Daily loss limit hit",
@@ -1207,6 +1623,7 @@ class TradingBot:
                     enabled.news_straddle,
                 )
                 currency = self._news_currency(symbol)
+                news_wants_place = False
 
                 # News straddle management (OCO / expiry / abort) must run even when
                 # kill switch / daily loss blocks *new* entries — otherwise pending
@@ -1217,9 +1634,13 @@ class TradingBot:
                         "pending",
                         "filled",
                     )
-                    at_capacity = self._at_capacity()
+                    at_capacity = self._at_capacity(
+                        "news_straddle" if self._is_comparison_book() else None
+                    )
                     three_paused = self.three_strikes_enabled and self.three_strikes.is_paused(
-                        symbol, at=now
+                        symbol,
+                        at=now,
+                        strategy="news_straddle" if self._is_comparison_book() else "",
                     )
                     in_session = self.session_filter.is_within_session(now, symbol=symbol)
                     news_session_ok = in_session or not self.news_straddle.require_session
@@ -1232,25 +1653,6 @@ class TradingBot:
                         self._open_dollar_risks()
                         if self._heat_unknown:
                             heat_blocked = True
-                        else:
-                            equity_now = float(news_broker.get_balance())
-                            heat_cap = resolve_max_portfolio_heat_pct(self.settings.risk)
-                            open_heat = self._committed_heat_pct(equity_now)
-                            requested = float(
-                                self.risk_manager.risk_cfg.get(
-                                    "active_risk_per_trade_pct",
-                                    self.risk_manager.risk_cfg.get("max_risk_per_trade_pct", 1.0),
-                                )
-                            )
-                            alloc = allocate_risk_pct(
-                                requested_risk_pct=min(requested, 1.0),
-                                open_heat_pct=open_heat,
-                                max_heat_pct=heat_cap,
-                            )
-                            if not alloc.allowed:
-                                heat_blocked = True
-                            else:
-                                news_risk_pct = alloc.risk_pct
                     allow_place = (
                         allow_new_entries
                         and not news_already
@@ -1295,6 +1697,7 @@ class TradingBot:
                         )
                         if allow_place:
                             placement_block_reason = None
+                    news_wants_place = bool(allow_place)
                     if run_straddle:
                         m1_for_straddle = self.connector.fetch_ohlcv(symbol, Timeframe.M1, count=40)
                         if m1_for_straddle is not None and not m1_for_straddle.empty:
@@ -1332,7 +1735,7 @@ class TradingBot:
                             spread_pips=spread_pips,
                             currency=currency,
                             already_open=news_already,
-                            allow_place=allow_place,
+                            allow_place=False,
                             abort_pending=abort_pending,
                             placement_block_reason=placement_block_reason,
                             risk_pct=news_risk_pct,
@@ -1384,7 +1787,12 @@ class TradingBot:
                                 == position.ticket
                             )
                             if not already:
-                                reserved = self._release_heat(symbol, "news_straddle") or {}
+                                reserved = dict(
+                                    self._heat_reservations.get(
+                                        self._open_key(symbol, "news_straddle")
+                                    )
+                                    or {}
+                                )
                                 dollar_risk = float(reserved.get("dollar_risk") or 0.0)
                                 if dollar_risk <= 0 and straddle_res.session is not None:
                                     dollar_risk = float(straddle_res.session.dollar_risk or 0.0)
@@ -1405,6 +1813,7 @@ class TradingBot:
                                     },
                                     position.ticket,
                                 )
+                                self._sync_heat_after_fill(symbol, "news_straddle", reserved)
                                 self.attribution.for_strategy("news_straddle").filled += 1
                                 if not getattr(position, "strategy", ""):
                                     position.strategy = "news_straddle"
@@ -1446,7 +1855,11 @@ class TradingBot:
                 if not allow_new_entries:
                     continue
 
-                if self.three_strikes_enabled and self.three_strikes.is_paused(symbol, at=now):
+                if (
+                    self.three_strikes_enabled
+                    and not self._is_comparison_book()
+                    and self.three_strikes.is_paused(symbol, at=now)
+                ):
                     self._note_skip(f"{symbol}:three_strikes")
                     continue
 
@@ -1727,19 +2140,22 @@ class TradingBot:
                     )
                 )
                 batch_risk = min(requested, 1.0)
-                if ready and not self._is_comparison_book():
+                news_in_batch = bool(news_wants_place and not self._is_comparison_book())
+                batch_n = len(ready) + int(news_in_batch)
+                if batch_n and not self._is_comparison_book():
                     self._open_dollar_risks()
                     if self._heat_unknown:
                         for _sig, _tf, _bar, _dk, strategy_tag in ready:
                             skip_parts.append(f"{strategy_tag}:portfolio_heat")
                             self.attribution.for_strategy(strategy_tag).lost_arbitration += 1
                         ready = []
+                        news_wants_place = False
                     else:
                         equity_live = float(self.broker.get_balance())
                         heat_cap = resolve_max_portfolio_heat_pct(self.settings.risk)
                         open_heat = self._committed_heat_pct(equity_live)
                         alloc = allocate_batch_risk_pct(
-                            n=len(ready),
+                            n=batch_n,
                             requested_risk_pct=batch_risk,
                             open_heat_pct=open_heat,
                             max_heat_pct=heat_cap,
@@ -1753,13 +2169,35 @@ class TradingBot:
                                 for other in holders:
                                     counters.record_heat_block(other)
                             ready = []
+                            news_wants_place = False
                         else:
                             batch_risk = alloc.risk_pct
+
+                if news_wants_place:
+                    news_risk_pct = (
+                        min(requested, 1.0) if self._is_comparison_book() else batch_risk
+                    )
+                    self._place_deferred_news(
+                        symbol,
+                        now,
+                        spread_pips=spread_pips,
+                        currency=currency,
+                        risk_pct=news_risk_pct,
+                    )
 
                 placed_any = False
                 for signal, _signal_tf, _completed_bar, dedup_key, strategy_tag in ready:
                     counters = self.attribution.for_strategy(strategy_tag)
-                    if self._at_capacity():
+                    book_strategy = strategy_tag if self._is_comparison_book() else ""
+                    if self.three_strikes_enabled and self.three_strikes.is_paused(
+                        symbol, at=now, strategy=book_strategy
+                    ):
+                        skip_parts.append(f"{strategy_tag}:three_strikes")
+                        continue
+                    if self._is_comparison_book() and strategy_tag in self._book_dd_blocked:
+                        skip_parts.append(f"{strategy_tag}:daily_drawdown")
+                        continue
+                    if self._at_capacity(strategy_tag if self._is_comparison_book() else None):
                         skip_parts.append(f"{strategy_tag}:max_concurrent")
                         counters.lost_arbitration += 1
                         counters.record_internal_reject("max_concurrent")
@@ -1927,11 +2365,13 @@ class TradingBot:
         position.partial_taken = bool(meta.get("partial_taken", False))
         position.breakeven_moved = bool(meta.get("breakeven_moved", False))
 
-    def _estimate_unrealized_pnl(self) -> float:
+    def _estimate_unrealized_pnl(self, strategy: str | None = None) -> float:
         total = 0.0
         for key, ticket in list(self.open_tickets.items()):
-            symbol, strategy = parse_position_key(key)
-            positions = self._broker_for(strategy).get_open_positions(symbol)
+            symbol, tag = parse_position_key(key)
+            if strategy is not None and tag != strategy:
+                continue
+            positions = self._broker_for(tag).get_open_positions(symbol)
             position = next((p for p in positions if p.ticket == ticket), None)
             if position is None:
                 continue
@@ -1973,7 +2413,7 @@ class TradingBot:
                 trade = self._broker_for(strategy).close_position(ticket)
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 if self.three_strikes_enabled:
-                    self.three_strikes.record_result(symbol, trade.pnl, at=now)
+                    self.three_strikes.record_result(symbol, trade.pnl, at=now, strategy=strategy)
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
                 self._clear_meta(symbol, strategy, ticket)
@@ -2026,7 +2466,7 @@ class TradingBot:
                 )
                 self.risk_manager.daily_tracker.record_trade_pnl(trade.pnl, at=now)
                 if self.three_strikes_enabled:
-                    self.three_strikes.record_result(symbol, trade.pnl, at=now)
+                    self.three_strikes.record_result(symbol, trade.pnl, at=now, strategy=strategy)
                 closed = self.trade_journal.record_close(trade, ticket=ticket)
                 self._record_mistake_memory(closed, at=now)
                 self.open_tickets.pop(key, None)
@@ -2116,7 +2556,7 @@ class TradingBot:
         if pnl is not None:
             self.risk_manager.daily_tracker.record_trade_pnl(pnl, at=now)
             if self.three_strikes_enabled:
-                self.three_strikes.record_result(symbol, pnl, at=now)
+                self.three_strikes.record_result(symbol, pnl, at=now, strategy=strategy or "")
             if pnl < 0:
                 self._record_mistake_memory(closed, at=now)
             logger.info("Position {} ticket={} closed externally, pnl={:.2f}", symbol, ticket, pnl)

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from chronoscalp.telegram.control_bot import TelegramControlBot
+from chronoscalp.telegram.control_bot import TelegramControlBot, telegram_error_summary
 from chronoscalp.telegram.keyboards import (
     BTN_TRADE_NOTIFY,
     BTN_TRADE_NOTIFY_OFF,
@@ -551,3 +552,32 @@ def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:
     assert "منبع تنظیم" in text
     assert "multi_strategy_mode" in text
     assert "shadow_only" in text
+
+
+def test_telegram_poll_error_omits_token(bot: TelegramControlBot, caplog, monkeypatch) -> None:
+    import requests
+
+    token = bot.token
+    poison = (
+        f"HTTPSConnectionPool(host='api.telegram.org', port=443): "
+        f"Max retries exceeded with url: /bot{token}/getUpdates"
+    )
+
+    def _boom(*_a, **_k):
+        raise requests.RequestException(poison)
+
+    monkeypatch.setattr(bot, "_api", _boom)
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.time.sleep",
+        lambda *_a, **_k: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    caplog.set_level("WARNING")
+    with contextlib.suppress(KeyboardInterrupt):
+        bot.run_forever()
+    logged = caplog.text
+    assert token not in logged
+    assert f"bot{token}" not in logged
+    assert "api.telegram.org" not in logged
+    summary = telegram_error_summary(requests.RequestException(poison))
+    assert token not in summary
+    assert "api.telegram.org" not in summary

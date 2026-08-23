@@ -73,6 +73,15 @@ API = "https://api.telegram.org/bot{token}/{method}"
 DEFAULT_MT5_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
 
 
+def telegram_error_summary(exc: BaseException) -> str:
+    """Describe a Telegram HTTP failure without URL, token, or request body."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    name = type(exc).__name__
+    if status is not None:
+        return f"{name} status={status}"
+    return name
+
+
 class TelegramControlBot:
     """Long-polling Telegram bot that controls ChronoScalp on the host."""
 
@@ -138,16 +147,19 @@ class TelegramControlBot:
         """POST to Telegram Bot API with explicit UTF-8 JSON (Persian-safe)."""
         url = API.format(token=self.token, method=method)
         body = json.dumps(params, ensure_ascii=False).encode("utf-8")
-        response = requests.post(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            timeout=max(35.0, self.timeout),
-        )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = requests.post(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                timeout=max(35.0, self.timeout),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            raise requests.RequestException(telegram_error_summary(exc)) from None
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API rejected the request")
         return data
 
     def send(
@@ -167,9 +179,14 @@ class TelegramControlBot:
             payload["reply_markup"] = reply_markup
         try:
             self._api("sendMessage", **payload)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Telegram sendMessage failed chat_id={} {}",
+                chat_id,
+                telegram_error_summary(exc),
+            )
         except Exception:  # noqa: BLE001
             logger.exception("Telegram sendMessage failed chat_id={}", chat_id)
-            raise
 
     def _authorized(self, chat_id: str | int) -> bool:
         if not self.allowed_chat:
@@ -1642,7 +1659,7 @@ class TelegramControlBot:
                     except Exception:  # noqa: BLE001
                         logger.exception("Failed handling telegram message")
             except requests.RequestException as exc:
-                logger.warning("Telegram poll error: {}", exc)
+                logger.warning("Telegram poll error: {}", telegram_error_summary(exc))
                 time.sleep(5)
             except Exception:  # noqa: BLE001
                 logger.exception("Telegram bot loop error")

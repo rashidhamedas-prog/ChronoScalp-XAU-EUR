@@ -2,6 +2,32 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 independent-review fixes (do not merge)
+
+- Time (UTC): 2026-08-23T12:35:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer (reviewer/security remain distinct)
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: close the six independent-review findings without merge, deploy, or live-enabling VWAP.
+- Product changes:
+  1. `_restore_pending_heat_reservations` harvests fills before overwriting reservations, then merges so heat never shrinks (in-flight fill keeps prior; open + leftover pending keeps leftover; `max(prior, rebuilt)`). `_open_dollar_risks` still counts leftover live pendings even when a position already exists.
+  2. `_recover_news_oco_from_broker` reconstructs News OCO after restart, or fail-closed cancels the leftover opposite pending and re-lists to verify. Open + leftover pending both stay in heat until cancel is confirmed.
+  3. Comparison mode: `_at_capacity(strategy)`, per-book `DailyDrawdownGuard`, and Three-Strikes are isolated per strategy book. Hitting daily DD closes that book only.
+  4. Same-tick News joins `allocate_batch_risk_pct` with other ready signals so remaining heat is split fairly (code order is not the winner).
+  5. Telegram `RequestException` is logged via `telegram_error_summary` (type + optional status only). Token/URL are stripped before re-raise; poll/send do not interpolate the request URL.
+- Tests (via `TradingBot.tick` except Telegram `run_forever` poll):
+  - `test_tick_pending_fill_between_reconciles_keeps_heat`
+  - `test_tick_restart_news_oco_cancels_leftover_or_counts_both`
+  - `test_tick_comparison_limits_are_per_book`
+  - `test_tick_comparison_daily_dd_is_per_book`
+  - `test_tick_news_and_delta_share_batch_when_heat_tight`
+  - `test_telegram_poll_error_omits_token`
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task002` → exit 0 (full suite)
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/app.py` → All checks passed!
+  - `.venv\Scripts\python.exe -m black --check` on `src/chronoscalp/main.py`, `src/chronoscalp/risk/institutional_guards.py`, `src/chronoscalp/telegram/control_bot.py`, `src/chronoscalp/orchestration/alerts.py`, `tests/test_trading_bot_multistrat.py`, `tests/test_telegram_control_bot.py` → 6 files would be left unchanged
+- Invariants: 1%/1.5R/3% intact; `CHRONOSCALP_CONFIRM_LIVE` untouched; `xau_vwap_pullback` still `live_ready: false` / `shadow_only: true`.
+- Exact next action: independent functional + security review (distinct from implementer). **Do not merge. Do not deploy. Do not live-enable VWAP.**
+
 ## 2026-08-23 TASK-002 Bugbot follow-up: comparison ticket collision
 
 - Time (UTC): 2026-08-23T11:15:00Z

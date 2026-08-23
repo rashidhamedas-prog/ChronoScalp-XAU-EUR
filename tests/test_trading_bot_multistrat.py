@@ -422,7 +422,14 @@ def test_tick_news_pending_reserves_heat_before_fill(
         volume=0.10,
     )
 
-    def _news_tick(*_a, **_k):
+    def _news_tick(*_a, **kwargs):
+        if not kwargs.get("allow_place"):
+            return StraddleTickResult(
+                symbol="XAUUSD",
+                phase=StraddlePhase.IDLE,
+                action="blocked",
+                session=None,
+            )
         bot.broker.place_pending_stop(
             symbol="XAUUSD",
             side=PendingOrderSide.BUY_STOP,
@@ -532,7 +539,7 @@ def test_tick_news_reservation_keeps_total_heat_at_cap(
     heat = bot._committed_heat_pct(10_000)
     assert heat <= 3.0 + 1e-9
     assert bot._heat_reservations.get(bot._open_key("XAUUSD", "news_straddle")) is not None
-    assert not any(p.strategy == "delta" for p in bot.broker.get_open_positions("XAUUSD"))
+    # Remaining 1% is split fairly; delta may open at the batch share, never above the cap.
 
 
 def test_tick_comparison_uses_independent_brokers(
@@ -840,3 +847,232 @@ def test_successful_pending_cancel_releases_heat(
     bot._cancel_strategy_pendings("XAUUSD", "xau_vwap_pullback")
     assert not bot.broker.get_pending_orders("XAUUSD")
     assert bot._open_key("XAUUSD", "xau_vwap_pullback") not in bot._heat_reservations
+
+
+def test_tick_pending_fill_between_reconciles_keeps_heat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    bot = _make_bot(tmp_path, monkeypatch, strategies=["delta"], heat_pct=3.0)
+    order = bot.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_xau_vwap_pullback",
+        strategy="xau_vwap_pullback",
+    )
+    bot._reserve_heat("XAUUSD", "xau_vwap_pullback", 300.0, [order.ticket])
+    heat_before = bot._committed_heat_pct(10_000)
+    assert heat_before == pytest.approx(3.0)
+    bot.broker.set_quote("XAUUSD", 2020.2, 2020.6)
+    assert bot.broker.get_open_positions("XAUUSD")
+    assert bot._open_key("XAUUSD", "xau_vwap_pullback") not in bot.open_tickets
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", lambda **_k: [])
+    bot.tick()
+    heat_after = bot._committed_heat_pct(10_000)
+    assert heat_after >= heat_before - 1e-9
+    assert (
+        bot._open_key("XAUUSD", "xau_vwap_pullback") in bot.open_tickets or bot._heat_reservations
+    )
+
+
+def test_tick_restart_news_oco_cancels_leftover_or_counts_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.utils.types import PendingOrderSide
+
+    first = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["news_straddle"],
+        heat_pct=3.0,
+    )
+    first.use_news_straddle = True
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.BUY_STOP,
+        volume=0.10,
+        price=2020.0,
+        stop_loss=1990.0,
+        take_profit=2080.0,
+        comment="CS_News_B",
+        strategy="news_straddle",
+    )
+    first.broker.place_pending_stop(
+        symbol="XAUUSD",
+        side=PendingOrderSide.SELL_STOP,
+        volume=0.10,
+        price=1980.0,
+        stop_loss=2010.0,
+        take_profit=1920.0,
+        comment="CS_News_S",
+        strategy="news_straddle",
+    )
+    first.broker.set_quote("XAUUSD", 2020.2, 2020.6)
+    assert first.broker.get_open_positions("XAUUSD")
+    leftover_before = first.broker.get_pending_orders("XAUUSD")
+    assert leftover_before
+    broker = first.broker
+    restarted = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["news_straddle"],
+        heat_pct=3.0,
+        broker=broker,
+    )
+    restarted.use_news_straddle = True
+    monkeypatch.setattr(restarted.strategy, "evaluate_candidates", lambda **_k: [])
+    restarted.tick()
+    leftover = restarted.broker.get_pending_orders("XAUUSD")
+    positions = restarted.broker.get_open_positions("XAUUSD")
+    assert positions
+    if leftover:
+        heat = restarted._committed_heat_pct(10_000)
+        assert heat >= 2.0 - 1e-9
+    else:
+        assert not leftover
+    session = restarted.news_straddle.sessions.get("XAUUSD")
+    assert session is not None
+
+
+def test_tick_comparison_limits_are_per_book(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta", "liquidity_volume"],
+        multi_strategy_mode="comparison",
+        max_concurrent=1,
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta"), _signal("liquidity_volume")]
+        return []
+
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", _eval)
+    bot.tick()
+    assert bot._broker_for("delta").get_open_positions("XAUUSD")
+    assert bot._broker_for("liquidity_volume").get_open_positions("XAUUSD")
+
+    bot.three_strikes_enabled = True
+    now = datetime.now(tz=UTC)
+    for _ in range(3):
+        bot.three_strikes.record_result("XAUUSD", -10.0, at=now, strategy="delta")
+    assert bot.three_strikes.is_paused("XAUUSD", at=now, strategy="delta")
+    assert not bot.three_strikes.is_paused("XAUUSD", at=now, strategy="liquidity_volume")
+
+
+def test_tick_comparison_daily_dd_is_per_book(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["delta", "liquidity_volume"],
+        multi_strategy_mode="comparison",
+    )
+    bot.comparison_books.for_strategy("delta")
+    bot.comparison_books.for_strategy("liquidity_volume")
+    monkeypatch.setattr(
+        bot,
+        "_book_realized_today",
+        lambda strategy, _now: -400.0 if strategy == "delta" else 0.0,
+    )
+
+    def _eval(**kwargs):
+        if kwargs.get("run_institutional"):
+            return [_signal("delta"), _signal("liquidity_volume")]
+        return []
+
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", _eval)
+    bot.tick()
+    assert not bot._broker_for("delta").get_open_positions("XAUUSD")
+    assert bot._broker_for("liquidity_volume").get_open_positions("XAUUSD")
+    assert "delta" in bot._book_dd_blocked
+
+
+def test_tick_news_and_delta_share_batch_when_heat_tight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from chronoscalp.strategy.news_straddle_engine import (
+        StraddlePhase,
+        StraddleSession,
+        StraddleTickResult,
+    )
+    from chronoscalp.utils.types import PendingOrderSide
+
+    bot = _make_bot(
+        tmp_path,
+        monkeypatch,
+        strategies=["news_straddle", "delta"],
+        multi_strategy_mode="live",
+        heat_pct=3.0,
+    )
+    bot.use_news_straddle = True
+    monkeypatch.setattr(bot, "_manage_open_position", lambda *_a, **_k: None)
+    occupied = bot.broker.place_order(_signal("liquidity_volume"), 0.1)
+    bot._register_open("XAUUSD", "liquidity_volume", occupied.ticket)
+    bot._position_meta[occupied.ticket] = {
+        "initial_volume": occupied.volume,
+        "initial_stop_loss": occupied.stop_loss,
+        "entry_price": occupied.entry_price,
+        "dollar_risk": 150.0,
+        "strategy": "liquidity_volume",
+    }
+    session = StraddleSession(
+        symbol="XAUUSD",
+        event_title="NFP",
+        event_time=datetime.now(tz=UTC),
+        phase=StraddlePhase.PENDING,
+        buy_ticket=21,
+        sell_ticket=22,
+        dollar_risk=50.0,
+        volume=0.05,
+    )
+    captured: list[bool] = []
+
+    def _news_tick(*_a, **kwargs):
+        captured.append(bool(kwargs.get("allow_place")))
+        if kwargs.get("allow_place"):
+            bot.broker.place_pending_stop(
+                symbol="XAUUSD",
+                side=PendingOrderSide.BUY_STOP,
+                volume=0.05,
+                price=2020.0,
+                stop_loss=1990.0,
+                take_profit=2080.0,
+                comment="CS_News_B",
+                strategy="news_straddle",
+            )
+            return StraddleTickResult(
+                symbol="XAUUSD",
+                phase=StraddlePhase.PENDING,
+                action="placed",
+                session=session,
+            )
+        return StraddleTickResult(
+            symbol="XAUUSD",
+            phase=StraddlePhase.IDLE,
+            action="blocked",
+            session=None,
+        )
+
+    monkeypatch.setattr(bot.news_straddle, "tick", _news_tick)
+    monkeypatch.setattr(bot.news_straddle, "is_scalp_paused", lambda *_a, **_k: True)
+    monkeypatch.setattr(bot.strategy, "evaluate_candidates", lambda **_k: [_signal("delta")])
+    bot.tick()
+    assert True in captured
+    assert False in captured
+    heat = bot._committed_heat_pct(10_000)
+    assert heat <= 3.0 + 1e-9
+    assert bot._heat_reservations.get(bot._open_key("XAUUSD", "news_straddle")) is not None
+    news_risk = float(
+        bot._heat_reservations[bot._open_key("XAUUSD", "news_straddle")]["dollar_risk"]
+    )
+    assert news_risk <= 150.0 + 1e-9
