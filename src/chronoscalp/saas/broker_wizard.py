@@ -14,6 +14,18 @@ ENV_PATH = Path(".env")
 OVERRIDES_PATH = Path("config/runtime_overrides.yaml")
 
 
+def _committed_xau_live_ready() -> bool:
+    """Read live_ready from git-tracked settings.yaml, not from overlay."""
+    from chronoscalp.config import CONFIG_DIR
+
+    path = CONFIG_DIR / "settings.yaml"
+    if not path.exists():
+        return False
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    block = (data.get("strategy") or {}).get("xau_vwap_pullback") or {}
+    return bool(block.get("live_ready"))
+
+
 @dataclass
 class ConnectionTestResult:
     ok: bool
@@ -315,6 +327,8 @@ def apply_enabled_strategies(
     strategy["use_delta"] = "delta" in seen
     strategy["use_xau_vwap_pullback"] = "xau_vwap_pullback" in seen
     xau = dict(strategy.get("xau_vwap_pullback") or {})
+    # Research gate lives in committed settings.yaml; UI/API cannot flip it.
+    xau["live_ready"] = _committed_xau_live_ready()
     if "xau_vwap_pullback" in seen:
         xau["enabled"] = True
         must_shadow = force_shadow_if_not_live_ready(
@@ -328,10 +342,6 @@ def apply_enabled_strategies(
     else:
         xau["enabled"] = False
         xau["shadow_only"] = True
-    # UI/API must never flip the research gate.
-    xau.setdefault("live_ready", False)
-    if not xau.get("live_ready"):
-        xau["live_ready"] = False
     strategy["xau_vwap_pullback"] = xau
     payload["strategy"] = strategy
     _write_overrides(overrides_path, payload)

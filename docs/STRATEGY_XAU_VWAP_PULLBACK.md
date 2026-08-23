@@ -1,9 +1,10 @@
 # Strategy `xau_vwap_pullback` (XAUUSD)
 
 `xau_vwap_pullback` is an explainable M15-regime / M5-impulse / M1-rejection
-pullback candidate. It is **research-only** in this cycle: default config is
-`enabled: false` and `shadow_only: true`, and it is **not** on
-`enabled_strategies`. Do not describe it as live-ready or guaranteed.
+pullback candidate. Operator live-enabled it on 2026-08-23 (`enabled: true`,
+`shadow_only: false`, `live_ready: true`, listed on `enabled_strategies`).
+That is an operator decision, not a completed walk-forward proof — do not
+describe results as guaranteed. 1% / 1.5R / 3% heat stay hard.
 
 Implementation: `src/chronoscalp/strategy/xau_vwap_pullback.py`. Telegram label:
 `پولبک VWAP (طلا)`. Selection is simultaneous OR with other engines — not
@@ -43,11 +44,9 @@ Forbidden: martingale, grid, averaging down, raising risk after a loss.
 
 ## Telegram control
 
-Open `تنظیمات → استراتژی‌ها`. `پولبک VWAP (طلا)` cycles **off ↔ shadow** until
-`live_ready: true` in config after validation. Telegram, Streamlit, and the
-control API cannot persist a live enable while that gate is false. Shadow
-records candidates and counters but places **no order**. Save, then
-**Stop then Start** the trading process. Overlay source is shown on `/status`.
+Open `تنظیمات → استراتژی‌ها`. `پولبک VWAP (طلا)` now cycles **off → shadow → live**
+because `live_ready: true`. Shadow still records candidates without orders.
+Save, then **Stop then Start** the trading process. Overlay source is shown on `/status`.
 
 ## Required validation before live use
 

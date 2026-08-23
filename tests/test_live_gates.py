@@ -21,7 +21,13 @@ def test_xau_is_not_live_ready_by_default():
     assert blocks_real_live_orders(cfg, "xau_vwap_pullback", mode="live", shadow_only=False)
 
 
-def test_apply_enabled_strategies_cannot_live_enable_xau(tmp_path: Path):
+def test_apply_enabled_strategies_cannot_live_enable_xau_when_gate_closed(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "chronoscalp.saas.broker_wizard._committed_xau_live_ready",
+        lambda: False,
+    )
     overrides = tmp_path / "runtime_overrides.yaml"
     saved = apply_enabled_strategies(
         ["delta", "xau_vwap_pullback"],
@@ -35,3 +41,19 @@ def test_apply_enabled_strategies_cannot_live_enable_xau(tmp_path: Path):
     assert xau["shadow_only"] is True
     assert xau.get("live_ready") is False
     assert is_shadow_only(data["strategy"], "xau_vwap_pullback") is True
+
+
+def test_apply_enabled_strategies_live_enables_xau_when_gate_open(tmp_path: Path):
+    overrides = tmp_path / "runtime_overrides.yaml"
+    saved = apply_enabled_strategies(
+        ["delta", "xau_vwap_pullback"],
+        overrides_path=overrides,
+    )
+    assert "xau_vwap_pullback" in saved
+    import yaml
+
+    data = yaml.safe_load(overrides.read_text(encoding="utf-8"))
+    xau = data["strategy"]["xau_vwap_pullback"]
+    assert xau["shadow_only"] is False
+    assert xau.get("live_ready") is True
+    assert is_shadow_only(data["strategy"], "xau_vwap_pullback") is False

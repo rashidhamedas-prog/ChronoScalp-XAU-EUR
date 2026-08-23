@@ -233,16 +233,19 @@ def test_symbol_allowlist_and_spread_reject():
     assert "spread" in wide.reason
 
 
-def test_default_config_is_shadow_only_not_live():
-    from chronoscalp.config import Settings
+def test_default_config_is_live_ready():
+    import yaml
 
-    settings = Settings()
-    xau = settings.strategy.get("xau_vwap_pullback") or {}
-    assert xau.get("enabled") is False
-    assert xau.get("shadow_only") is True
-    assert xau.get("live_ready") is False
-    assert "xau_vwap_pullback" not in (settings.strategy.get("enabled_strategies") or [])
-    assert is_shadow_only(settings.strategy, "xau_vwap_pullback") is True
+    from chronoscalp.config import CONFIG_DIR
+
+    data = yaml.safe_load((CONFIG_DIR / "settings.yaml").read_text(encoding="utf-8"))
+    strat = data["strategy"]
+    xau = strat.get("xau_vwap_pullback") or {}
+    assert xau.get("enabled") is True
+    assert xau.get("shadow_only") is False
+    assert xau.get("live_ready") is True
+    assert "xau_vwap_pullback" in (strat.get("enabled_strategies") or [])
+    assert is_shadow_only(strat, "xau_vwap_pullback") is False
 
 
 def test_no_lookahead_truncation_regime():

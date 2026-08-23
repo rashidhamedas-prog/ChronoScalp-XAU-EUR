@@ -2,6 +2,16 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-23 TASK-002 operator confirmed merge/deploy/VWAP live
+
+- Time (UTC): 2026-08-23T13:20:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Operator confirmation: Merge, Deploy, live-enable VWAP.
+- Product: `config/settings.yaml` sets `xau_vwap_pullback` `enabled: true`, `shadow_only: false`, `live_ready: true`, and lists it on `enabled_strategies`. `apply_enabled_strategies` copies `live_ready` from committed settings.yaml so Telegram/API save cannot drop the gate to false. Fail-closed path remains when `live_ready` is false.
+- Unchanged: 1%/1.5R/3% heat, `CHRONOSCALP_CONFIRM_LIVE`.
+- Exact next action: pytest/ruff/black, commit, merge to main, deploy VPS, confirm overlay.
+
 ## 2026-08-23 TASK-002 pin fair-batch test (finding 4)
 
 - Time (UTC): 2026-08-23T12:55:00Z

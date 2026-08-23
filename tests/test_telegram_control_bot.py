@@ -546,6 +546,21 @@ def test_xau_vwap_cycles_shadow_then_off_when_not_live_ready(bot: TelegramContro
     assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
 
 
+def test_xau_vwap_cycles_to_live_when_live_ready(bot: TelegramControlBot) -> None:
+    bot.settings.strategy["xau_vwap_pullback"] = {
+        "enabled": True,
+        "shadow_only": False,
+        "live_ready": True,
+    }
+    bot.handle(42, "استراتژی‌ها")
+    bot.handle(42, "⬜ پولبک VWAP (طلا)")
+    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
+    assert "xau_vwap_pullback" in bot._pending[42]["shadow"]
+    bot.handle(42, "👁 پولبک VWAP (طلا)")
+    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
+    assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
+
+
 def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:
     bot.handle(42, "/status")
     text = bot.send.call_args.args[1]

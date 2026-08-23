@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-23T12:55:00Z"
+    heartbeat_at: "2026-08-23T13:20:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"
@@ -79,7 +79,7 @@ tasks:
     acceptance_criteria:
       - "Enabled strategies emit independent candidates; pick_best_signal is unused on live/paper/backtest paths."
       - "Open positions are keyed (symbol, strategy, ticket); one strategy cannot block another on the same symbol."
-      - "xau_vwap_pullback exists, defaults to enabled=false and shadow_only=true, and is not live-enabled."
+      - "xau_vwap_pullback exists; operator live-enabled it (enabled=true, shadow_only=false, live_ready=true) after explicit confirmation."
       - "Live portfolio heat is enforced at 3% with per-trade 1% and min 1.5 R:R intact; comparison/paper uses independent books."
       - "MT5 netting fail-closes same-symbol independent live execution; hedging allows it."
       - "News OCO cancels only the twin pending; skip reasons are enumerable; require_session defaults false."

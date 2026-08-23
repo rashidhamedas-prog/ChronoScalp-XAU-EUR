@@ -475,7 +475,9 @@ def page_control(settings) -> None:
 
     st.markdown(f"#### {_t('strategies_label')}")
     st.caption(_t("strategies_hint"))
-    st.caption("XAU VWAP pullback cannot be live-enabled until live_ready (validation gates).")
+    st.caption(
+        "XAU VWAP pullback is live_ready. 1% / 1.5R / 3% heat still apply. Restart after save."
+    )
     selected_strats = st.multiselect(
         _t("strategies_label"),
         options=list(KNOWN_STRATEGIES),
