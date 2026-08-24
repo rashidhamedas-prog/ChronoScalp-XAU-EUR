@@ -2,6 +2,36 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-24 TASK-002 VPS MT5 IPC recovered + Telegram unblocked
+
+- Time (UTC): 2026-08-24T09:37:00Z
+- Telegram: Positions no longer calls `mt5.initialize` (poll hang). Keyboard restore sent to chat `1008770451`.
+- Trading: zombie `terminal64` (~6MB) killed; new terminal WS≈118MB; `Connected to MT5 server=AUSCommercial-Demo` elapsed=0.0s; `ChronoScalp started in live mode`; tick running (EURUSD low_rvol skip).
+- Invariants: 1%/1.5R/3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged. Debug instrumentation still on (`debug-ece9a8.log`) until operator confirms Positions/Logs.
+- Exact next action: operator presses Positions then Logs; then strip debug logs.
+
+
+- Time (UTC): 2026-08-24T09:22:00Z
+- Evidence (`debug-ece9a8.log` from VPS): status `handle` then open `handle`, then Telegram `mt5.initialize` — no `_cmd_open` finish, no logs `handle`. Live IPC timeout `-10005` ~211s.
+- Fix: Telegram Positions/Logs/Test-conn no longer call `mt5.initialize`; snapshot/journal + log tail from end. MT5 connect stops retrying after IPC timeout. Watchdog kills hung connect after 4 min without `ChronoScalp started`.
+- Instrumentation kept (`runId=post-fix`).
+- Exact next action: deploy files, restart Telegram, operator presses Positions then Logs.
+
+
+- Time (UTC): 2026-08-24T08:55:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Branch: `ai/TASK-002-xau-vwap-multistrat`
+- Objective: diagnose operator report that Telegram control and ChronoScalp live bots "don't work".
+- Reclaimed from stale TASK-001 (heartbeat 2026-08-17): `mt5_connector.py`, `process_control.py`. Also claimed `logging_setup.py`.
+- VPS evidence (45.90.98.99, HEAD `fbb16fc` on `main`, local VPS clock ~01:47):
+  - `run_live.py --mode live` alive but looping MT5 `initialize()` IPC timeout `-10005` (~211–218s per attempt). Watchdog treats it as healthy after 12s.
+  - `terminal64` PID 2396 WS≈7.5MB (hollow vs a normal loaded terminal).
+  - Telegram control bot up since 2026-08-23 06:54; poll errors logged only as `RequestException` (status stripped). Operator cmds at 21:38–21:58: status / positions / stop / start live / positions.
+  - Overlay already uses numeric `trade_open_copy_chat_id=1008770451`.
+- Hypotheses under test (debug session ece9a8): A MT5 IPC hang; B watchdog false-healthy; C poll error stripped; D Telegram positions blocks poll via second MT5 initialize; E Markdown/`@username` sendMessage 400.
+- Instrumentation only — no product fix yet. Debug NDJSON: repo-root `debug-ece9a8.log`.
+- Exact next action: operator reproduces via Telegram; then analyze `debug-ece9a8.log` (VPS + local) and fix with evidence.
+
 ## 2026-08-23 TASK-002 operator confirmed merge/deploy/VWAP live
 
 - Time (UTC): 2026-08-23T13:20:00Z

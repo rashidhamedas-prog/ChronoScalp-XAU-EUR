@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from chronoscalp.logging_setup import logger
+from chronoscalp.logging_setup import agent_debug_log, logger
 
 ROOT = Path(__file__).resolve().parents[3]
 PID_FILE = ROOT / "data" / "user" / "bot.pid"
@@ -183,7 +183,16 @@ def _rotate_bot_stdout_if_needed(stdout_path: Path) -> None:
 def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str]:
     """Spawn ``scripts/run_live.py`` in the background."""
     pid_file = resolve_pid_file(pid_file)
-    if bot_is_running(pid_file):
+    already = bot_is_running(pid_file)
+    # #region agent log
+    agent_debug_log(
+        location="process_control.py:start_bot",
+        message="start_bot requested",
+        data={"mode": mode, "already_running": already},
+        hypothesis_id="B",
+    )
+    # #endregion
+    if already:
         return False, "ربات از قبل در حال اجراست"
 
     # Fail fast before spawn when live gate is missing (avoids false "started" UI).
@@ -239,8 +248,24 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
             tail = "\n".join(lines[-8:])
         except OSError:
             pass
+        # #region agent log
+        agent_debug_log(
+            location="process_control.py:start_bot",
+            message="start_bot early exit",
+            data={"mode": mode, "pid": proc.pid, "exit_code": exit_code},
+            hypothesis_id="B",
+        )
+        # #endregion
         return False, f"ربات فوراً متوقف شد (exit={exit_code}). آخرین لاگ:\n{tail}"
 
+    # #region agent log
+    agent_debug_log(
+        location="process_control.py:start_bot",
+        message="start_bot spawned",
+        data={"mode": mode, "pid": proc.pid},
+        hypothesis_id="B",
+    )
+    # #endregion
     return True, f"ربات با PID {proc.pid} در حالت {mode} شروع شد"
 
 
@@ -295,20 +320,36 @@ def bot_pid(pid_file: Path = PID_FILE) -> int | None:
     return live[0] if live else None
 
 
-def tail_logs(n: int = 40, log_dir: Path | None = None) -> list[str]:
-    """Return the last ``n`` lines from the newest chronoscalp_*.log file."""
-    directory = Path(log_dir) if log_dir is not None else ROOT / "logs"
-    logs = sorted(directory.glob("chronoscalp_*.log"))
-    if not logs:
-        # Fall back to subprocess stdout captured by start_bot.
-        stdout_path = directory / "bot_stdout.log"
-        if stdout_path.exists():
-            logs = [stdout_path]
-        else:
-            return []
-    path = logs[-1]
+def _tail_file_lines(path: Path, n: int) -> list[str]:
+    """Read the last ``n`` lines without loading the whole file."""
+    n = max(1, n)
     try:
-        text = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            data = b""
+            block = 8192
+            while size > 0 and data.count(b"\n") <= n:
+                step = min(block, size)
+                size -= step
+                handle.seek(size)
+                data = handle.read(step) + data
+                if len(data) > 512 * 1024:
+                    break
+            text = data.decode("utf-8", errors="replace")
     except OSError:
         return []
-    return text[-max(1, n) :]
+    return text.splitlines()[-n:]
+
+
+def tail_logs(n: int = 40, log_dir: Path | None = None) -> list[str]:
+    """Return the last ``n`` lines from the newest chronoscalp / bot_stdout log."""
+    directory = Path(log_dir) if log_dir is not None else ROOT / "logs"
+    candidates = list(directory.glob("chronoscalp_*.log"))
+    stdout_path = directory / "bot_stdout.log"
+    if stdout_path.exists():
+        candidates.append(stdout_path)
+    if not candidates:
+        return []
+    path = max(candidates, key=lambda item: item.stat().st_mtime)
+    return _tail_file_lines(path, n)

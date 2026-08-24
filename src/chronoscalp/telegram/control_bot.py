@@ -20,7 +20,7 @@ from typing import Any
 import requests
 
 from chronoscalp.config import Settings, get_settings
-from chronoscalp.logging_setup import logger
+from chronoscalp.logging_setup import agent_debug_log, logger
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.trade_journal import load_journal_snapshot, write_daily_reset_marker
 from chronoscalp.saas.broker_wizard import (
@@ -37,7 +37,6 @@ from chronoscalp.saas.broker_wizard import (
     enable_live_confirm,
     save_mt5_credentials,
     save_oanda_credentials,
-    test_mt5_connection,
     test_oanda_connection,
 )
 from chronoscalp.saas.process_control import (
@@ -157,6 +156,19 @@ class TelegramControlBot:
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as exc:
+            # #region agent log
+            agent_debug_log(
+                location="control_bot.py:_api",
+                message="Telegram HTTP RequestException",
+                data={
+                    "method": method,
+                    "exc_type": type(exc).__name__,
+                    "status": getattr(getattr(exc, "response", None), "status_code", None),
+                    "summary": telegram_error_summary(exc),
+                },
+                hypothesis_id="C",
+            )
+            # #endregion
             raise requests.RequestException(telegram_error_summary(exc)) from None
         if not data.get("ok"):
             raise RuntimeError("Telegram API rejected the request")
@@ -346,6 +358,8 @@ class TelegramControlBot:
         mode = self._detect_mode()
         ks = "ACTIVE" if self.kill.is_active() else "off"
         reason = self.kill.reason() if self.kill.is_active() else "—"
+        recent = "\n".join(self._logs_fn(12))
+        mt5_ipc = "IPC timeout" in recent or "MT5 initialize() failed" in recent
         broker = self.settings.execution.get("broker", "?")
         symbols = ", ".join(self.settings.symbols) if self.settings.symbols else "—"
         strategies = ", ".join(self._current_strategies()) or "(MACD/trend only)"
@@ -372,6 +386,11 @@ class TelegramControlBot:
             f"تأیید Live (.env): {live_ok}",
             f"mistake_memory={mm}",
         ]
+        if mt5_ipc:
+            lines.append(
+                "هشدار MT5: IPC timeout — فرآیند روشن است ولی به ترمینال وصل نیست. "
+                "MetaTrader را ببندید و دوباره باز/لاگین کنید."
+            )
         self.send(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
 
     def _cmd_pnl(self, chat_id: int, _text: str = "") -> None:
@@ -396,7 +415,22 @@ class TelegramControlBot:
         self.send(chat_id, "\n".join(lines))
 
     def _cmd_open(self, chat_id: int, _text: str = "") -> None:
+        t0 = time.monotonic()
         rows, account = self._load_live_open_positions()
+        # #region agent log
+        agent_debug_log(
+            location="control_bot.py:_cmd_open",
+            message="Open-positions fetch finished",
+            data={
+                "elapsed_s": round(time.monotonic() - t0, 1),
+                "live_ok": rows is not None,
+                "n_rows": len(rows) if rows is not None else None,
+                "has_account": bool(account),
+            },
+            hypothesis_id="D",
+            run_id="post-fix",
+        )
+        # #endregion
         if rows is not None:
             if not rows:
                 self.send(chat_id, self._empty_broker_positions_message(account))
@@ -422,7 +456,8 @@ class TelegramControlBot:
             self.send(
                 chat_id,
                 "پوزیشن بازی در ژورنال نیست.\n"
-                "(خواندن زنده از بروکر ممکن نشد — لاگ/اتصال MT5 را چک کنید)",
+                "تلگرام مستقیم به MT5 وصل نمی‌شود تا کیبورد قفل نشود.\n"
+                "اگر ربات هنوز به ترمینال وصل نشده، اسنپ‌شات خالی است — لاگ را ببینید.",
             )
             return
         lines = [
@@ -466,27 +501,20 @@ class TelegramControlBot:
         return "حساب: " + " | ".join(parts) if parts else ""
 
     def _load_live_open_positions(self) -> tuple[list[dict] | None, dict]:
-        """Live MT5/OANDA first, then fresh snapshot; ``(None, {})`` = fall back to journal."""
+        """Fresh snapshot from the trading process, else journal.
+
+        This process must not call ``mt5.initialize()``. A second IPC client
+        blocks Telegram long-poll for minutes (VPS: Positions → IPC timeout,
+        so Logs never reaches ``handle``).
+        """
         self._reload_settings()
         broker = str(self.settings.execution.get("broker") or "").lower()
-        secrets = self.settings.secrets
         account: dict = {}
 
-        if broker == "mt5":
-            from chronoscalp.saas.broker_wizard import fetch_mt5_open_positions
-
-            ok, msg, live_rows, account = fetch_mt5_open_positions(
-                int(secrets.mt5_login or 0),
-                str(secrets.mt5_password or ""),
-                str(secrets.mt5_server or ""),
-                str(secrets.mt5_terminal_path or ""),
-            )
-            if ok:
-                return live_rows, account
-            logger.warning("Telegram live positions (MT5) failed: {}", msg)
-        elif broker == "oanda":
+        if broker == "oanda":
             from chronoscalp.saas.broker_wizard import fetch_oanda_open_positions
 
+            secrets = self.settings.secrets
             user = UserConfigStore().config
             ok, msg, live_rows = fetch_oanda_open_positions(
                 str(secrets.oanda_api_token or ""),
@@ -502,7 +530,21 @@ class TelegramControlBot:
 
         mode = self._detect_mode()
         snapshot_path = self.state_dir / f"broker_positions_{mode}.json"
-        rows, snap_account = self._read_positions_snapshot(snapshot_path, max_age_seconds=120.0)
+        rows, snap_account = self._read_positions_snapshot(snapshot_path, max_age_seconds=180.0)
+        # #region agent log
+        agent_debug_log(
+            location="control_bot.py:_load_live_open_positions",
+            message="positions via snapshot only",
+            data={
+                "broker": broker,
+                "skipped_mt5_initialize": broker == "mt5",
+                "snapshot_ok": rows is not None,
+                "n_rows": len(rows) if rows is not None else None,
+            },
+            hypothesis_id="D",
+            run_id="post-fix",
+        )
+        # #endregion
         if rows is not None:
             return rows, snap_account or account
         return None, account
@@ -612,6 +654,15 @@ class TelegramControlBot:
         body = "\n".join(lines)
         if len(body) > 3800:
             body = body[-3800:]
+        # #region agent log
+        agent_debug_log(
+            location="control_bot.py:_cmd_logs",
+            message="logs reply ready",
+            data={"n_lines": len(lines), "body_len": len(body)},
+            hypothesis_id="D",
+            run_id="post-fix",
+        )
+        # #endregion
         self.send(chat_id, f"آخرین لاگ:\n{body}")
 
     def _cmd_cancel(self, chat_id: int, _text: str = "") -> None:
@@ -792,18 +843,44 @@ class TelegramControlBot:
                 self.settings.secrets.oanda_account_id,
                 user.broker.oanda_environment or "practice",
             )
-        else:
-            try:
-                res = test_mt5_connection(
-                    int(self.settings.secrets.mt5_login or 0),
-                    self.settings.secrets.mt5_password,
-                    self.settings.secrets.mt5_server,
-                    self.settings.secrets.mt5_terminal_path,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.send(chat_id, f"❌ {exc}", reply_markup=CONN_KEYBOARD)
-                return
-        self.send(chat_id, ("✅ " if res.ok else "❌ ") + res.message, reply_markup=CONN_KEYBOARD)
+            self.send(
+                chat_id, ("✅ " if res.ok else "❌ ") + res.message, reply_markup=CONN_KEYBOARD
+            )
+            return
+        # Do not call mt5.initialize() here — it contends with run_live and
+        # blocks getUpdates (same hang as Positions).
+        recent = "\n".join(self._logs_fn(40))
+        running = self._running_fn()
+        if (
+            "Connected to MT5" in recent
+            and "IPC timeout" not in recent.split("Connected to MT5")[-1]
+        ):
+            self.send(
+                chat_id, "✅ اتصال MT5 در لاگ ربات ترید موفق بوده", reply_markup=CONN_KEYBOARD
+            )
+            return
+        if "IPC timeout" in recent or "initialize() failed" in recent:
+            self.send(
+                chat_id,
+                "❌ MT5 IPC timeout — ترمینال را ببندید، دوباره باز کنید و لاگین کنید. "
+                "بعد ربات را Stop سپس Start کنید.",
+                reply_markup=CONN_KEYBOARD,
+            )
+            return
+        if running:
+            self.send(
+                chat_id,
+                "ربات ترید روشن است و هنوز لاگ اتصال موفق/ناموفق نرسیده. "
+                "چند دقیقه صبر کنید یا «لاگ» را بزنید.",
+                reply_markup=CONN_KEYBOARD,
+            )
+            return
+        self.send(
+            chat_id,
+            "ربات ترید خاموش است. استارت Paper/Live بزنید؛ تست اتصال از تلگرام "
+            "دیگر ترمینال MT5 را جداگانه initialize نمی‌کند.",
+            reply_markup=CONN_KEYBOARD,
+        )
 
     def _cmd_wizard_mt5(self, chat_id: int, _text: str = "") -> None:
         self._pending[chat_id] = {"flow": "mt5", "step": "login", "data": {}}
@@ -1534,6 +1611,19 @@ class TelegramControlBot:
     def handle(self, chat_id: int, text: str) -> None:
         """Dispatch one inbound message."""
         logger.info("Telegram cmd from chat_id={} text={!r}", chat_id, (text or "")[:80])
+        # #region agent log
+        agent_debug_log(
+            location="control_bot.py:handle",
+            message="Telegram inbound",
+            data={
+                "authorized": self._authorized(chat_id),
+                "text_len": len(text or ""),
+                "cmd": self._resolve_command(text),
+                "pending_flow": (self._pending.get(chat_id) or {}).get("flow"),
+            },
+            hypothesis_id="D",
+        )
+        # #endregion
         if not self._authorized(chat_id):
             self.send(
                 chat_id,

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 
 import yaml
 
-from chronoscalp.logging_setup import logger
+from chronoscalp.logging_setup import agent_debug_log, logger
 from chronoscalp.strategy.live_gates import force_shadow_if_not_live_ready
 
 ENV_PATH = Path(".env")
@@ -569,7 +570,16 @@ def fetch_mt5_open_positions(
             server=server,
             terminal_path=terminal_path or "",
         )
+        t0 = monotonic()
         if not broker.connect():
+            # #region agent log
+            agent_debug_log(
+                location="broker_wizard.py:fetch_mt5_open_positions",
+                message="MT5 position fetch connect failed",
+                data={"elapsed_s": round(monotonic() - t0, 1)},
+                hypothesis_id="D",
+            )
+            # #endregion
             return False, "اتصال MT5 برای خواندن پوزیشن ناموفق بود", [], {}
         account = broker.snapshot_account_summary()
         rows = broker.snapshot_account_positions()

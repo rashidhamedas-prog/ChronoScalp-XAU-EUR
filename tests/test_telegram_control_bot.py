@@ -521,6 +521,44 @@ def test_open_positions_empty_live_snapshot(bot: TelegramControlBot, tmp_path: P
     assert "equity=9426.47" in text
 
 
+def test_open_positions_mt5_does_not_call_initialize(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot.settings.execution["broker"] = "mt5"
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Telegram must not call fetch_mt5_open_positions")
+
+    monkeypatch.setattr(
+        "chronoscalp.saas.broker_wizard.fetch_mt5_open_positions",
+        boom,
+    )
+    bot.handle(42, "پوزیشن‌ها")
+    assert bot.send.called
+    assert "پوزیشن" in bot.send.call_args.args[1]
+
+
+def test_logs_button_sends_tail(bot: TelegramControlBot) -> None:
+    bot.handle(42, "لاگ")
+    text = bot.send.call_args.args[1]
+    assert "line-a" in text
+    assert "line-b" in text
+
+
+def test_tail_logs_reads_last_lines_only(tmp_path: Path) -> None:
+    from chronoscalp.saas.process_control import tail_logs
+
+    log = tmp_path / "chronoscalp_2026-08-24.log"
+    log.write_text(("old\n" * 500) + "last-a\nlast-b\n", encoding="utf-8")
+    assert tail_logs(2, log_dir=tmp_path) == ["last-a", "last-b"]
+
+
+def test_status_warns_when_logs_show_mt5_ipc(bot: TelegramControlBot) -> None:
+    bot._logs_fn = lambda _n: ["MT5 initialize() failed err=(-10005, 'IPC timeout')"]
+    bot.handle(42, "وضعیت")
+    assert "IPC timeout" in bot.send.call_args.args[1]
+
+
 def test_strategies_menu_says_simultaneous_and_hides_xau_from_all(
     bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

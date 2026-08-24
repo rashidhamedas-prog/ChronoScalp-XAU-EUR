@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from chronoscalp.logging_setup import logger
+from chronoscalp.logging_setup import agent_debug_log, logger
 from chronoscalp.utils.telegram_chat import DEFAULT_TRADE_OPEN_COPY_CHAT
 
 
@@ -140,6 +140,24 @@ class AlertNotifier:
         }
         try:
             response = requests.post(url, json=payload, timeout=self._cfg.timeout_seconds)
+            # #region agent log
+            desc = ""
+            try:
+                desc = str((response.json() or {}).get("description") or "")[:120]
+            except Exception:  # noqa: BLE001
+                desc = (response.text or "")[:80]
+            agent_debug_log(
+                location="alerts.py:_send_telegram",
+                message="Telegram sendMessage result",
+                data={
+                    "status": response.status_code,
+                    "chat_kind": "username" if str(chat_id).startswith("@") else "numeric",
+                    "parse_mode": "Markdown",
+                    "description": desc,
+                },
+                hypothesis_id="E",
+            )
+            # #endregion
             if response.status_code >= 400:
                 logger.warning(
                     "Telegram alert failed: HTTP {} chat_id={} body={}",

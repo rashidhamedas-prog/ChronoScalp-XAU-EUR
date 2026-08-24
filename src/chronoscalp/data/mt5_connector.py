@@ -19,7 +19,7 @@ from typing import Any
 
 import pandas as pd
 
-from chronoscalp.logging_setup import logger
+from chronoscalp.logging_setup import agent_debug_log, logger
 from chronoscalp.utils.types import Timeframe
 
 OHLCV_COLUMNS = ["time", "open", "high", "low", "close", "tick_volume", "spread"]
@@ -156,28 +156,29 @@ class MT5Connector:
 
         # MetaTrader5 docs: timeout is milliseconds. Some builds still print
         # "60 sec" in the error string even when a larger timeout is used.
-        timeout_ms = 180_000
+        timeout_ms = 45_000
         attempts: list[dict[str, object]] = []
-        base: dict[str, object] = {
+        login_kwargs: dict[str, object] = {
             "timeout": timeout_ms,
             "login": int(self._login),
             "password": self._password,
             "server": self._server,
         }
+        # Attach to a running terminal first (no extra login handshake). A
+        # zombie terminal is killed by ops recovery; a healthy one already
+        # holds the IPC and must not be re-initialized with credentials.
         if self._terminal_path:
-            with_path = dict(base)
+            attempts.append({"timeout": timeout_ms, "path": self._terminal_path})
+            with_path = dict(login_kwargs)
             with_path["path"] = self._terminal_path
             attempts.append(with_path)
-        attempts.append(dict(base))  # auto-discover / launch
-        if self._terminal_path:
-            # Last resort: path only, then separate login() (older package path).
-            attempts.append({"timeout": timeout_ms, "path": self._terminal_path})
+        attempts.append(dict(login_kwargs))
 
         last_err: object = None
         for i, kwargs in enumerate(attempts, start=1):
-            with contextlib.suppress(Exception):
-                mt5.shutdown()
             if i > 1:
+                with contextlib.suppress(Exception):
+                    mt5.shutdown()
                 time.sleep(3)
 
             logger.info(
@@ -188,8 +189,36 @@ class MT5Connector:
                 timeout_ms,
             )
             t0 = time.monotonic()
+            # #region agent log
+            agent_debug_log(
+                location="mt5_connector.py:connect:before_init",
+                message="MT5 initialize starting",
+                data={
+                    "attempt": i,
+                    "attempts": len(attempts),
+                    "has_path": bool(kwargs.get("path")),
+                    "timeout_ms": timeout_ms,
+                },
+                hypothesis_id="A",
+                run_id="post-fix",
+            )
+            # #endregion
             ok = bool(mt5.initialize(**kwargs))
             elapsed = time.monotonic() - t0
+            # #region agent log
+            agent_debug_log(
+                location="mt5_connector.py:connect:after_init",
+                message="MT5 initialize returned",
+                data={
+                    "attempt": i,
+                    "ok": ok,
+                    "elapsed_s": round(elapsed, 1),
+                    "err": None if ok else str(mt5.last_error()),
+                },
+                hypothesis_id="A",
+                run_id="post-fix",
+            )
+            # #endregion
             if not ok:
                 last_err = mt5.last_error()
                 logger.error(
@@ -198,6 +227,11 @@ class MT5Connector:
                     elapsed,
                     last_err,
                 )
+                err_code = last_err[0] if isinstance(last_err, tuple) and last_err else None
+                err_s = str(last_err or "")
+                if err_code == -10005 or "IPC timeout" in err_s or "-10005" in err_s:
+                    logger.error("MT5 IPC timeout — stopping further initialize retries")
+                    break
                 continue
 
             # If credentials were not passed into initialize, login explicitly.

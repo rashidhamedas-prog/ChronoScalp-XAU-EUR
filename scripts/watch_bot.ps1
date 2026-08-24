@@ -63,6 +63,22 @@ if ($roots.Count -gt 1) {
   $roots = @($roots[0])
 }
 if ($roots.Count -eq 1) {
+  $latest = Get-ChildItem -Path $LogDir -Filter 'chronoscalp_*.log' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime | Select-Object -Last 1
+  if ($latest) {
+    $tail = @(Get-Content -Path $latest.FullName -Tail 20 -ErrorAction SilentlyContinue)
+    $joined = $tail -join "`n"
+    $ageMin = ((Get-Date) - $latest.LastWriteTime).TotalMinutes
+    $stuckConnect = ($joined -match 'Connecting to MT5|IPC timeout') -and ($joined -notmatch 'ChronoScalp started')
+    if ($stuckConnect -and $ageMin -ge 4) {
+      Write-Watch ("kill hung MT5 connect pid={0} logAgeMin={1:N1}" -f $roots[0].ProcessId, $ageMin)
+      Stop-Process -Id $roots[0].ProcessId -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 2
+      $roots = @()
+    }
+  }
+}
+if ($roots.Count -eq 1) {
   Set-Content -Path $PidFile -Value $roots[0].ProcessId -Encoding ascii
   Write-Watch "already running pid=$($roots[0].ProcessId)"
   exit 0

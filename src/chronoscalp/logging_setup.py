@@ -61,4 +61,34 @@ def setup_logging(log_level: str | None = None, log_dir: str | Path = "logs") ->
 
 setup_logging()
 
-__all__ = ["logger", "setup_logging"]
+
+def agent_debug_log(
+    *,
+    location: str,
+    message: str,
+    data: dict,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    """Append one NDJSON debug line for the ece9a8 session (no secrets)."""
+    try:
+        import json
+        import time
+
+        payload = {
+            "sessionId": "ece9a8",
+            "timestamp": int(time.time() * 1000),
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "runId": run_id,
+        }
+        path = Path(__file__).resolve().parents[2] / "debug-ece9a8.log"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+__all__ = ["agent_debug_log", "logger", "setup_logging"]
