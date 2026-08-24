@@ -607,6 +607,28 @@ def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:
     assert "shadow_only" in text
 
 
+def test_getupdates_http_timeout_outlives_long_poll(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_post(*_a: object, **kwargs: object) -> MagicMock:
+        captured["timeout"] = kwargs.get("timeout")
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status = lambda: None
+        response.json.return_value = {"ok": True, "result": []}
+        return response
+
+    monkeypatch.setattr("chronoscalp.telegram.control_bot.requests.post", fake_post)
+    bot._api("getUpdates", offset=0, timeout=25)
+    timeout = captured["timeout"]
+    assert isinstance(timeout, tuple)
+    connect_s, read_s = timeout
+    assert connect_s >= 10
+    assert read_s >= 70
+
+
 def test_telegram_poll_error_omits_token(bot: TelegramControlBot, caplog, monkeypatch) -> None:
     import requests
 

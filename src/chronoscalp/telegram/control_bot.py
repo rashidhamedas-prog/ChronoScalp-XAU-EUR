@@ -142,6 +142,18 @@ class TelegramControlBot:
             pass
         return "paper"
 
+    def _http_timeout(self, method: str, params: dict[str, Any]) -> float | tuple[float, float]:
+        """HTTP timeout for one Bot API call.
+
+        ``getUpdates`` long-polls for ``timeout`` seconds; the HTTP read
+        budget must be larger or the control loop dies with ReadTimeout and
+        never reaches ``handle`` (VPS evidence: no Positions/Logs after restart).
+        """
+        if method == "getUpdates":
+            poll = float(params.get("timeout") or 25)
+            return (15.0, poll + 45.0)
+        return max(35.0, self.timeout)
+
     def _api(self, method: str, **params: Any) -> dict[str, Any]:
         """POST to Telegram Bot API with explicit UTF-8 JSON (Persian-safe)."""
         url = API.format(token=self.token, method=method)
@@ -151,7 +163,7 @@ class TelegramControlBot:
                 url,
                 data=body,
                 headers={"Content-Type": "application/json; charset=utf-8"},
-                timeout=max(35.0, self.timeout),
+                timeout=self._http_timeout(method, params),
             )
             response.raise_for_status()
             data = response.json()
@@ -1736,7 +1748,18 @@ class TelegramControlBot:
                     timeout=25,
                     allowed_updates=["message"],
                 )
-                for upd in data.get("result") or []:
+                batch = data.get("result") or []
+                # #region agent log
+                if batch:
+                    agent_debug_log(
+                        location="control_bot.py:run_forever",
+                        message="getUpdates batch",
+                        data={"n": len(batch)},
+                        hypothesis_id="C",
+                        run_id="post-fix",
+                    )
+                # #endregion
+                for upd in batch:
                     self.offset = int(upd["update_id"]) + 1
                     msg = upd.get("message") or {}
                     text = msg.get("text") or ""
