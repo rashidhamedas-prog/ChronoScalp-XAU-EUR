@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-24T08:50:00Z"
+    heartbeat_at: "2026-08-24T15:10:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"
@@ -61,6 +61,7 @@ tasks:
       - "src/chronoscalp/saas/process_control.py"
       - "scripts/watch_bot.ps1"
       - "scripts/app.py"
+      - "tests/test_process_control.py"
       - "tests/test_execution_utils.py"
       - "tests/test_xau_vwap_pullback.py"
       - "tests/test_multi_strategy_execution.py"
@@ -93,7 +94,7 @@ tasks:
       - ".venv/Scripts/python.exe -m pytest -q --basetemp .tmp_pytest_task002"
       - ".venv/Scripts/python.exe -m ruff check src tests"
       - ".venv/Scripts/python.exe -m black --check src tests"
-    notes: "Reclaimed stale TASK-001 overlapping product files (heartbeat 2026-08-17). Do not weaken 1%/1.5R/3% or CHRONOSCALP_CONFIRM_LIVE. Do not rewrite Delta."
+    notes: "Reclaimed stale TASK-001 overlapping product files (heartbeat 2026-08-17) plus tests/test_process_control.py on 2026-08-24. Do not weaken 1%/1.5R/3% or CHRONOSCALP_CONFIRM_LIVE. Do not rewrite Delta."
   - id: "TASK-001"
     title: "Audit live losses and redesign XAUUSD/EURUSD strategies"
     status: "in_progress"
@@ -140,7 +141,6 @@ tasks:
       - "tests/test_alerts.py"
       - "tests/test_telegram_chat.py"
       - "tests/test_optimizer.py"
-      - "tests/test_process_control.py"
       - "tests/test_delta_strategy.py"
       - "tests/test_mistake_memory.py"
       - "tests/test_trade_journal.py"

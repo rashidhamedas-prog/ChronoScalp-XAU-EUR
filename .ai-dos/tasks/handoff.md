@@ -2,6 +2,17 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-24 TASK-002 hollow MT5 relapsed; live loop restored
+
+- Time (UTC): 2026-08-24T15:35:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Evidence: from 03:00 PDT the live loop died; `terminal64` WS≈7MB; watchdog restart-loop + IPC `-10005`. Operator asked to fix.
+- Ops: killed hollow terminal + `run_live`; after clearing `bot.stopped`, watchdog started live; `initialize` launched a loaded terminal (WS≈119MB, session 0); `Connected ... elapsed=12.2s`; `ChronoScalp started in live mode` at 08:33:30 PDT.
+- Product: `watch_bot.ps1` recycles hollow/missing MT5 (best-effort) and kills hung connect by process age ≥90s; `process_control.ensure_mt5_terminal` same recycle; live start warns but still spawns so initialize can launch the terminal. Deployed `watch_bot.ps1` to VPS. Reclaimed stale TASK-001 `tests/test_process_control.py`.
+- Tests: `pytest tests/test_process_control.py` 11 passed; ruff+black on touched Python files.
+- Invariants: 1%/1.5R/3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- Exact next action: keep an RDP session disconnected (not logged off) so MT5 does not go hollow again; merge still needs independent review.
+
 ## 2026-08-24 TASK-002 VPS MT5 IPC recovered + Telegram unblocked
 
 - Time (UTC): 2026-08-24T09:37:00Z

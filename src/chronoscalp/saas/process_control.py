@@ -15,6 +15,119 @@ ROOT = Path(__file__).resolve().parents[3]
 PID_FILE = ROOT / "data" / "user" / "bot.pid"
 _BOT_STDOUT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB — rotate before VPS disk fills
 _RUN_LIVE_MARKER = "run_live.py"
+DEFAULT_MT5_TERMINAL_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+# Loaded terminal64 is typically ~80–150 MiB; a session-0 zombie is ~6–8 MiB.
+HOLLOW_MT5_WS_MB = 30.0
+
+
+def terminal64_working_set_mb() -> float | None:
+    """Return ``terminal64`` working-set MiB, or ``None`` if it is not running."""
+    if sys.platform != "win32":
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-Process -Name terminal64 -ErrorAction SilentlyContinue "
+                "| Measure-Object WorkingSet64 -Maximum).Maximum",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(float(raw)) / (1024 * 1024)
+    except ValueError:
+        return None
+
+
+def ensure_mt5_terminal(
+    *,
+    min_ws_mb: float = HOLLOW_MT5_WS_MB,
+    terminal_path: str | None = None,
+    wait_seconds: float = 45.0,
+) -> tuple[bool, str]:
+    """Kill a hollow/missing ``terminal64`` and start it; wait until memory looks loaded.
+
+    A healthy logged-in terminal is typically well above ``min_ws_mb``. Session-0
+    zombies sit around 6–8 MiB and cause IPC timeout ``-10005``.
+    """
+    if sys.platform != "win32":
+        return True, "not-windows"
+    ws = terminal64_working_set_mb()
+    if ws is not None and ws >= min_ws_mb:
+        return True, f"terminal64_ok ws_mb={ws:.1f}"
+
+    path = terminal_path or os.environ.get("MT5_TERMINAL_PATH") or DEFAULT_MT5_TERMINAL_PATH
+    logger.warning(
+        "MT5 terminal hollow or missing (ws_mb={}); recycling {}",
+        None if ws is None else round(ws, 1),
+        path,
+    )
+    subprocess.run(
+        ["taskkill", "/IM", "terminal64.exe", "/F"],
+        check=False,
+        capture_output=True,
+        timeout=20,
+    )
+    if not Path(path).is_file():
+        return False, f"mt5_missing:{path}"
+    quoted = f'"{path}"'
+    subprocess.run(
+        [
+            "schtasks",
+            "/Create",
+            "/TN",
+            "ChronoScalpMT5",
+            "/TR",
+            quoted,
+            "/SC",
+            "ONSTART",
+            "/F",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    run = subprocess.run(
+        ["schtasks", "/Run", "/TN", "ChronoScalpMT5"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if run.returncode != 0:
+        try:
+            subprocess.Popen(
+                [path],
+                cwd=str(Path(path).parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+                | getattr(subprocess, "DETACHED_PROCESS", 0),
+            )
+        except OSError as exc:
+            return False, f"mt5_start_failed:{exc}"
+
+    deadline = time.time() + max(5.0, wait_seconds)
+    last_ws = terminal64_working_set_mb()
+    while time.time() < deadline:
+        time.sleep(5)
+        last_ws = terminal64_working_set_mb()
+        if last_ws is not None and last_ws >= min_ws_mb:
+            logger.info("MT5 terminal recycled ws_mb={:.1f}", last_ws)
+            return True, f"terminal64_recycled ws_mb={last_ws:.1f}"
+    detail = "none" if last_ws is None else f"{last_ws:.1f}"
+    return False, f"terminal64_hollow ws_mb={detail}"
 
 
 def _python_executable() -> str:
@@ -205,6 +318,13 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
                 False,
                 "حالت Live نیاز به CHRONOSCALP_CONFIRM_LIVE=yes در فایل .env دارد. "
                 "در پنل کنترل، تأیید Live را فعال و ذخیره کنید، یا .env را دستی تنظیم کنید.",
+            )
+        mt5_ok, mt5_msg = ensure_mt5_terminal(wait_seconds=15.0)
+        if not mt5_ok:
+            logger.warning(
+                "Starting live bot while MT5 is not loaded ({}); "
+                "initialize() will try to launch/login the terminal",
+                mt5_msg,
             )
 
     script = ROOT / "scripts" / "run_live.py"

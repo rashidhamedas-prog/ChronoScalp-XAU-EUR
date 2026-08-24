@@ -18,6 +18,54 @@ function Write-Watch([string]$msg) {
   Add-Content -Path $WatchLog -Value $line -Encoding utf8
 }
 
+$Mt5Exe = 'C:\Program Files\MetaTrader 5\terminal64.exe'
+$HollowWsMb = 30
+
+function Get-Mt5State {
+  $proc = @(Get-Process -Name terminal64 -ErrorAction SilentlyContinue)
+  if (-not $proc) {
+    return [pscustomobject]@{ Running = $false; WsMb = 0; Hollow = $true }
+  }
+  $wsMb = [math]::Round((($proc | Measure-Object WorkingSet64 -Maximum).Maximum / 1MB), 1)
+  return [pscustomobject]@{ Running = $true; WsMb = $wsMb; Hollow = ($wsMb -lt $HollowWsMb) }
+}
+
+function Start-Mt5Detached {
+  if (-not (Test-Path $Mt5Exe)) {
+    Write-Watch "MT5_MISSING $Mt5Exe"
+    return
+  }
+  $tr = '"{0}"' -f $Mt5Exe
+  schtasks /Create /TN ChronoScalpMT5 /TR $tr /SC ONSTART /F | Out-Null
+  schtasks /Run /TN ChronoScalpMT5 | Out-Null
+}
+
+function Wait-Mt5Loaded([int]$Seconds = 45) {
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  while ((Get-Date) -lt $deadline) {
+    $state = Get-Mt5State
+    if ($state.Running -and -not $state.Hollow) {
+      Write-Watch ("mt5 loaded ws_mb={0}" -f $state.WsMb)
+      return $true
+    }
+    Start-Sleep -Seconds 5
+  }
+  $state = Get-Mt5State
+  Write-Watch ("mt5 not loaded running={0} ws_mb={1}" -f $state.Running, $state.WsMb)
+  return $false
+}
+
+$mt5 = Get-Mt5State
+if (-not $mt5.Running -or $mt5.Hollow) {
+  Write-Watch ("recycling hollow/missing MT5 ws_mb={0}" -f $mt5.WsMb)
+  Get-Process -Name terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+  Start-Mt5Detached
+  if (-not (Wait-Mt5Loaded -Seconds 20)) {
+    Write-Watch 'HOLLOW_MT5 after recycle — starting bot anyway so initialize can launch terminal'
+  }
+}
+
 if (Test-Path $StopMarker) {
   Write-Watch 'operator stop marker present — not starting'
   exit 0
@@ -68,10 +116,16 @@ if ($roots.Count -eq 1) {
   if ($latest) {
     $tail = @(Get-Content -Path $latest.FullName -Tail 20 -ErrorAction SilentlyContinue)
     $joined = $tail -join "`n"
-    $ageMin = ((Get-Date) - $latest.LastWriteTime).TotalMinutes
+    $procAgeSec = 0
+    try {
+      $gp = Get-Process -Id $roots[0].ProcessId -ErrorAction Stop
+      $procAgeSec = ((Get-Date) - $gp.StartTime).TotalSeconds
+    } catch {
+      $procAgeSec = 0
+    }
     $stuckConnect = ($joined -match 'Connecting to MT5|IPC timeout') -and ($joined -notmatch 'ChronoScalp started')
-    if ($stuckConnect -and $ageMin -ge 4) {
-      Write-Watch ("kill hung MT5 connect pid={0} logAgeMin={1:N1}" -f $roots[0].ProcessId, $ageMin)
+    if ($stuckConnect -and $procAgeSec -ge 90) {
+      Write-Watch ("kill hung MT5 connect pid={0} procAgeSec={1:N0}" -f $roots[0].ProcessId, $procAgeSec)
       Stop-Process -Id $roots[0].ProcessId -Force -ErrorAction SilentlyContinue
       Start-Sleep -Seconds 2
       $roots = @()
