@@ -1398,7 +1398,8 @@ class TradingBot:
         risk_cfg = self.settings.risk
         logger.info(
             "Entry gate profile: strategies=[{}] symbols=[{}] max_concurrent={} "
-            "sessions={} trade_outside={} news_filter={} risk_pct={} min_rr={}",
+            "sessions={} trade_outside={} news_filter={} risk_pct={} min_rr={} "
+            "broker_class={} broker_cfg={}",
             ",".join(active) or "none",
             ",".join(self.settings.symbols),
             self.max_concurrent,
@@ -1407,6 +1408,8 @@ class TradingBot:
             (self.settings.news_filter or {}).get("enabled", True),
             risk_cfg.get("active_risk_per_trade_pct", risk_cfg.get("max_risk_per_trade_pct")),
             risk_cfg.get("min_reward_risk_ratio"),
+            type(self.broker).__name__,
+            self.settings.execution.get("broker"),
         )
         logger.info(
             "Entry guards: three_strikes={} mistake_memory={} correlation={} "
@@ -2004,6 +2007,7 @@ class TradingBot:
                 # Independent engines on their own timeframes (not fallback chain).
                 raw_signals: list = []
                 skip_parts: list[str] = []
+                engine_skips: list[str] = []
                 cap = None
                 spread_map = self.settings.spread_filter.get("max_spread_pips") or {}
                 if isinstance(spread_map, dict):
@@ -2017,6 +2021,7 @@ class TradingBot:
                     "spread_pips": spread_pips,
                     "median_spread_pips": median,
                     "broker_spread_cap_pips": float(cap) if cap is not None else None,
+                    "skip_out": engine_skips,
                 }
                 if run_scalp:
                     raw_signals.extend(
@@ -2082,7 +2087,11 @@ class TradingBot:
                         run_institutional=run_institutional,
                         inst_bar=inst_bar,
                     )
-                    detail = ("|".join(skip_parts) if skip_parts else "no_signal").replace(" ", "_")
+                    detail = (
+                        "|".join(skip_parts or engine_skips)
+                        if (skip_parts or engine_skips)
+                        else "no_signal"
+                    ).replace(" ", "_")
                     self._note_skip(f"{symbol}:{detail}")
                     continue
 

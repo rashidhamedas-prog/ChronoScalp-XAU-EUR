@@ -511,11 +511,17 @@ class MultiTimeframeStrategy:
         spread_pips: float | None = None,
         median_spread_pips: float | None = None,
         broker_spread_cap_pips: float | None = None,
+        skip_out: list[str] | None = None,
         run_scalp: bool = True,
         run_institutional: bool = True,
     ) -> list[Signal]:
-        """Return every actionable candidate. Never winner-takes-all."""
-        candidates, _skip = self._collect_candidates(
+        """Return every actionable candidate. Never winner-takes-all.
+
+        When ``skip_out`` is provided, engine reject reasons are appended so
+        the live skip heartbeat can show ``delta:low_rvol`` instead of a
+        blank ``no_signal``.
+        """
+        candidates, skip = self._collect_candidates(
             symbol,
             data_by_timeframe,
             higher_timeframes,
@@ -527,6 +533,8 @@ class MultiTimeframeStrategy:
             run_scalp=run_scalp,
             run_institutional=run_institutional,
         )
+        if skip_out is not None:
+            skip_out.extend(skip)
         return candidates
 
     def _collect_candidates(

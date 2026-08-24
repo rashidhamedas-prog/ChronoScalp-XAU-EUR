@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-24T15:10:00Z"
+    heartbeat_at: "2026-08-24T16:25:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"
@@ -38,6 +38,10 @@ tasks:
       - "src/chronoscalp/filters/spread_shield.py"
       - "src/chronoscalp/main.py"
       - "src/chronoscalp/orchestration/alerts.py"
+      - "src/chronoscalp/orchestration/bootstrap.py"
+      - "tests/test_bootstrap.py"
+      - "tests/test_strategy.py"
+      - "tests/test_mt5_connect_idempotent.py"
       - "src/chronoscalp/orchestration/position_keys.py"
       - "src/chronoscalp/orchestration/state_store.py"
       - "src/chronoscalp/orchestration/strategy_attribution.py"

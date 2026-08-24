@@ -8,8 +8,11 @@
 # list is chronoscalp.config_overrides.UNENFORCED_OVERRIDE_KEYS.
 #
 # Deployed overlays drift from this file. Diff the host copy against it before
-# assuming a strategy is running: an overlay that omits `delta` from
+# assuming a strategy is running: an overlay that omits a name from
 # enabled_strategies silently disables it no matter what settings.yaml says.
+# Do not copy this demo overlay onto a live VPS. Live mode now ignores
+# execution.broker=paper (uses MT5/OANDA from data_source) so a leftover
+# paper key cannot silently swallow real orders.
 
 symbols:
   - XAUUSD_o

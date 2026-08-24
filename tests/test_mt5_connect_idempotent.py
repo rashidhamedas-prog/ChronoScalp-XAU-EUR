@@ -1,10 +1,8 @@
 """Regression tests for MT5 connection churn.
 
-Every ``connect()`` attempt calls ``mt5.shutdown()`` before ``initialize()``.
-Repeated callers (broker adapters, panel and Telegram status probes) therefore
-used to tear down and rebuild the IPC link underneath in-flight quote fetches
-and orders, which showed up on the VPS as bursts of
-"Connecting to MT5 / Connected to MT5 elapsed=0.0s" pairs every poll.
+Every ``connect()`` retry (attempt 2+) calls ``mt5.shutdown()`` before
+``initialize()``. The first attach to a healthy terminal does not shutdown,
+so panel/Telegram probes must not tear down the live IPC link.
 """
 
 from __future__ import annotations
@@ -67,7 +65,7 @@ def test_repeated_connect_reuses_live_terminal_link() -> None:
             assert connector.connect() is True
 
     assert calls["initialize"] == 1
-    assert calls["shutdown"] == 1, "must not tear the link down once per caller"
+    assert calls["shutdown"] == 0, "must not tear the link down on first attach or reuse"
     assert connector.is_connected is True
 
 
@@ -87,7 +85,7 @@ def test_fresh_connector_reuses_the_process_link() -> None:
             assert _connector().connect() is True
 
     assert calls["initialize"] == 1
-    assert calls["shutdown"] == 1
+    assert calls["shutdown"] == 0
 
 
 def test_link_to_a_different_login_is_rebuilt() -> None:

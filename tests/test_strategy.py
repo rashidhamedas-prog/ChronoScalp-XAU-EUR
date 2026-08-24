@@ -660,3 +660,24 @@ def test_institutional_still_runs_when_scalp_quiet(monkeypatch):
     assert scalp_calls["n"] == 1 and inst_calls["n"] == 2
     assert signal.signal_type == SignalType.BUY
     assert "institutional_entry" in signal.reason
+
+
+def test_evaluate_candidates_records_engine_skip_reasons() -> None:
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+
+    strategy = MultiTimeframeStrategy({"enabled_strategies": ["delta"]}, {})
+    skips: list[str] = []
+
+    def _fake_collect(*_args, **_kwargs):
+        return [], ["delta:low_rvol", "smc_confluence:no_mss"]
+
+    strategy._collect_candidates = _fake_collect  # type: ignore[method-assign]
+    out = strategy.evaluate_candidates(
+        "XAUUSD_o",
+        {},
+        [],
+        Timeframe.M1,
+        skip_out=skips,
+    )
+    assert out == []
+    assert skips == ["delta:low_rvol", "smc_confluence:no_mss"]

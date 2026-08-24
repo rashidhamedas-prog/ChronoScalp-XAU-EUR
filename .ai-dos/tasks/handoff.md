@@ -2,6 +2,15 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-24 TASK-002 live open path: overlay paper + stripped strategies
+
+- Time (UTC): 2026-08-24T16:30:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- Evidence: merged local overlay had `execution.broker: paper`, `enabled_strategies: [delta, liquidity_volume]`, `max_concurrent: 1`; `create_broker(mode=live)` returned PaperBroker; session `in_session=false` at 16:17 UTC.
+- Product: live mode ignores overlay `broker: paper` and uses MT5/OANDA from data_source; skip heartbeat records engine skip reasons; local gitignored overlay restored to SMC+liq+delta+VWAP, MT5, 3% heat, independent symbols. Session still london_ny (NY 13:30–16:30 New York).
+- Unchanged: 1%/1.5R/3%, `CHRONOSCALP_CONFIRM_LIVE`.
+- Exact next action: restart live bot so overlay + create_broker take effect; deploy VPS; independent review still required before merge.
+
 ## 2026-08-24 TASK-002 hollow MT5 relapsed; live loop restored
 
 - Time (UTC): 2026-08-24T15:35:00Z

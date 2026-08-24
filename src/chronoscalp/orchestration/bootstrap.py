@@ -15,6 +15,7 @@ from chronoscalp.execution.mt5_broker import MT5Broker
 from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC
 from chronoscalp.execution.oanda_broker import OANDABroker
 from chronoscalp.execution.paper_broker import PaperBroker
+from chronoscalp.logging_setup import logger
 
 
 def resolve_data_source(settings: Settings) -> str:
@@ -50,18 +51,31 @@ def create_broker(
     mode: str,
     connector: Any,
 ) -> PaperBroker | MT5Broker | OANDABroker:
-    """Instantiate the execution broker for ``mode`` (paper or live)."""
-    broker_kind = settings.execution.get("broker", "paper")
+    """Instantiate the execution broker for ``mode`` (paper or live).
+
+    ``--mode paper`` always uses the paper book. ``--mode live`` never falls
+    back to paper just because an overlay left ``execution.broker: paper``
+    (demo/shadow leftover) — that combination previously filled nothing on MT5.
+    """
+    broker_kind = str(settings.execution.get("broker", "paper") or "paper").strip().lower()
     magic = int(settings.execution.get("magic_number", CHRONOSCALP_MAGIC))
     slippage = float(settings.execution.get("slippage_pips", 0.5))
     starting = float(settings.backtest.get("initial_balance", 10_000))
 
-    if mode == "paper" or broker_kind == "paper":
+    if mode == "paper":
         return PaperBroker(
             symbols_cfg=settings.symbols_raw,
             starting_balance=starting,
             slippage_pips=slippage,
         )
+
+    if broker_kind == "paper":
+        inferred = "oanda" if resolve_data_source(settings) == "oanda" else "mt5"
+        logger.warning(
+            "Live mode ignoring execution.broker=paper (overlay demo leftover); using {}",
+            inferred,
+        )
+        broker_kind = inferred
 
     if broker_kind == "oanda":
         oanda_cfg = settings.raw.get("oanda", {})
