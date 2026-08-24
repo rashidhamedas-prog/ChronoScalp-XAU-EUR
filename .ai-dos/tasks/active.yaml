@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-002-xau-vwap-multistrat"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-22T15:26:00Z"
-    heartbeat_at: "2026-08-24T16:25:00Z"
+    heartbeat_at: "2026-08-24T21:15:00Z"
     depends_on: []
     file_claims:
       - ".ai-dos/project/status.md"
@@ -64,6 +64,10 @@ tasks:
       - "src/chronoscalp/data/mt5_connector.py"
       - "src/chronoscalp/saas/process_control.py"
       - "scripts/watch_bot.ps1"
+      - "scripts/_vps_inspect_status.ps1"
+      - "scripts/_vps_deploy_feature_branch.ps1"
+      - "scripts/_vps_force_restart_live.ps1"
+      - "scripts/_vps_restart_telegram_only.ps1"
       - "scripts/app.py"
       - "tests/test_process_control.py"
       - "tests/test_execution_utils.py"

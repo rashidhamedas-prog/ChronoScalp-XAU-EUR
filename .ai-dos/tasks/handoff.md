@@ -2,6 +2,15 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-24 TASK-002 deployed ccff6ea live+Telegram on VPS
+
+- Time (UTC): 2026-08-24T21:25:00Z
+- Task / owner / role: TASK-002 / cursor:grok-4.6 / implementer
+- VPS `45.90.98.99` HEAD=`ccff6ea` (feature commit; VPS local `main` pointer moved to that SHA — do not run `_vps_full_deploy.ps1` until merge to origin/main or it will roll back).
+- Overlay: kept broker-native `XAUUSD/EURUSD/BTCUSD`, `always_on_24h`, chat `1008770451`, news_straddle on; added `smc_confluence`; heat 3%.
+- Live: `ChronoScalp started in live mode` `broker_class=MT5Broker` `Connected AUSCommercial-Demo` equity≈71029. Telegram restarted, keyboard restored. Duplicate PID pairs are venv launcher + Python312 child, not two bots.
+- Exact next action: leave VPS running; merge to origin/main before the next standard deploy.
+
 ## 2026-08-24 TASK-002 live open path: overlay paper + stripped strategies
 
 - Time (UTC): 2026-08-24T16:30:00Z
