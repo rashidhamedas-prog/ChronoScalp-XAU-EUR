@@ -114,12 +114,35 @@ def test_start_bot_clears_stop_marker(tmp_path: Path, monkeypatch: pytest.Monkey
     assert not marker.exists()
 
 
-def test_ensure_mt5_terminal_ok_when_ws_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensure_mt5_terminal_ok_when_private_bytes_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pc.sys, "platform", "win32")
-    monkeypatch.setattr(pc, "terminal64_working_set_mb", lambda: 118.0)
+    monkeypatch.setattr(pc, "terminal64_private_mb", lambda: 49.0)
     ok, msg = pc.ensure_mt5_terminal()
     assert ok is True
     assert "terminal64_ok" in msg
+
+
+def test_terminal64_health_reads_private_bytes_not_working_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows trims the working set of an idle terminal, so measuring it made a
+    healthy MT5 look hollow and the watchdog recycled it every few minutes."""
+    seen: list[str] = []
+
+    def fake_run(cmd, **_kwargs):  # noqa: ANN001
+        seen.append(" ".join(cmd))
+
+        class _R:
+            returncode = 0
+            stdout = str(49 * 1024 * 1024)
+
+        return _R()
+
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    monkeypatch.setattr(pc.subprocess, "run", fake_run)
+    assert pc.terminal64_private_mb() == pytest.approx(49.0)
+    assert "PrivateMemorySize64" in seen[0]
+    assert "WorkingSet64" not in seen[0]
 
 
 def test_ensure_mt5_terminal_recycles_hollow(
@@ -128,10 +151,10 @@ def test_ensure_mt5_terminal_recycles_hollow(
     exe = tmp_path / "terminal64.exe"
     exe.write_bytes(b"mz")
     calls: list[list[str]] = []
-    ws_values = [7.0, 7.0, 95.0]
+    priv_values = [7.0, 7.0, 95.0]
 
-    def fake_ws() -> float | None:
-        return ws_values.pop(0) if ws_values else 95.0
+    def fake_priv() -> float | None:
+        return priv_values.pop(0) if priv_values else 95.0
 
     def fake_run(cmd, **_kwargs):  # noqa: ANN001
         calls.append(list(cmd))
@@ -142,7 +165,7 @@ def test_ensure_mt5_terminal_recycles_hollow(
         return _R()
 
     monkeypatch.setattr(pc.sys, "platform", "win32")
-    monkeypatch.setattr(pc, "terminal64_working_set_mb", fake_ws)
+    monkeypatch.setattr(pc, "terminal64_private_mb", fake_priv)
     monkeypatch.setattr(pc.subprocess, "run", fake_run)
     monkeypatch.setattr(pc.time, "sleep", lambda _s: None)
     ok, msg = pc.ensure_mt5_terminal(terminal_path=str(exe), wait_seconds=10)
@@ -168,7 +191,7 @@ def test_start_bot_live_continues_if_mt5_hollow(
     monkeypatch.setattr(pc.subprocess, "Popen", lambda *_a, **_k: _FakeProc())
     monkeypatch.setattr(pc.time, "sleep", lambda _s: None)
     monkeypatch.setattr(
-        pc, "ensure_mt5_terminal", lambda **_k: (False, "terminal64_hollow ws_mb=7.0")
+        pc, "ensure_mt5_terminal", lambda **_k: (False, "terminal64_hollow priv_mb=7.0")
     )
 
     class _Secrets:

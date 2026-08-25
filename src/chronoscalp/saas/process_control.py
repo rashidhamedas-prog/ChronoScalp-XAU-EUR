@@ -16,12 +16,15 @@ PID_FILE = ROOT / "data" / "user" / "bot.pid"
 _BOT_STDOUT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB — rotate before VPS disk fills
 _RUN_LIVE_MARKER = "run_live.py"
 DEFAULT_MT5_TERMINAL_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
-# Loaded terminal64 is typically ~80–150 MiB; a session-0 zombie is ~6–8 MiB.
-HOLLOW_MT5_WS_MB = 30.0
+# Private bytes, not working set: Windows trims the working set of an idle
+# background terminal to ~20–30 MiB, which made a healthy terminal look
+# hollow and got it killed every few minutes. Commit charge is not trimmed —
+# a loaded terminal stays above 40 MiB, a session-0 zombie under 20 MiB.
+HOLLOW_MT5_PRIVATE_MB = 20.0
 
 
-def terminal64_working_set_mb() -> float | None:
-    """Return ``terminal64`` working-set MiB, or ``None`` if it is not running."""
+def terminal64_private_mb() -> float | None:
+    """Return ``terminal64`` private-bytes MiB, or ``None`` if it is not running."""
     if sys.platform != "win32":
         return None
     try:
@@ -31,7 +34,7 @@ def terminal64_working_set_mb() -> float | None:
                 "-NoProfile",
                 "-Command",
                 "(Get-Process -Name terminal64 -ErrorAction SilentlyContinue "
-                "| Measure-Object WorkingSet64 -Maximum).Maximum",
+                "| Measure-Object PrivateMemorySize64 -Maximum).Maximum",
             ],
             capture_output=True,
             text=True,
@@ -51,25 +54,25 @@ def terminal64_working_set_mb() -> float | None:
 
 def ensure_mt5_terminal(
     *,
-    min_ws_mb: float = HOLLOW_MT5_WS_MB,
+    min_private_mb: float = HOLLOW_MT5_PRIVATE_MB,
     terminal_path: str | None = None,
     wait_seconds: float = 45.0,
 ) -> tuple[bool, str]:
     """Kill a hollow/missing ``terminal64`` and start it; wait until memory looks loaded.
 
-    A healthy logged-in terminal is typically well above ``min_ws_mb``. Session-0
-    zombies sit around 6–8 MiB and cause IPC timeout ``-10005``.
+    A healthy logged-in terminal is typically well above ``min_private_mb``.
+    Session-0 zombies sit around 6–8 MiB and cause IPC timeout ``-10005``.
     """
     if sys.platform != "win32":
         return True, "not-windows"
-    ws = terminal64_working_set_mb()
-    if ws is not None and ws >= min_ws_mb:
-        return True, f"terminal64_ok ws_mb={ws:.1f}"
+    priv = terminal64_private_mb()
+    if priv is not None and priv >= min_private_mb:
+        return True, f"terminal64_ok priv_mb={priv:.1f}"
 
     path = terminal_path or os.environ.get("MT5_TERMINAL_PATH") or DEFAULT_MT5_TERMINAL_PATH
     logger.warning(
-        "MT5 terminal hollow or missing (ws_mb={}); recycling {}",
-        None if ws is None else round(ws, 1),
+        "MT5 terminal hollow or missing (priv_mb={}); recycling {}",
+        None if priv is None else round(priv, 1),
         path,
     )
     subprocess.run(
@@ -119,15 +122,15 @@ def ensure_mt5_terminal(
             return False, f"mt5_start_failed:{exc}"
 
     deadline = time.time() + max(5.0, wait_seconds)
-    last_ws = terminal64_working_set_mb()
+    last_priv = terminal64_private_mb()
     while time.time() < deadline:
         time.sleep(5)
-        last_ws = terminal64_working_set_mb()
-        if last_ws is not None and last_ws >= min_ws_mb:
-            logger.info("MT5 terminal recycled ws_mb={:.1f}", last_ws)
-            return True, f"terminal64_recycled ws_mb={last_ws:.1f}"
-    detail = "none" if last_ws is None else f"{last_ws:.1f}"
-    return False, f"terminal64_hollow ws_mb={detail}"
+        last_priv = terminal64_private_mb()
+        if last_priv is not None and last_priv >= min_private_mb:
+            logger.info("MT5 terminal recycled priv_mb={:.1f}", last_priv)
+            return True, f"terminal64_recycled priv_mb={last_priv:.1f}"
+    detail = "none" if last_priv is None else f"{last_priv:.1f}"
+    return False, f"terminal64_hollow priv_mb={detail}"
 
 
 def _python_executable() -> str:
