@@ -1,9 +1,11 @@
 # Project Status
 
-- Last verified: 2026-08-24T21:25:00Z
-- Primary branch: main. Active implementer branch: `ai/TASK-002-xau-vwap-multistrat`.
-- Current release/state: Local overlay was a demo/shadow leftover (`broker: paper`, strategies=`delta`+`liquidity_volume`, `max_concurrent=1`) so live could not place MT5 orders and VWAP/SMC never evaluated. Live mode now ignores overlay `broker: paper`. Local overlay restored to settings.yaml strategies + MT5 + 3% heat. Session still `london_ny` (NY overlay 13:30–16:30 America/New_York). 1%/1.5R/3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- Last verified: 2026-08-25T12:05:00Z
+- Primary branch: main (`29463ec`). Implementer branch `ai/TASK-002-xau-vwap-multistrat` is merged into it; VPS `45.90.98.99` is on `main` at the same SHA, so a standard `_vps_full_deploy` no longer rolls anything back.
+- Current release/state: the live bot had opened no trades since 2026-08-21 because `watch_bot.ps1` judged MT5 health by working set, which Windows trims on idle terminals. It recycled a healthy MT5 and then killed the healthy bot every ~7 minutes (137 restarts on 2026-08-24). Watchdog health now reads private bytes and only recycles on real failure evidence; a connect counts as hung only when nothing resolves it. Verified: 22 min uptime with zero recycles while MT5 sat at `ws_mb=6.4` / `priv_mb=49.3`.
+- VPS overlay: symbols are `XAUUSD` + `EURUSD`. `BTCUSD` was removed because the broker lists it as `BTCUSD.ca`; re-adding crypto needs a `BTCUSD.ca` entry in `config/symbols.yaml` plus an alias, not just a symbols-list edit.
 - Telegram: simultaneous-OR picker; `پولبک VWAP (طلا)` cycles off → shadow → live.
 - VPS evidence (AUSCommercial-Demo, ~2026-06-27→2026-08-11) unchanged: XAUUSD cost-stress OK, EURUSD fail.
-- Next milestone: VPS is on `ccff6ea` live; merge to origin/main before the next `_vps_full_deploy`; denser XAUUSD OOS; EURUSD redesign.
+- Known noise: Finnhub calendar returns HTTP 403, so `news_straddle` has no event feed. `debug-ece9a8.log` instrumentation is still enabled.
+- Next milestone: observe a full London/NY session for the first live entry; denser XAUUSD OOS; EURUSD redesign.
 - Invariants: 1%/3% intact; live heat 3%; `CHRONOSCALP_CONFIRM_LIVE` unchanged.

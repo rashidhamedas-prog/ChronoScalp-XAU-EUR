@@ -2,6 +2,30 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-25 TASK-002 watchdog was killing the live bot every ~7 minutes
+
+- Time (UTC): 2026-08-25T12:05:00Z
+- Task / owner / role: TASK-002 / cursor:opus-5 / implementer
+- Objective: operator reported no trades opened since 2026-08-24. Find and fix the cause.
+- Root cause (VPS `45.90.98.99`, evidence in `logs/bot_watchdog.log` + `logs/chronoscalp_2026-08-25.log`):
+  - `watch_bot.ps1` treated `terminal64` **working set** `< 30 MB` as a hollow terminal. Windows trims the working set of an idle background terminal to ~20–28 MB within ~6 minutes, so a fully loaded MT5 looked hollow on a fixed cycle.
+  - Recycling MT5 severed the running bot's IPC link. The bot logged `Connecting to MT5`, and the `stuckConnect` check (last 20 log lines contain `Connecting to MT5` and not `ChronoScalp started`) then killed the healthy bot **in the same watchdog run**.
+  - Counts: 33 `recycling hollow` and 33 `kill hung MT5 connect` on 2026-08-25 up to 03:55; 137 `ChronoScalp started` lines on 2026-08-24. Bot lifetime was capped at ~7 minutes, so no strategy held enough rolling state (spread median/MA, structure, pendings) to reach an entry. Last journal trade: 2026-08-21.
+  - Secondary noise: overlay symbol `BTCUSD` does not exist on `AUSCommercial-Demo` (broker name is `BTCUSD.ca`), producing per-minute `symbol unavailable` + `Empty BTCUSD Mx — reconnect + retry` bursts.
+- Product changes:
+  - `scripts/watch_bot.ps1`: health reads **private bytes** (not trimmed by Windows); MT5 is recycled only on evidence (no process, unresolved IPC failure in the log, or hollow while no bot runs); terminals younger than 300s are never recycled; `Test-LiveConnectHung` requires no `Connected to MT5|ChronoScalp started|MT5 connect exhausted retries` after the last `Connecting to MT5`; no hang verdict in a run that just recycled MT5.
+  - `src/chronoscalp/saas/process_control.py`: `terminal64_working_set_mb` → `terminal64_private_mb`, `HOLLOW_MT5_WS_MB` → `HOLLOW_MT5_PRIVATE_MB = 20.0`, `min_ws_mb` → `min_private_mb`, messages report `priv_mb`.
+  - VPS overlay: `BTCUSD` dropped from `symbols` via `scripts/_vps_drop_unavailable_symbol.py` (gitignored local helper); backup `config/runtime_overrides.yaml.bak-20260825T113339Z` kept on the VPS.
+- Tests/gates (this session, actual):
+  - `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_watchdog_full` → exit 0 (full suite)
+  - `.venv\Scripts\python.exe -m ruff check src tests scripts/_vps_drop_unavailable_symbol.py` → All checks passed!
+  - `.venv\Scripts\python.exe -m black --check` on `process_control.py`, `test_process_control.py`, `_vps_drop_unavailable_symbol.py` → 3 files unchanged
+  - New regression test `test_terminal64_health_reads_private_bytes_not_working_set` pins the metric.
+- VPS verification (05:00 local / 12:00 UTC): HEAD `29463ec` on `main`; bot pid 2672 uptime 22.2 min with 22 consecutive `already running` watchdog runs and zero recycles/kills; MT5 `ws_mb=6.4` while `priv_mb=49.3` and quotes flowing — the old rule would have killed that terminal instantly; `btc_warnings=0` since restart.
+- Invariants: 1% per trade / 1.5 R:R / 3% heat and `CHRONOSCALP_CONFIRM_LIVE` untouched. No strategy or risk logic changed.
+- Open items: Finnhub calendar returns HTTP 403, so `news_straddle` has no event feed and logs `news_straddle_place_blocked` every tick. `XAUUSD:spread_ma` still blocks 3–6 ticks per 5 min — re-assess now that the spread MA is built from an uninterrupted session rather than a 7-minute window. `debug-ece9a8.log` instrumentation is still enabled.
+- Exact next action: watch a full London/NY session for the first live entry; if `spread_ma` dominates the skip heartbeat over a full session, review the spread-guard multiplier with fresh evidence before touching it.
+
 ## 2026-08-24 TASK-002 deployed ccff6ea live+Telegram on VPS
 
 - Time (UTC): 2026-08-24T21:25:00Z
