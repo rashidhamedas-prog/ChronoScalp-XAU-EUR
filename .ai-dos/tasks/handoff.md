@@ -167,12 +167,34 @@ shared `rvol >= 1.50` gate in `strategy/entry_trigger.py`.
 6. `partial_tp` rows record `pnl=0.00` for all 11 occurrences — journal
    accounting gap, separate from the exit-price fix.
 
+### Deployment hazard — do NOT use the standard deploy while entries are halted
+
+`scripts/_vps_full_deploy.ps1` must not be used to ship these fixes as-is:
+
+- Line 28 runs `git reset --hard origin/main`. `config/runtime_overrides.yaml`
+  is **tracked**, and the VPS copy diverges from the repo copy (VPS:
+  `symbols=[XAUUSD,EURUSD]`, `delta.allowed_symbols` includes EURUSD; repo:
+  `[BTCUSD, ETHUSD, XAUUSD_o, USDJPY_o, EURJPY_o]`, delta gold-only). A hard
+  reset would silently swap the live symbol set.
+- Line 47 deletes `data/state/STOP_TRADING`, i.e. the deploy **clears the kill
+  switch and resumes live trading** as its final step.
+
+To ship the fixes for validation only, update the VPS working copy without the
+restart/kill-switch phase (back up `config/runtime_overrides.yaml`, fetch, check
+out only `src/`, `config/settings.yaml`, `tests/`, restore the overlay), then run
+the detached validation. Fixing the deploy script to preserve the overlay and to
+respect an existing kill switch is a prerequisite for the next live deploy.
+
 ### Exact next action
 
-Run the cost-stress validation and limited walk-forward for both symbols on the
-VPS with the new Delta geometry, compare against the pre-fix baselines above,
-and only then decide whether EURUSD joins `allowed_symbols`. Leave
-`STOP_TRADING` in place until that evidence exists.
+1. Ship the fixes to the VPS working copy **without** `_vps_full_deploy.ps1`,
+   preserving `config/runtime_overrides.yaml` and the `STOP_TRADING` marker.
+2. Run `scripts/_vps_detach_cost_stress.ps1` (wraps
+   `run_cost_stress_validate.py --symbols XAUUSD EURUSD --last-days 45`) and
+   `scripts/_vps_detach_limited_wf.ps1`, then compare against the pre-fix
+   baselines above (XAUUSD PF 2.114 / +0.354R; EURUSD PF 0.591 / -0.15R).
+3. Only then decide whether EURUSD joins `allowed_symbols`, and only then clear
+   `STOP_TRADING`.
 
 ## 2026-08-25 TASK-002 watchdog was killing the live bot every ~7 minutes
 
