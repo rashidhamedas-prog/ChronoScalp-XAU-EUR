@@ -169,21 +169,27 @@ shared `rvol >= 1.50` gate in `strategy/entry_trigger.py`.
 
 ### Deployment hazard — do NOT use the standard deploy while entries are halted
 
-`scripts/_vps_full_deploy.ps1` must not be used to ship these fixes as-is:
+`scripts/_vps_full_deploy.ps1` line 47 deletes `data/state/STOP_TRADING`, i.e.
+the deploy **clears the kill switch and resumes live trading** as its final
+step, and it also restarts the live bot. Neither is wanted before validation.
+Making the deploy respect a pre-existing kill switch is a prerequisite for the
+next live deploy.
 
-- Line 28 runs `git reset --hard origin/main`. `config/runtime_overrides.yaml`
-  is **tracked**, and the VPS copy diverges from the repo copy (VPS:
-  `symbols=[XAUUSD,EURUSD]`, `delta.allowed_symbols` includes EURUSD; repo:
-  `[BTCUSD, ETHUSD, XAUUSD_o, USDJPY_o, EURJPY_o]`, delta gold-only). A hard
-  reset would silently swap the live symbol set.
-- Line 47 deletes `data/state/STOP_TRADING`, i.e. the deploy **clears the kill
-  switch and resumes live trading** as its final step.
+The overlay is **not** at risk from `git reset --hard`:
+`config/runtime_overrides.yaml` is gitignored (`.gitignore:52`) and untracked on
+the VPS (`git ls-files` empty), verified 2026-08-26 by
+`scripts/_vps_probe_procs_and_overlay.ps1`. An earlier version of this entry
+claimed the file was tracked; that was wrong. The overlay divergence is still
+worth knowing about — VPS runs `symbols=[XAUUSD,EURUSD]`, `enabled_strategies=
+[delta, liquidity_volume, xau_vwap_pullback]`, `delta.allowed_symbols=
+[XAUUSD, EURUSD]`, `xau_vwap_pullback.shadow_only=true`,
+`sessions=always_on_24h`, `daily_loss_limit_enabled=false` — but it survives a
+reset because it is ignored, not because the deploy protects it.
 
-To ship the fixes for validation only, update the VPS working copy without the
-restart/kill-switch phase (back up `config/runtime_overrides.yaml`, fetch, check
-out only `src/`, `config/settings.yaml`, `tests/`, restore the overlay), then run
-the detached validation. Fixing the deploy script to preserve the overlay and to
-respect an existing kill switch is a prerequisite for the next live deploy.
+Also verified: the apparent duplicate `run_live.py` processes are **one** logical
+bot. PID 3220 (`Program Files\Python312\python.exe`) is a child of PID 1640
+(`.venv\Scripts\python.exe`) — the venv launcher spawns the base interpreter.
+Same pattern for the API and Telegram processes. There is no double-order risk.
 
 ### Exact next action
 
