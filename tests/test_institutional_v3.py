@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from chronoscalp.execution.trade_manager import manage_open_position, partial_tp_action
 from chronoscalp.indicators.session_vwap import asian_range_midpoint, session_vwap
 from chronoscalp.risk.institutional_guards import (
+    SpreadMovingAverageGuard,
     ThreeStrikesGuard,
     correlation_blocks,
     correlation_guard_enabled,
@@ -62,6 +64,43 @@ def test_three_strikes_pauses_symbol():
     assert guard.is_paused("BTCUSD", at=now)
     guard.record_result("BTCUSD", 5, at=now + timedelta(hours=13))
     assert not guard.is_paused("BTCUSD", at=now + timedelta(hours=13))
+
+
+def test_spread_guard_passes_through_until_enough_samples():
+    guard = SpreadMovingAverageGuard(window=100, multiplier=2.5)
+    assert guard.baseline("EURUSD") is None
+    assert guard.allows("EURUSD", 5.0)
+    for _ in range(4):
+        guard.observe("EURUSD", 0.1)
+    assert guard.allows("EURUSD", 5.0)
+
+
+def test_spread_guard_median_baseline_ignores_spike_skew():
+    """Regression: a mean baseline let a few spikes block normal spreads.
+
+    Live EURUSD samples sit near 0.10-0.14 pips with occasional news spikes.
+    Those spikes drag the mean above the typical quote, and the old
+    ``mean * 1.2`` test then rejected ordinary 0.30-pip spreads.
+    """
+    guard = SpreadMovingAverageGuard(window=100, multiplier=2.5)
+    for _ in range(95):
+        guard.observe("EURUSD", 0.12)
+    for _ in range(5):
+        guard.observe("EURUSD", 8.0)
+
+    assert guard.baseline("EURUSD") == pytest.approx(0.12)
+    # A normal quote is accepted even though it is well above the mean (0.51).
+    assert guard.allows("EURUSD", 0.28)
+    # A genuine blow-out is still rejected.
+    assert not guard.allows("EURUSD", 1.5)
+
+
+def test_spread_guard_still_blocks_outliers_on_a_wide_symbol():
+    guard = SpreadMovingAverageGuard(window=20, multiplier=2.5)
+    for _ in range(20):
+        guard.observe("XAUUSD", 12.0)
+    assert guard.allows("XAUUSD", 28.0)
+    assert not guard.allows("XAUUSD", 35.0)
 
 
 def test_volatility_allows_bounds():

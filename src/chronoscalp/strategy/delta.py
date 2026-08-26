@@ -74,6 +74,49 @@ def _signal_timestamp(row: pd.Series) -> datetime:
     return row.name.to_pydatetime() if isinstance(row.name, pd.Timestamp) else datetime.now(UTC)
 
 
+def merge_symbol_config(config: dict[str, Any], symbol: str) -> dict[str, Any]:
+    """Return ``config`` with ``symbol_overrides[<root>]`` applied on top.
+
+    XAUUSD moves in dollars while EURUSD moves in fractions of a pip, so one
+    shared stop band cannot fit both. Each symbol may override any Delta key.
+    """
+    merged = dict(config)
+    overrides = config.get("symbol_overrides") or {}
+    if isinstance(overrides, dict):
+        root = _root(symbol)
+        for key, values in overrides.items():
+            if _root(str(key)) == root and isinstance(values, dict):
+                merged.update(values)
+    return merged
+
+
+def reference_stop_atr(
+    config: dict[str, Any], trigger_atr: float, higher_frames: list[pd.DataFrame]
+) -> float:
+    """ATR the stop distance is scaled from.
+
+    Defaults to the trigger frame for backwards compatibility. With
+    ``stop_atr_source: htf`` the stop scales off a higher timeframe instead,
+    because an M1 ATR is about one candle of noise: a stop of a small multiple
+    of it sits inside the ordinary spread-plus-noise band and is taken out
+    before the setup can resolve either way. ``stop_atr_htf_index`` selects
+    which higher frame (0 = nearest), clamped to what was supplied. Falls back
+    to the trigger ATR whenever the requested frame has no usable ATR.
+    """
+    if str(config.get("stop_atr_source", "trigger")).lower() != "htf":
+        return trigger_atr
+    if not higher_frames:
+        return trigger_atr
+    index = min(max(0, int(config.get("stop_atr_htf_index", 0))), len(higher_frames) - 1)
+    frame = higher_frames[index]
+    if frame is None or len(frame) == 0 or "atr" not in frame.columns:
+        return trigger_atr
+    value = frame["atr"].iloc[-1]
+    if pd.isna(value) or float(value) <= 0:
+        return trigger_atr
+    return max(trigger_atr, float(value))
+
+
 def generate_delta_signal(
     symbol: str,
     trigger_df: pd.DataFrame,
@@ -88,9 +131,12 @@ def generate_delta_signal(
 
     Entry requires aligned HTF bias plus either a sweep/reclaim of the recent
     M1 range or a close-and-retest breakout. Stops sit beyond structure with an
-    ATR buffer and must also clear estimated spread costs.
+    ATR buffer, clear a configurable share of round-trip spread cost, and are
+    scaled from ``reference_stop_atr`` — a higher timeframe when
+    ``stop_atr_source`` is ``htf`` — so the stop is not one M1 candle wide.
+    Per-symbol overrides are merged by :func:`merge_symbol_config`.
     """
-    cfg = config or {}
+    cfg = merge_symbol_config(config or {}, symbol)
     allowed = {_root(item) for item in cfg.get("allowed_symbols", ["XAUUSD", "EURUSD"])}
     if _root(symbol) not in allowed:
         return _none(symbol, "symbol_blocked")
@@ -152,7 +198,8 @@ def generate_delta_signal(
         signal_type = SignalType.SELL
         setup = "sweep_reclaim" if sweep else "breakout_retest"
 
-    buffer = float(cfg.get("stop_buffer_atr", 0.20)) * atr
+    ref_atr = reference_stop_atr(cfg, atr, higher_frames)
+    buffer = float(cfg.get("stop_buffer_atr", 0.20)) * ref_atr
     structural_distance = (
         close - structural_stop + buffer
         if signal_type == SignalType.BUY
@@ -164,12 +211,24 @@ def generate_delta_signal(
         spread_pips if spread_pips is not None else spec.get("typical_spread_pips", 0.0) or 0.0
     )
     spread_distance = effective_spread_pips * pip_size
+
+    # Entering and exiting each pay the spread, so a stop only a few spreads
+    # wide hands most of the risk budget to costs. Require the round trip to be
+    # at most ``max_cost_fraction_of_risk`` of the money at risk.
+    cost_fraction = float(cfg.get("max_cost_fraction_of_risk", 0.0))
+    cost_floor = (2.0 * spread_distance) / cost_fraction if cost_fraction > 0 else 0.0
+
+    max_stop = float(cfg.get("max_stop_atr", 2.5)) * ref_atr
+    if cost_floor > max_stop:
+        return _none(symbol, "cost_exceeds_stop_cap")
+
     stop_distance = max(
         structural_distance,
-        float(cfg.get("min_stop_atr", 0.8)) * atr,
+        float(cfg.get("min_stop_atr", 0.8)) * ref_atr,
         float(cfg.get("min_stop_spread_multiple", 2.0)) * spread_distance,
+        cost_floor,
     )
-    if stop_distance > float(cfg.get("max_stop_atr", 2.5)) * atr:
+    if stop_distance > max_stop:
         return _none(symbol, "stop_too_wide")
 
     rr = max(1.5, float(cfg.get("reward_risk_ratio", 1.8)))

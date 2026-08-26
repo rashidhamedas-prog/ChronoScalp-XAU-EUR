@@ -2,6 +2,178 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-26 TASK-003 three live-loss root causes fixed; entries halted
+
+- Time (UTC): 2026-08-26T13:40:00Z
+- Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer
+- Objective: operator reported that every trade since 2026-08-25 closed at a loss,
+  and asked why EURUSD barely trades. Find root causes, fix them, keep risk intact.
+
+### Claim reclaim notice (per AGENTS.md ownership rules)
+
+Reclaimed stale claims. Previous owners are notified here:
+
+- **TASK-001** (`cursor:grok-4.5`, heartbeat `2026-08-17T12:00:00Z`, 9 days stale):
+  `src/chronoscalp/strategy/delta.py`, `tests/test_delta_strategy.py`,
+  `tests/test_trade_journal.py`.
+- **TASK-002** (`cursor:grok-4.6`, heartbeat `2026-08-25T12:05:00Z`, >24h stale per
+  `.ai-dos/ai-dos.yaml` `stale_claim_hours: 24`): `config/settings.yaml`,
+  `src/chronoscalp/risk/position_sizing.py`,
+  `src/chronoscalp/orchestration/trade_journal.py`,
+  `src/chronoscalp/execution/mt5_broker.py`, `src/chronoscalp/main.py`,
+  `tests/test_risk.py`, `tests/test_execution_utils.py`.
+- Previously unclaimed: `src/chronoscalp/risk/institutional_guards.py`,
+  `src/chronoscalp/execution/mt5_utils.py`, `tests/test_institutional_v3.py`.
+
+This directly continues TASK-002's own recorded next action ("review the
+spread-guard multiplier with fresh evidence before touching it") — the evidence
+is below.
+
+### Live state
+
+Entries are **halted** on the VPS: `STOP_TRADING` kill-switch marker created via
+`scripts/_vps_halt_entries.ps1`; `MARKER_EXISTS=True`, `open_positions 0` at
+2026-08-26T13:05Z. Do not clear the marker until the validation below passes.
+
+### Evidence (VPS `45.90.98.99`, artifacts under `data/_analysis/`)
+
+Journal, 267 closed trades — `vps_journal_stats.txt`:
+
+| Split | n | win% | net PnL | PF |
+|---|---|---|---|---|
+| all | 267 | 23.2 | -31,724 | 0.65 |
+| `ultra_scalp` | 97 | 32.0 | -24,428 | 0.60 |
+| `delta` | 22 | 22.7 | -3,981 | 0.36 |
+| USDJPY | 27 | 18.5 | -18,498 | 0.24 |
+| EURUSD | 53 | 28.3 | -6,549 | 0.73 |
+| XAUUSD | 83 | 42.2 | -5,228 | 0.87 |
+| BTCUSD | 33 | **0.0** | -681 | 0.00 |
+| ETHUSD | 50 | **0.0** | -632 | 0.00 |
+
+- 255 of 267 closes are `exit_reason=external`; median losing hold time 1.1 min.
+- Live ATR/spread probe (`vps_atr_probe.txt`, 2026-08-26): XAUUSD M1 ATR $1.573
+  vs **median M1 bar range $1.495**, and the old Delta stop band was
+  $1.258–$3.932. EURUSD M1 ATR 0.94 pip vs median bar range 0.90 pip, band
+  0.75–2.34 pip. **The minimum permitted stop was narrower than one average
+  M1 candle on both symbols.**
+- Aggregated entry-skip heartbeats (488 heartbeats): `XAUUSD:spread_ma` 3571,
+  `EURUSD:spread_ma` 929, `EURUSD:delta:regime_neutral` 577,
+  `XAUUSD:delta:regime_neutral` 539, `XAUUSD:delta:low_rvol` 352,
+  `EURUSD:delta:low_rvol` 244, `BTCUSD:no_trigger_data` 4883,
+  `*:news_straddle_place_blocked` 5914/5914/4883.
+
+### Root causes fixed
+
+1. **`RiskManager.trailing_stop` trailed from the moment of entry.** No profit
+   precondition existed, so `current_price - 1.5*ATR` replaced any structural
+   stop wider than `1.5*ATR` immediately. Live polls every 2–5s
+   (`execution.poll_interval_seconds`), while `backtest/engine.py` calls
+   `apply_breakeven_or_trailing` **once per bar, on the bar close, after**
+   `check_sl_tp_hit`. That is a ~30x difference in how hard the bug bites, and
+   it explains why the XAUUSD backtest reads +17.08% (`validate_XAUUSD_last45d.json`)
+   while live gold is -$5,228. Fix: `trailing_start_r_multiple` (default 1.0),
+   R measured from `initial_stop_loss`.
+2. **`SpreadMovingAverageGuard` used a mean baseline with a 1.2 multiplier.**
+   Spread samples are right-skewed, so news spikes lifted the mean and normal
+   quotes were rejected (live: `EURUSD spread guard: 0.30 > MA0.11*1.20`). Fix:
+   median baseline, multiplier 2.5. Now blocks genuine blow-outs only.
+3. **`TradeJournal.record_external_close` stored `exit_price = entry_price`.**
+   Every externally closed row therefore read as zero price excursion, making
+   all exit-geometry analysis silently meaningless. Fix: real broker fill via
+   `mt5_utils.closing_deal_exit_price` (volume-weighted `DEAL_ENTRY_OUT` legs),
+   plumbed through `MT5Broker.fetch_closed_exit_price` and
+   `main._on_position_closed_externally`; unknown exits are now flagged
+   `exit_price_unknown` instead of faked. `r_multiple` was already PnL-derived
+   and is unaffected.
+
+### Delta geometry redesign
+
+- `stop_atr_source: htf` + `stop_atr_htf_index` scale the stop off a higher
+  timeframe instead of the M1 trigger bar (`higher_trend` is `["M15","M5"]`, so
+  index 1 = M5). `stop_buffer_atr` now scales off the same reference ATR.
+- `max_cost_fraction_of_risk: 0.15` forces round-trip spread to stay a minor
+  share of risk; a setup whose cost floor cannot fit under `max_stop_atr` is
+  rejected with the new reason `cost_exceeds_stop_cap`.
+- `symbol_overrides` block: XAUUSD `min/max_stop_atr 0.80/2.00`; EURUSD
+  `1.50/3.50` with `reward_risk_ratio 2.00`. Per-symbol tuning was impossible
+  before — one band had to fit both a dollar-quoted metal and a 5-digit FX pair.
+- Risk ceilings untouched: 1% per trade, 3% heat, `rr = max(1.5, ...)` floor,
+  `CHRONOSCALP_CONFIRM_LIVE` unchanged. Wider stops **reduce** lot size via
+  `calculate_position_size`, they do not raise risk.
+
+### Per-strategy EURUSD verdict (operator's question)
+
+The deployed VPS overlay is **not** the repo's `config/runtime_overrides.yaml`.
+VPS runs `symbols=[XAUUSD,EURUSD]` with `delta.allowed_symbols` including
+EURUSD; the repo file lists `[BTCUSD, ETHUSD, XAUUSD_o, USDJPY_o, EURJPY_o]`
+and `delta.allowed_symbols: [XAUUSD]`. Keep that divergence in mind.
+
+| Strategy | Evaluates EURUSD? | Dominant blocker |
+|---|---|---|
+| `delta` | yes (overlay) | `regime_neutral` 577, `low_rvol` 244 |
+| `smc_confluence` | yes | `low_rvol`, `trend_neutral`, `no_liquidity_sweep` |
+| `liquidity_volume` | yes | `low_rvol`, `trend_neutral` |
+| `xau_vwap_pullback` | **no** | `symbol_blocked` — `allowed_symbols: [XAUUSD]` by design |
+| `ultra_scalp` | disabled | `use_ultra_scalp: false` in overlay |
+| `news_straddle` | n/a | `news_straddle_place_blocked` (Finnhub 403, no feed) |
+
+So only `xau_vwap_pullback` hard-blocks EURUSD, and that is intentional for a
+gold VWAP strategy. Everywhere else EURUSD is evaluated and rejected by the
+shared `rvol >= 1.50` gate in `strategy/entry_trigger.py`.
+
+### Tests/gates (this session, actual)
+
+- `.venv\Scripts\python.exe -m pytest -q --basetemp .tmp_pytest_task003` → exit 0,
+  378 passed.
+- `.venv\Scripts\python.exe -m ruff check src tests` → All checks passed!
+- `.venv\Scripts\python.exe -m black --check src tests` → 2 files would be
+  reformatted: `src/chronoscalp/strategy/live_gates.py` and
+  `tests/test_analyze_spread_guard.py`. **Both pre-existing on `main`** (verified
+  by stashing this branch's changes and re-running). Neither is touched by this
+  task, so they were left alone rather than reformatted as unrelated churn.
+- New regression tests: 5 in `tests/test_risk.py` (trailing profit gate,
+  sell-side, R-from-initial-stop, opt-out at 0), 3 in `tests/test_institutional_v3.py`
+  (median baseline vs skew), 7 in `tests/test_delta_strategy.py` (trigger-ATR
+  anchoring rejects normal structure, HTF anchoring accepts it, cost floor, cost
+  cap rejection, EURUSD override, config merge, ATR fallbacks), 3 in
+  `tests/test_trade_journal.py` (real exit price, unknown flagged, non-positive
+  rejected), 4 in `tests/test_execution_utils.py` (fresh position untouched,
+  deal parsing incl. partial closes).
+
+### Open items — none of this is validated for live money yet
+
+1. **Required before clearing the kill switch**: broker-native backtest with real
+   costs + walk-forward on XAUUSD *and* EURUSD using the new geometry
+   (`scripts/run_cost_stress_validate.py`, `scripts/_vps_limited_walkforward.ps1`).
+   The prior EURUSD rejection (`validate_EURUSD_last45d.json`: 17 trades, PF 0.591,
+   expectancy -0.15R; `wf_limited_EURUSD.json`: 5 OOS trades, all losers) was
+   measured with M1-ATR stops and the unconditional trail, so it does **not**
+   carry over — but it is not evidence in favour either. `allowed_symbols` in
+   `config/settings.yaml` deliberately still reads `[XAUUSD]`.
+2. **The backtest does not model the live gates it needs to.** `spread_ma_guard`,
+   `volatility_guard`, `three_strikes`, `mistake_memory` are all in
+   `LIVE_ONLY_GATES`, and trailing is sampled once per bar instead of every
+   2–5s. Until that gap closes, a positive backtest cannot clear a strategy for
+   live. This is the highest-value follow-up.
+3. **`rvol >= 1.50` in `strategy/entry_trigger.py` is untouched and suspect.**
+   151 logged rejections span rvol 0.19–1.49 (median 0.94). The sample contains
+   only rejections so it cannot yield a pass rate — instrument accepted bars
+   before changing the threshold.
+4. **BTCUSD/ETHUSD: 83 trades, 0 wins**, alongside `BTCUSD:no_trigger_data` 4883.
+   Broker symbol is `BTCUSD.ca` on `AUSCommercial-Demo`. Crypto handling is
+   broken, not merely unprofitable — investigate separately.
+5. **`ultra_scalp` is -$24,428 of the -$31,724 total** (77%). It is disabled in
+   the current overlay; keep it disabled until it is re-validated.
+6. `partial_tp` rows record `pnl=0.00` for all 11 occurrences — journal
+   accounting gap, separate from the exit-price fix.
+
+### Exact next action
+
+Run the cost-stress validation and limited walk-forward for both symbols on the
+VPS with the new Delta geometry, compare against the pre-fix baselines above,
+and only then decide whether EURUSD joins `allowed_symbols`. Leave
+`STOP_TRADING` in place until that evidence exists.
+
 ## 2026-08-25 TASK-002 watchdog was killing the live bot every ~7 minutes
 
 - Time (UTC): 2026-08-25T12:05:00Z

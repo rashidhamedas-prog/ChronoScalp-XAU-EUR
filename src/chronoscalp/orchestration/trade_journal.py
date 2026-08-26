@@ -652,6 +652,7 @@ class TradeJournal:
         *,
         at: datetime | None = None,
         strategy: str | None = None,
+        exit_price: float | None = None,
     ) -> ClosedTradeRecord | None:
         """Record a broker-side close matched to a journal open row.
 
@@ -660,6 +661,11 @@ class TradeJournal:
         ``initial_stop_loss`` when available and symbol pip specs from
         ``symbols_cfg``; missing specs or implausible |R|>10 yield ``r_multiple=0``
         with a ``data_quality`` flag rather than a price-distance fallback.
+
+        ``exit_price`` is the broker's real closing fill when the caller could
+        read it. When it is unknown the entry price is stored as a placeholder
+        **and** flagged ``exit_price_unknown``, so exit-geometry analysis can
+        exclude those rows instead of silently reading them as zero excursion.
         """
         open_rec = self._pop_open(ticket, symbol=symbol, strategy=strategy)
         if open_rec is None:
@@ -708,6 +714,12 @@ class TradeJournal:
                 r_multiple = 0.0
                 quality_flags.append("implausible_r")
 
+        resolved_exit = entry
+        if exit_price is not None and float(exit_price) > 0:
+            resolved_exit = float(exit_price)
+        else:
+            quality_flags.append("exit_price_unknown")
+
         open_time_str = open_rec.open_time or ""
         close_time_str = _dt_to_iso(at) or _utc_now_iso()
         opened_at = _parse_iso(open_time_str)
@@ -726,7 +738,7 @@ class TradeJournal:
             direction=open_rec.direction,
             volume=float(open_rec.volume),
             entry_price=entry,
-            exit_price=entry,
+            exit_price=resolved_exit,
             open_time=open_time_str,
             close_time=close_time_str,
             pnl=realized,

@@ -546,3 +546,82 @@ def test_breakeven_stop_uses_initial_sl_and_never_widens():
         initial_stop_loss=1990.0,
     )
     assert rm.breakeven_stop(fresh, current_price=2010.0) == pytest.approx(2000.0)
+
+
+def _trailing_rm(**risk_cfg) -> RiskManager:
+    cfg = {"trailing_stop_atr_multiple": 1.5, "trailing_start_r_multiple": 1.0}
+    cfg.update(risk_cfg)
+    return RiskManager(
+        risk_cfg=cfg,
+        spread_cfg={"enabled": False},
+        symbols_cfg={"XAUUSD": XAUUSD_SPEC},
+        starting_equity=10_000,
+    )
+
+
+def _trailing_position(direction: SignalType, *, stop_loss: float) -> Position:
+    return Position(
+        ticket=1,
+        symbol="XAUUSD",
+        direction=direction,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=stop_loss,
+        take_profit=2018.0 if direction == SignalType.BUY else 1982.0,
+        open_time=datetime.now(tz=UTC),
+        initial_stop_loss=stop_loss,
+    )
+
+
+def test_trailing_stop_does_not_tighten_before_profit_gate():
+    """Regression: the trail used to fire from the moment of entry.
+
+    With a $10 structural stop and ATR 4.0, ``price - 1.5*ATR`` is 1994.0 at
+    entry — $6 tighter than the intended stop — so a flat or barely-profitable
+    trade had its stop yanked into noise range. Live polls every 2-5s, so this
+    happened within seconds of opening.
+    """
+    rm = _trailing_rm()
+    pos = _trailing_position(SignalType.BUY, stop_loss=1990.0)
+
+    assert rm.trailing_stop(pos, current_price=2000.0, atr_value=4.0) is None
+    # Still short of 1R (needs +$10).
+    assert rm.trailing_stop(pos, current_price=2009.0, atr_value=4.0) is None
+
+
+def test_trailing_stop_engages_once_position_is_one_r_in_profit():
+    rm = _trailing_rm()
+    pos = _trailing_position(SignalType.BUY, stop_loss=1990.0)
+
+    trailed = rm.trailing_stop(pos, current_price=2012.0, atr_value=4.0)
+    assert trailed == pytest.approx(2006.0)
+    assert trailed > pos.stop_loss
+
+
+def test_trailing_stop_gate_applies_to_sell_side():
+    rm = _trailing_rm()
+    pos = _trailing_position(SignalType.SELL, stop_loss=2010.0)
+
+    assert rm.trailing_stop(pos, current_price=2000.0, atr_value=4.0) is None
+    assert rm.trailing_stop(pos, current_price=1991.0, atr_value=4.0) is None
+    assert rm.trailing_stop(pos, current_price=1988.0, atr_value=4.0) == pytest.approx(1994.0)
+
+
+def test_trailing_stop_measures_r_from_initial_stop_not_trailed_stop():
+    """A stop already moved to breakeven must not re-scale the profit gate."""
+    rm = _trailing_rm()
+    pos = _trailing_position(SignalType.BUY, stop_loss=1990.0)
+    pos.stop_loss = 2000.0  # breakeven already taken
+
+    # +$9 is under 1R of the *initial* $10 risk, so no trail yet.
+    assert rm.trailing_stop(pos, current_price=2009.0, atr_value=4.0) is None
+    # +$12 clears 1R; 2012 - 6 = 2006 is tighter than the breakeven stop.
+    assert rm.trailing_stop(pos, current_price=2012.0, atr_value=4.0) == pytest.approx(2006.0)
+
+
+def test_trailing_start_zero_restores_immediate_trailing():
+    """Operators can opt back into the old behaviour explicitly."""
+    rm = _trailing_rm(trailing_start_r_multiple=0.0)
+    pos = _trailing_position(SignalType.BUY, stop_loss=1990.0)
+
+    assert rm.trailing_stop(pos, current_price=2000.0, atr_value=4.0) == pytest.approx(1994.0)
