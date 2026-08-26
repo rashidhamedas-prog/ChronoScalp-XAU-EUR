@@ -10,8 +10,15 @@
 - [x] Broker-native history on VPS AUSCommercial-Demo: `XAUUSD`/`EURUSD` M1/M5/M15 (~100k M1/M5; not LiteFinance `_o`) — see `docs/STRATEGY_RESEARCH.md`
 - [x] Limited 45d baseline + 1.5× cost-stress (2026-08-12): XAUUSD survives (E[R]≈0.35, PF≈2.11); EURUSD fails (E[R]<0) — live still disabled
 - [x] Applied evidence to config: EURUSD removed from active symbols; Delta gold-only (`allowed_symbols: [XAUUSD]`)
+- [x] Live-loss forensics (2026-08-26): 267 journal trades, 23.2% win rate, −$31,724. Root causes fixed — ATR trailing stop engaged from entry instead of after 1R; spread guard used a mean baseline on a right-skewed distribution; `record_external_close` stored `exit_price = entry_price`, corrupting all exit-geometry analysis. See `.ai-dos/tasks/handoff.md` (TASK-003).
+- [x] Delta stop geometry rebuilt: stops scale from a configurable higher-timeframe ATR (`stop_atr_source`/`stop_atr_htf_index`) instead of the M1 trigger bar, which measured narrower than one average M1 candle on both symbols; added `max_cost_fraction_of_risk` and per-symbol `symbol_overrides`
+- [ ] **In progress:** re-run baseline + 1.5× cost-stress on the new geometry over the identical 2026-06-27..2026-08-11 window, so the delta versus the pre-fix numbers (XAUUSD PF 2.114 / E[R] +0.354; EURUSD PF 0.591 / E[R] −0.150) isolates the code change
+- [ ] Close the backtest↔live parity gap before trusting any backtest: `spread_ma_guard`, `volatility_guard`, `three_strikes`, `mistake_memory` are in `LIVE_ONLY_GATES`, and trailing is sampled once per bar versus every 2–5s live
 - [ ] Longer-horizon WF / denser OOS for XAUUSD; **EURUSD strategy redesign**
 - [ ] Cost-stressed Monte Carlo analysis and 100+ demo trades per symbol
+- [ ] Recalibrate the shared `rvol >= 1.50` gate in `strategy/entry_trigger.py` — dominant rejection reason for both symbols; instrument accepted bars before changing it
+- [ ] Investigate BTCUSD/ETHUSD: 83 journal trades with **zero** wins plus 4,883 `no_trigger_data` skips — broken, not merely unprofitable
+- [ ] Make `scripts/_vps_full_deploy.ps1` respect an existing `STOP_TRADING` marker (it currently deletes it, resuming live trading as the final deploy step); use `scripts/_vps_safe_code_update.ps1` until then
 - [ ] **Do not enable live** until denser WF/OOS + EUR redesign gates pass; keep 1%/3%
 
 Status legend: ✅ scaffolded with real logic · 🟡 stubbed / partial · ⬜ not started
