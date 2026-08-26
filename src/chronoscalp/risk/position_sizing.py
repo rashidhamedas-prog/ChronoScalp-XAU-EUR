@@ -493,10 +493,35 @@ class RiskManager:
     def trailing_stop(
         self, position: Position, current_price: float, atr_value: float
     ) -> float | None:
-        """ATR-based trailing stop. Returns a new SL only if it's tighter
-        than the current one (never widens risk)."""
-        multiple = self.risk_cfg.get("trailing_stop_atr_multiple", 1.5)
-        if position.direction.value == "buy":
+        """ATR-based trailing stop, engaged only once the position is at least
+        ``trailing_start_r_multiple`` R in profit.
+
+        R is measured from the *initial* stop. Without the profit gate a trade
+        can be trailed from the moment it is opened: ``current_price -
+        multiple * atr`` sits far inside a structural stop whenever the stop is
+        wider than ``multiple * atr``, so the stop is pulled to noise distance
+        before the setup has had room to work. Returns a new SL only if it is
+        tighter than the current one (never widens risk).
+        """
+        multiple = float(self.risk_cfg.get("trailing_stop_atr_multiple", 1.5))
+        start_r = float(self.risk_cfg.get("trailing_start_r_multiple", 1.0))
+        sl0 = (
+            position.initial_stop_loss
+            if position.initial_stop_loss is not None
+            else position.stop_loss
+        )
+        risk = abs(position.entry_price - sl0)
+        if risk <= 0:
+            return None
+
+        is_buy = position.direction.value == "buy"
+        favorable_move = (
+            current_price - position.entry_price if is_buy else position.entry_price - current_price
+        )
+        if favorable_move < start_r * risk:
+            return None
+
+        if is_buy:
             candidate = current_price - multiple * atr_value
             if candidate > position.stop_loss:
                 return candidate

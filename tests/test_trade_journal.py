@@ -332,6 +332,69 @@ def test_external_close_r_uses_initial_stop_not_trailed(tmp_path: Path) -> None:
     assert closed.r_multiple == -1.0
 
 
+def _eurusd_journal_with_open(tmp_path: Path, ticket: int) -> TradeJournal:
+    journal = TradeJournal(
+        tmp_path / "j.json",
+        mode="live",
+        symbols_cfg={"EURUSD": {"pip_size": 0.0001, "pip_value_per_lot": 10.0}},
+    )
+    journal.record_open(
+        Position(
+            ticket=ticket,
+            symbol="EURUSD",
+            direction=SignalType.BUY,
+            volume=1.0,
+            entry_price=1.10000,
+            stop_loss=1.09900,
+            take_profit=1.10150,
+            open_time=datetime(2026, 7, 17, 10, 0, tzinfo=UTC),
+            initial_stop_loss=1.09900,
+        )
+    )
+    return journal
+
+
+def test_external_close_records_broker_exit_price(tmp_path: Path) -> None:
+    journal = _eurusd_journal_with_open(tmp_path, 40)
+    closed = journal.record_external_close(
+        40,
+        "EURUSD",
+        -100.0,
+        at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC),
+        exit_price=1.09900,
+    )
+    assert closed is not None
+    assert closed.exit_price == 1.09900
+    assert closed.exit_price != closed.entry_price
+    assert "exit_price_unknown" not in (closed.data_quality or "")
+
+
+def test_external_close_flags_unknown_exit_price_instead_of_faking_it(tmp_path: Path) -> None:
+    """Regression: an unknown exit was stored as the entry price, unflagged.
+
+    Every externally closed row then read as zero price excursion, which made
+    exit-geometry analysis silently meaningless. The placeholder stays (the
+    field is non-optional) but is now flagged so it can be excluded.
+    """
+    journal = _eurusd_journal_with_open(tmp_path, 41)
+    closed = journal.record_external_close(
+        41, "EURUSD", -100.0, at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC)
+    )
+    assert closed is not None
+    assert "exit_price_unknown" in (closed.data_quality or "")
+    # PnL-derived R is unaffected — it never depended on exit_price.
+    assert closed.r_multiple == -1.0
+
+
+def test_external_close_rejects_nonpositive_exit_price(tmp_path: Path) -> None:
+    journal = _eurusd_journal_with_open(tmp_path, 42)
+    closed = journal.record_external_close(
+        42, "EURUSD", -100.0, at=datetime(2026, 7, 17, 11, 0, tzinfo=UTC), exit_price=0.0
+    )
+    assert closed is not None
+    assert "exit_price_unknown" in (closed.data_quality or "")
+
+
 def test_orphan_external_close_returns_none(tmp_path: Path) -> None:
     """No matching open row → fail closed; do not write blank volume=0 rows."""
     journal = TradeJournal(tmp_path / "j.json", mode="live")

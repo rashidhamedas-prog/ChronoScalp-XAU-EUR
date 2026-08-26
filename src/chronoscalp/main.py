@@ -214,7 +214,7 @@ class TradingBot:
         spread_ma_cfg = risk_cfg.get("spread_ma_guard") or {}
         self.spread_ma_guard = SpreadMovingAverageGuard(
             window=int(spread_ma_cfg.get("window", 100)),
-            multiplier=float(spread_ma_cfg.get("multiplier", 1.2)),
+            multiplier=float(spread_ma_cfg.get("multiplier", 2.5)),
         )
         self.spread_ma_enabled = bool(spread_ma_cfg.get("enabled", True))
         self.corr_cfg = risk_cfg.get("correlation") or {}
@@ -2555,11 +2555,18 @@ class TradingBot:
         self, symbol: str, ticket: int, now: datetime, *, strategy: str | None = None
     ) -> None:
         pnl: float | None = None
+        exit_price: float | None = None
         if self.mode == "live" and isinstance(self.broker, (MT5Broker, OANDABroker)):
             pnl = self.broker.fetch_closed_pnl(ticket)
+            reader = getattr(self.broker, "fetch_closed_exit_price", None)
+            if callable(reader):
+                try:
+                    exit_price = reader(ticket)
+                except Exception as exc:  # broker/history hiccup must not lose the close
+                    logger.warning("Exit price unavailable for ticket={}: {}", ticket, exc)
 
         closed = self.trade_journal.record_external_close(
-            ticket, symbol, pnl, at=now, strategy=strategy
+            ticket, symbol, pnl, at=now, strategy=strategy, exit_price=exit_price
         )
 
         if pnl is not None:

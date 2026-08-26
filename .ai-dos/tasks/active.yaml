@@ -1,5 +1,66 @@
 schema_version: 1
 tasks:
+  - id: "TASK-003"
+    title: "Fix live loss root causes and per-symbol Delta geometry (XAUUSD + EURUSD)"
+    status: "in_progress"
+    risk: "critical"
+    owner: "cursor:claude-opus-5"
+    roles:
+      architect: "cursor:claude-opus-5"
+      implementer: "cursor:claude-opus-5"
+      reviewer: "independent-agent-required-before-merge"
+      security: "independent-agent-required-before-merge"
+    branch: "ai/TASK-003-loss-rootcause-eurusd"
+    worktree: "D:/soft/Claud/porje/ChronoScalp s3"
+    claimed_at: "2026-08-26T13:20:00Z"
+    heartbeat_at: "2026-08-26T13:20:00Z"
+    depends_on: []
+    file_claims:
+      - "config/settings.yaml"
+      - "src/chronoscalp/risk/institutional_guards.py"
+      - "src/chronoscalp/risk/position_sizing.py"
+      - "src/chronoscalp/strategy/delta.py"
+      - "src/chronoscalp/orchestration/trade_journal.py"
+      - "src/chronoscalp/execution/mt5_broker.py"
+      - "src/chronoscalp/execution/broker.py"
+      - "src/chronoscalp/execution/paper_broker.py"
+      - "src/chronoscalp/main.py"
+      - "docs/STRATEGY_DELTA.md"
+      - "src/chronoscalp/execution/mt5_utils.py"
+      - "tests/test_delta_strategy.py"
+      - "tests/test_risk.py"
+      - "tests/test_trade_journal.py"
+      - "tests/test_institutional_v3.py"
+      - "tests/test_execution_utils.py"
+      - "scripts/_vps_forensic_audit.ps1"
+      - "scripts/_vps_halt_entries.ps1"
+      - "scripts/_vps_trade_window.ps1"
+      - "scripts/_vps_journal_stats.py"
+      - "scripts/_vps_atr_spread_probe.py"
+      - ".ai-dos/tasks/active.yaml"
+      - ".ai-dos/tasks/handoff.md"
+      - ".ai-dos/project/status.md"
+    acceptance_criteria:
+      - "Trailing stop never tightens a stop before the position is at least trailing_start_r_multiple R in profit; regression test covers entry-time invocation."
+      - "Trade journal records the broker's real exit price for externally closed positions; r_multiple is never derived from exit_price == entry_price."
+      - "Spread outlier guard uses a robust (median) baseline so ordinary spreads are not rejected; regression test covers a right-skewed sample."
+      - "Delta sizes stops from a configurable higher-timeframe ATR with a per-symbol override block, so an M1 noise-scale stop is no longer possible."
+      - "EURUSD and XAUUSD each have explicit Delta parameters; no strategy silently blocks a symbol the operator selected."
+      - "Risk stays capped at 1% per trade, 3% portfolio heat, and min 1.5 R:R; CHRONOSCALP_CONFIRM_LIVE untouched."
+      - "pytest, ruff, and black pass; live re-enable stays blocked until broker-native backtest + walk-forward evidence exists for both symbols."
+    validation:
+      - ".venv/Scripts/python.exe -m pytest -q --basetemp .tmp_pytest_task003"
+      - ".venv/Scripts/python.exe -m ruff check src tests"
+      - ".venv/Scripts/python.exe -m black --check src tests"
+    notes: >-
+      Reclaimed stale claims: TASK-001 (heartbeat 2026-08-17, 9 days stale) for
+      strategy/delta.py, docs/STRATEGY_DELTA.md, tests/test_delta_strategy.py,
+      tests/test_trade_journal.py; TASK-002 (heartbeat 2026-08-25T12:05, >24h
+      stale) for config/settings.yaml, risk/position_sizing.py,
+      orchestration/trade_journal.py, execution/*.py, main.py, tests/test_risk.py.
+      institutional_guards.py and tests/test_institutional_guards.py were
+      unclaimed. Reason recorded in handoff.md. Live entries are halted via the
+      STOP_TRADING kill-switch marker on the VPS for the duration of this task.
   - id: "TASK-002"
     title: "Independent multi-strategy execution + xau_vwap_pullback (shadow-only)"
     status: "in_progress"

@@ -47,6 +47,32 @@ signal-quality parameters. Do not optimize the 1% risk ceiling or 1.5R floor.
 Tune XAUUSD and EURUSD separately; never select parameters on the same period
 used to report performance.
 
+### Stop scale (revised 2026-08-26)
+
+Delta originally scaled its stop from the **trigger-bar** ATR. Measured live on
+2026-08-26 (`data/_analysis/vps_atr_probe.txt`), that produced stops narrower
+than one average M1 candle on both symbols:
+
+| Symbol | M1 ATR(14) | median M1 bar range | old stop band (0.8–2.5x M1 ATR) |
+|---|---|---|---|
+| XAUUSD | $1.573 | $1.495 | $1.258 – $3.932 |
+| EURUSD | 0.94 pip | 0.90 pip | 0.75 – 2.34 pip |
+
+A stop that small is inside the ordinary noise band, so the outcome of a trade
+was decided by the next tick rather than by the setup. Two keys change that:
+
+- `stop_atr_source: htf` scales the stop (and `stop_buffer_atr`) from a higher
+  timeframe. `stop_atr_htf_index` picks which one, counted along
+  `timeframes.higher_trend` — currently `["M15", "M5"]`, so index `1` is M5.
+  Falls back to the trigger ATR if that frame has no usable ATR.
+- `max_cost_fraction_of_risk` caps round-trip spread as a share of the money at
+  risk. A setup whose cost floor will not fit under `max_stop_atr` is rejected
+  with reason `cost_exceeds_stop_cap` rather than taken at a bad cost ratio.
+
+`symbol_overrides.<ROOT>` overrides any Delta key per symbol, matched on the
+root so broker suffixes (`XAUUSD_o`) resolve correctly. Widening a stop lowers
+lot size through `calculate_position_size`; it never increases risk.
+
 ## Telegram control
 
 Open `تنظیمات → استراتژی‌ها`, toggle `دلتا`, then tap
@@ -65,6 +91,17 @@ Telegram never bypasses the live-confirmation or risk gates.
 4. Run Monte Carlo trade-order and cost stress tests (spread/slippage >=1.5x).
 5. Forward-test on demo for at least 100 trades per symbol and four weeks.
 6. Keep `CHRONOSCALP_CONFIRM_LIVE` disabled until all gates pass.
+7. The backtest must model the gates that actually fire live. As of 2026-08-26
+   `spread_ma_guard`, `volatility_guard`, `three_strikes`, and `mistake_memory`
+   sit in `LIVE_ONLY_GATES` (`src/chronoscalp/backtest/engine.py`), and
+   `apply_breakeven_or_trailing` runs once per bar on the close, whereas live
+   calls it every `execution.poll_interval_seconds` (2–5s). A backtest result
+   is not comparable to live behaviour until that gap is closed or bounded.
+
+Prior EURUSD results (`data/_analysis/validate_EURUSD_last45d.json`,
+`wf_limited_EURUSD.json`) were produced with trigger-ATR stops and the
+pre-fix unconditional trailing stop. They do not transfer to the current
+geometry in either direction — re-measure rather than cite them.
 
 ## Data needed from the operator
 

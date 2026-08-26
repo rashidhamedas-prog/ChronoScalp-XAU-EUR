@@ -8,6 +8,7 @@ import pytest
 
 from chronoscalp.execution.mt5_utils import (
     StaleStopsError,
+    closing_deal_exit_price,
     resolve_order_filling_mode,
     sanitize_mt5_comment,
     spread_points_to_pips,
@@ -239,3 +240,64 @@ def test_apply_breakeven_never_widens_after_trail():
     new_sl = apply_breakeven_or_trailing(rm, position, current_price=2020.0, atr_value=5.0)
     assert new_sl is None or new_sl > position.stop_loss
     assert rm.breakeven_stop(position, 2020.0) is None
+
+
+def test_apply_breakeven_or_trailing_leaves_a_fresh_position_alone():
+    """Regression: a just-opened position had its stop trailed immediately.
+
+    Entry 2000 with a $10 structural stop and ATR 5 gave a trail candidate of
+    2020 - 7.5 = 1992.5 even at breakeven, tightening $7.50 of the $10 risk
+    away before the setup had room to work.
+    """
+    from chronoscalp.risk.position_sizing import RiskManager
+
+    rm = RiskManager(
+        risk_cfg={
+            "breakeven_at_r_multiple": 1.0,
+            "trailing_stop_atr_multiple": 1.5,
+            "trailing_start_r_multiple": 1.0,
+        },
+        spread_cfg={"enabled": False},
+        symbols_cfg={},
+        starting_equity=10_000,
+    )
+    position = Position(
+        ticket=10,
+        symbol="XAUUSD",
+        direction=SignalType.BUY,
+        volume=0.1,
+        entry_price=2000.0,
+        stop_loss=1990.0,
+        take_profit=2018.0,
+        open_time=datetime.now(tz=UTC),
+        initial_stop_loss=1990.0,
+    )
+    assert apply_breakeven_or_trailing(rm, position, current_price=2000.0, atr_value=5.0) is None
+    assert apply_breakeven_or_trailing(rm, position, current_price=2004.0, atr_value=5.0) is None
+    # At 1R the breakeven rule takes over and moves the stop to entry.
+    assert apply_breakeven_or_trailing(rm, position, current_price=2010.0, atr_value=5.0) == 2000.0
+
+
+def test_closing_deal_exit_price_uses_only_closing_legs():
+    deals = [
+        SimpleNamespace(entry=0, price=1.10000, volume=1.0),  # DEAL_ENTRY_IN
+        SimpleNamespace(entry=1, price=1.09900, volume=1.0),  # DEAL_ENTRY_OUT
+    ]
+    assert closing_deal_exit_price(deals) == pytest.approx(1.09900)
+
+
+def test_closing_deal_exit_price_volume_weights_partial_closes():
+    deals = [
+        SimpleNamespace(entry=0, price=2000.0, volume=1.0),
+        SimpleNamespace(entry=1, price=2010.0, volume=0.75),
+        SimpleNamespace(entry=1, price=2030.0, volume=0.25),
+    ]
+    assert closing_deal_exit_price(deals) == pytest.approx(2015.0)
+
+
+def test_closing_deal_exit_price_returns_none_without_closing_legs():
+    assert closing_deal_exit_price([]) is None
+    assert closing_deal_exit_price(None) is None
+    assert closing_deal_exit_price([SimpleNamespace(entry=0, price=2000.0, volume=1.0)]) is None
+    # Malformed leg (zero price/volume) must not be averaged in.
+    assert closing_deal_exit_price([SimpleNamespace(entry=1, price=0.0, volume=1.0)]) is None

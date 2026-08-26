@@ -225,3 +225,38 @@ def fetch_closed_position_pnl(ticket: int) -> float | None:
     if not deals:
         return None
     return float(sum(d.profit + d.swap + d.commission for d in deals))
+
+
+def closing_deal_exit_price(deals: object) -> float | None:
+    """Volume-weighted exit price of the closing deals in ``deals``.
+
+    ``deals`` is the sequence returned by ``history_deals_get(position=...)``.
+    Only ``DEAL_ENTRY_OUT``/``DEAL_ENTRY_OUT_BY`` legs count, so a partially
+    closed position yields the average price actually filled on the way out
+    rather than the entry price. Kept separate from the MT5 call so it can be
+    unit-tested on any platform.
+    """
+    # DEAL_ENTRY_OUT = 1, DEAL_ENTRY_OUT_BY = 3 (MT5 ENUM_DEAL_ENTRY).
+    closing_entries = (1, 3)
+    weighted = 0.0
+    volume = 0.0
+    for deal in deals or ():
+        if int(getattr(deal, "entry", -1)) not in closing_entries:
+            continue
+        price = float(getattr(deal, "price", 0.0) or 0.0)
+        lots = float(getattr(deal, "volume", 0.0) or 0.0)
+        if price <= 0 or lots <= 0:
+            continue
+        weighted += price * lots
+        volume += lots
+    if volume <= 0:
+        return None
+    return weighted / volume
+
+
+def fetch_closed_position_exit_price(ticket: int) -> float | None:
+    """Broker-reported exit price for a closed position, or None if unavailable."""
+    _require_windows()
+    import MetaTrader5 as mt5
+
+    return closing_deal_exit_price(mt5.history_deals_get(position=ticket))

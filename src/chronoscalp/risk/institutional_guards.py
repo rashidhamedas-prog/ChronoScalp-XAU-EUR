@@ -69,30 +69,43 @@ class ThreeStrikesGuard:
 
 @dataclass
 class SpreadMovingAverageGuard:
-    """Reject when current spread > MA(last N samples) * multiplier."""
+    """Reject when the current spread is an outlier versus recent history.
+
+    The baseline is the **median** of the window, not the mean. Intraday spread
+    samples are right-skewed: a handful of news/rollover spikes drag the mean
+    above the typical quote, and a mean-based test with a small multiplier then
+    rejects a large share of perfectly normal spreads. The median is unmoved by
+    those spikes, so ``multiplier`` means what it reads as — "this quote is N
+    times the typical spread".
+    """
 
     window: int = 100
-    multiplier: float = 1.2
+    multiplier: float = 2.5
     _history: dict[str, deque[float]] = field(default_factory=dict)
 
     def observe(self, symbol: str, spread_pips: float) -> None:
         hist = self._history.setdefault(symbol, deque(maxlen=self.window))
         hist.append(float(spread_pips))
 
-    def allows(self, symbol: str, spread_pips: float) -> bool:
+    def baseline(self, symbol: str) -> float | None:
+        """Median spread for ``symbol``, or None until enough samples exist."""
         hist = self._history.get(symbol)
         if not hist or len(hist) < max(5, self.window // 10):
+            return None
+        median = float(np.median(np.fromiter(hist, dtype=float)))
+        return median if median > 0 else None
+
+    def allows(self, symbol: str, spread_pips: float) -> bool:
+        median = self.baseline(symbol)
+        if median is None:
             return True
-        avg = sum(hist) / len(hist)
-        if avg <= 0:
-            return True
-        ok = spread_pips <= avg * self.multiplier
+        ok = spread_pips <= median * self.multiplier
         if not ok:
             logger.info(
-                "{} spread guard: {:.2f} > MA{:.2f}*{:.2f}",
+                "{} spread guard: {:.2f} > median{:.2f}*{:.2f}",
                 symbol,
                 spread_pips,
-                avg,
+                median,
                 self.multiplier,
             )
         return ok

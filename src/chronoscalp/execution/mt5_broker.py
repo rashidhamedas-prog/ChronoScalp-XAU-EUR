@@ -11,6 +11,7 @@ from chronoscalp.execution.account_mode import AccountMarginMode, from_mt5_margi
 from chronoscalp.execution.mt5_utils import (
     CHRONOSCALP_MAGIC,
     StaleStopsError,
+    fetch_closed_position_exit_price,
     fetch_closed_position_pnl,
     find_managed_position_ticket,
     order_comment_for_signal,
@@ -564,3 +565,7 @@ class MT5Broker:
     def fetch_closed_pnl(self, ticket: int) -> float | None:
         """Realized P&L after the position was closed externally (SL/TP on broker)."""
         return fetch_closed_position_pnl(ticket)
+
+    def fetch_closed_exit_price(self, ticket: int) -> float | None:
+        """Price the broker actually filled the closing deal(s) at, if known."""
+        return fetch_closed_position_exit_price(ticket)

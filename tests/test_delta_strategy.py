@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from chronoscalp.strategy.delta import delta_regime, generate_delta_signal
+from chronoscalp.strategy.delta import (
+    delta_regime,
+    generate_delta_signal,
+    merge_symbol_config,
+    reference_stop_atr,
+)
 from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
 from chronoscalp.utils.types import SignalType, Timeframe, TrendDirection
 
 
-def _higher(direction: str, n: int = 80) -> pd.DataFrame:
+def _higher(direction: str, n: int = 80, atr: float = 0.5) -> pd.DataFrame:
     index = pd.date_range("2026-01-01", periods=n, freq="5min", tz="UTC")
     close = np.linspace(100.0, 104.0, n) if direction == "up" else np.linspace(104.0, 100.0, n)
     ema = close - 0.25 if direction == "up" else close + 0.25
@@ -21,7 +27,7 @@ def _higher(direction: str, n: int = 80) -> pd.DataFrame:
             "close": close,
             "ema_50": ema,
             "rsi": rsi,
-            "atr": np.full(n, 0.5),
+            "atr": np.full(n, atr),
         },
         index=index,
     )
@@ -49,6 +55,17 @@ def _long_sweep_trigger() -> pd.DataFrame:
         },
         index=index,
     )
+
+
+def _quiet_trigger(atr: float = 0.2) -> pd.DataFrame:
+    """Sweep-reclaim trigger whose own ATR is far below the higher timeframes'.
+
+    Mirrors live XAUUSD: M1 ATR $1.57 against M5 ATR $4.26, so the structural
+    stop is several M1 ATRs wide and only fits inside an M5-scaled band.
+    """
+    trigger = _long_sweep_trigger()
+    trigger["atr"] = np.full(len(trigger), atr)
+    return trigger
 
 
 def test_delta_regime_requires_two_aligned_frames():
@@ -101,6 +118,164 @@ def test_delta_rejects_stop_that_is_too_wide_for_atr():
     )
     assert signal.signal_type == SignalType.NONE
     assert signal.reason == "delta:stop_too_wide"
+
+
+def test_merge_symbol_config_applies_override_across_broker_suffix():
+    cfg = {
+        "min_stop_atr": 0.8,
+        "reward_risk_ratio": 1.8,
+        "symbol_overrides": {"EURUSD": {"min_stop_atr": 1.5, "reward_risk_ratio": 2.0}},
+    }
+    assert merge_symbol_config(cfg, "XAUUSD_o")["min_stop_atr"] == 0.8
+    merged = merge_symbol_config(cfg, "EURUSD_o")
+    assert merged["min_stop_atr"] == 1.5
+    assert merged["reward_risk_ratio"] == 2.0
+    # The base config must not be mutated.
+    assert cfg["min_stop_atr"] == 0.8
+
+
+def test_reference_stop_atr_prefers_requested_higher_frame():
+    frames = [_higher("up", atr=3.0), _higher("up", atr=2.0)]
+    assert reference_stop_atr({}, 0.2, frames) == pytest.approx(0.2)
+    assert reference_stop_atr({"stop_atr_source": "htf"}, 0.2, frames) == pytest.approx(3.0)
+    cfg = {"stop_atr_source": "htf", "stop_atr_htf_index": 1}
+    assert reference_stop_atr(cfg, 0.2, frames) == pytest.approx(2.0)
+    # Out-of-range index clamps to the last supplied frame.
+    cfg_high = {"stop_atr_source": "htf", "stop_atr_htf_index": 9}
+    assert reference_stop_atr(cfg_high, 0.2, frames) == pytest.approx(2.0)
+
+
+def test_reference_stop_atr_falls_back_when_higher_frame_atr_unusable():
+    cfg = {"stop_atr_source": "htf"}
+    assert reference_stop_atr(cfg, 0.4, []) == pytest.approx(0.4)
+
+    missing_col = _higher("up", atr=3.0).drop(columns=["atr"])
+    assert reference_stop_atr(cfg, 0.4, [missing_col]) == pytest.approx(0.4)
+
+    nan_atr = _higher("up", atr=3.0)
+    nan_atr.loc[nan_atr.index[-1], "atr"] = np.nan
+    assert reference_stop_atr(cfg, 0.4, [nan_atr]) == pytest.approx(0.4)
+
+
+def test_trigger_atr_anchoring_rejects_a_normal_structural_stop():
+    """Regression: M1-ATR anchoring made ordinary structure look "too wide".
+
+    The sweep low is $0.90 below entry — a textbook structural stop — but at an
+    M1 ATR of 0.2 the 2.5x cap is only $0.50, so Delta discarded the setup.
+    """
+    signal = generate_delta_signal(
+        "XAUUSD",
+        _quiet_trigger(),
+        [_higher("up", atr=2.0), _higher("up", atr=2.0)],
+        config={"max_atr_close_ratio": 0.01},
+        symbol_spec={"pip_size": 0.01, "typical_spread_pips": 20},
+        spread_pips=20,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert signal.reason == "delta:stop_too_wide"
+
+
+def test_htf_anchoring_accepts_the_same_setup_with_a_survivable_stop():
+    trigger_atr = 0.2
+    signal = generate_delta_signal(
+        "XAUUSD",
+        _quiet_trigger(trigger_atr),
+        [_higher("up", atr=2.0), _higher("up", atr=2.0)],
+        config={
+            "stop_atr_source": "htf",
+            "min_stop_atr": 0.8,
+            "max_stop_atr": 2.0,
+            "max_atr_close_ratio": 0.01,
+        },
+        symbol_spec={"pip_size": 0.01, "typical_spread_pips": 20},
+        spread_pips=20,
+    )
+    assert signal.signal_type == SignalType.BUY
+    stop_distance = signal.entry_price - signal.stop_loss
+    assert stop_distance == pytest.approx(1.6)
+    # The whole point: the stop is many M1 ATRs wide, not a fraction of one.
+    assert stop_distance > 4 * trigger_atr
+
+
+def test_cost_floor_widens_the_stop_so_spread_is_a_minor_share_of_risk():
+    signal = generate_delta_signal(
+        "XAUUSD",
+        _quiet_trigger(),
+        [_higher("up", atr=2.0), _higher("up", atr=2.0)],
+        config={
+            "stop_atr_source": "htf",
+            "min_stop_atr": 0.8,
+            "max_stop_atr": 2.0,
+            "max_cost_fraction_of_risk": 0.15,
+            "max_atr_close_ratio": 0.01,
+        },
+        symbol_spec={"pip_size": 0.01, "typical_spread_pips": 20},
+        spread_pips=20,
+    )
+    assert signal.signal_type == SignalType.BUY
+    stop_distance = signal.entry_price - signal.stop_loss
+    round_trip_cost = 2 * 20 * 0.01
+    assert stop_distance == pytest.approx(round_trip_cost / 0.15)
+    assert round_trip_cost / stop_distance <= 0.15
+
+
+def test_delta_rejects_setup_when_spread_cost_cannot_fit_the_stop_cap():
+    signal = generate_delta_signal(
+        "XAUUSD",
+        _quiet_trigger(),
+        [_higher("up", atr=2.0), _higher("up", atr=2.0)],
+        config={
+            "stop_atr_source": "htf",
+            "max_stop_atr": 2.0,
+            "max_cost_fraction_of_risk": 0.15,
+            "max_atr_close_ratio": 0.01,
+        },
+        symbol_spec={"pip_size": 0.01, "typical_spread_pips": 200},
+        spread_pips=200,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert signal.reason == "delta:cost_exceeds_stop_cap"
+
+
+def test_eurusd_override_gets_its_own_stop_band_and_target():
+    config = {
+        "allowed_symbols": ["XAUUSD", "EURUSD"],
+        "stop_atr_source": "htf",
+        "min_stop_atr": 0.8,
+        "max_stop_atr": 2.0,
+        "reward_risk_ratio": 1.8,
+        "max_atr_close_ratio": 0.01,
+        "symbol_overrides": {
+            "EURUSD": {"min_stop_atr": 1.5, "max_stop_atr": 3.5, "reward_risk_ratio": 2.0}
+        },
+    }
+    frames = [_higher("up", atr=2.0), _higher("up", atr=2.0)]
+
+    gold = generate_delta_signal(
+        "XAUUSD",
+        _quiet_trigger(),
+        frames,
+        config=config,
+        symbol_spec={"pip_size": 0.01, "typical_spread_pips": 20},
+        spread_pips=20,
+    )
+    euro = generate_delta_signal(
+        "EURUSD",
+        _quiet_trigger(),
+        frames,
+        config=config,
+        symbol_spec={"pip_size": 0.0001, "typical_spread_pips": 1.0},
+        spread_pips=1.0,
+    )
+
+    assert gold.signal_type == SignalType.BUY
+    assert euro.signal_type == SignalType.BUY
+    gold_stop = gold.entry_price - gold.stop_loss
+    euro_stop = euro.entry_price - euro.stop_loss
+    assert gold_stop == pytest.approx(1.6)
+    assert euro_stop == pytest.approx(3.0)
+    assert euro.risk_reward_ratio >= 2.0
+    assert gold.risk_reward_ratio == pytest.approx(1.8)
 
 
 def test_delta_is_wired_into_multi_timeframe_strategy():
