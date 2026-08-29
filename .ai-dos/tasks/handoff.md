@@ -2,6 +2,103 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-29 TASK-003 post-fix validation + backtest/live parity engine
+
+- Time (UTC): 2026-08-29T16:10:00Z
+- Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer
+- Objective: validate the 2026-08-26 fixes on broker-native data, then close the
+  backtest/live gap that made that validation unable to measure the main fix.
+
+### Claim reclaim notice (second round)
+
+- **TASK-002** (`cursor:grok-4.6`, heartbeat `2026-08-25T12:05:00Z`, >4 days
+  stale): `src/chronoscalp/backtest/engine.py`,
+  `src/chronoscalp/execution/position_logic.py`,
+  `tests/test_backtest_engine.py`, `docs/ROADMAP.md`.
+- **TASK-001** (`cursor:grok-4.5`, heartbeat `2026-08-17T12:00:00Z`, 12 days
+  stale): `scripts/run_cost_stress_validate.py`.
+
+### Validation result on the pre-parity engine (HEAD 4c06af6, VPS broker data)
+
+Window 2026-06-27 → 2026-08-11, same as the pre-fix baseline. Artifacts:
+`data/reports/validate_XAUUSD.json`, `validate_EURUSD.json` on the VPS.
+
+| Symbol | n | win% | PF | E[R] | maxDD | return | 1.5x cost |
+|---|---|---|---|---|---|---|---|
+| XAUUSD pre-fix | 46 | 50.0 | 2.114 | +0.354 | 2.02% | +17.08% | — |
+| XAUUSD post-fix | 50 | 50.0 | 1.942 | +0.358 | 7.94% | +9.44% | PF 1.940 |
+| EURUSD post-fix | 4 | **0.0** | 0.00 | **−1.00** | 4.05% | −2.03% | PF 0.00 |
+
+Read this carefully before acting on it:
+
+1. **XAUUSD per-trade edge is unchanged** (+0.358R vs +0.354R). The return halved
+   because wider stops mean smaller lots for the same 1% risk — that is the
+   intended cost of the geometry change, not a loss of edge. Cost stress at 1.5x
+   moved PF by 0.002, so the spread-cost floor is doing its job.
+2. **EURUSD has no edge and no sample.** 4 trades in 46 days, all full-stop
+   losses, expectancy exactly −1.00R — not one trade reached breakeven or the
+   trail. Delta on EURUSD must not go live on this evidence. Either the entry
+   filters are so tight that the survivors are adversely selected, or the
+   geometry is wrong for the pair. Needs its own investigation, not a tweak.
+3. **Neither number validates the trailing fix**, which is why the parity work
+   below exists.
+
+### Why the backtest could not measure the main fix
+
+The trailing bug barely manifests in a bar-close simulation. Live polls every
+2–5s, so a stop trailed up mid-bar is exposed to the rest of that bar. The
+engine touched each bar once: it checked SL/TP against the *whole* bar range
+using the pre-trail stop, then trailed from the close, so a trailed stop could
+not be hit until the next bar. That single asymmetry is the main reason the
+backtest showed +17% while live bled — and it also means the post-fix backtest
+above only sees the *cost* of wider stops, never the benefit.
+
+### Parity changes (this commit)
+
+- `backtest/engine.py`: `_intrabar_path` / `_stop_check_segments` split each bar
+  into monotonic legs (adverse-first: up bars O→L→H→C, down bars O→H→L→C, the
+  MT5 "OHLC on M1" convention) and re-evaluate stops on every leg.
+  `_advance_stop` applies breakeven *and* trailing at a waypoint, because one
+  waypoint stands for a run of live polls, not a single one.
+- Engine now applies `spread_ma_guard`, `volatility_guard`, `three_strikes`, and
+  a bar-time `daily_loss_limit`. `LIVE_ONLY_GATES` shrank to the seven that
+  genuinely need live account/cross-symbol state; `PARITY_GATES` moves back into
+  the not-modelled list when `backtest.model_live_gates` is off, so a summary
+  never claims parity it does not have.
+- `RiskManager.validate_signal` takes `at`. Without it the daily tracker rolled
+  its day over against the real calendar while P&L was recorded at bar time, so
+  the daily loss limit never fired on history — that is why it was listed as
+  live-only rather than because it was hard.
+- Summaries carry `stop_management` (`intrabar_ohlc_path` / `bar_close`) so a
+  report states which engine produced it.
+- Config: `backtest.intrabar_stop_management` and `backtest.model_live_gates`,
+  both default true, both switchable to reproduce pre-2026-08-29 numbers.
+
+### Validation run
+
+`pytest -q` 391 passed; `ruff check src tests` clean; `black` clean on touched
+files (`strategy/live_gates.py` and `tests/test_analyze_spread_guard.py` remain
+pre-existing `black` failures on `main`, untouched by this task).
+
+New `tests/test_backtest_live_parity.py` (14 tests). The load-bearing pair is
+`test_stop_trailed_on_the_high_is_hit_by_the_pullback_in_the_same_bar` and
+`test_bar_close_model_misses_that_same_stop_out` — same bar, same geometry, one
+engine closes the trade and the other does not.
+
+### Live state
+
+Entries remain **halted** (`STOP_TRADING` marker present, `KILL_SWITCH=True`
+confirmed 2026-08-29T16:05Z). Do not clear it. The XAUUSD/EURUSD numbers above
+were produced by the pre-parity engine and are superseded by the re-run.
+
+### Next action
+
+Deploy the parity engine to the VPS (`_vps_safe_code_update.ps1` — it preserves
+the kill switch and the gitignored `config/runtime_overrides.yaml`) and re-run
+both symbols. Expect XAUUSD to degrade further; that is the point. Judge the
+fix by whether the parity backtest now resembles the live journal, not by
+whether the return went up.
+
 ## 2026-08-26 TASK-003 three live-loss root causes fixed; entries halted
 
 - Time (UTC): 2026-08-26T13:40:00Z

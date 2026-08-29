@@ -91,17 +91,35 @@ Telegram never bypasses the live-confirmation or risk gates.
 4. Run Monte Carlo trade-order and cost stress tests (spread/slippage >=1.5x).
 5. Forward-test on demo for at least 100 trades per symbol and four weeks.
 6. Keep `CHRONOSCALP_CONFIRM_LIVE` disabled until all gates pass.
-7. The backtest must model the gates that actually fire live. As of 2026-08-26
-   `spread_ma_guard`, `volatility_guard`, `three_strikes`, and `mistake_memory`
-   sit in `LIVE_ONLY_GATES` (`src/chronoscalp/backtest/engine.py`), and
-   `apply_breakeven_or_trailing` runs once per bar on the close, whereas live
-   calls it every `execution.poll_interval_seconds` (2–5s). A backtest result
-   is not comparable to live behaviour until that gap is closed or bounded.
+7. The backtest must model the gates that actually fire live. **Closed
+   2026-08-29** for the stop-management gap and four of the guards:
+   `backtest/engine.py` now walks each bar as monotonic legs
+   (`intrabar_stop_management`) and applies `spread_ma_guard`,
+   `volatility_guard`, `three_strikes`, and a bar-time `daily_loss_limit`
+   (`model_live_gates`). `LIVE_ONLY_GATES` still excludes `circuit_breaker`,
+   `correlation_guard`, `kill_switch`, `mistake_memory`,
+   `mt5_netting_fail_closed`, `portfolio_heat_live_shared`, and `stale_stops`,
+   which need live account or cross-symbol state. Check a report's
+   `stop_management` field before comparing it with anything older.
 
 Prior EURUSD results (`data/_analysis/validate_EURUSD_last45d.json`,
 `wf_limited_EURUSD.json`) were produced with trigger-ATR stops and the
 pre-fix unconditional trailing stop. They do not transfer to the current
 geometry in either direction — re-measure rather than cite them.
+
+### Measured 2026-08-29 (window 2026-06-27 → 2026-08-11, bar-close engine)
+
+| Symbol | n | win% | PF | E[R] | maxDD | return |
+|---|---|---|---|---|---|---|
+| XAUUSD | 50 | 50.0 | 1.942 | +0.358 | 7.94% | +9.44% |
+| EURUSD | 4 | 0.0 | 0.00 | −1.00 | 4.05% | −2.03% |
+
+**EURUSD Delta is not live-eligible.** Four trades in 46 days, every one a full
+stop-out, expectancy exactly −1.00R — no trade reached breakeven or the trail.
+That is not a small negative edge, it is an absence of any measurable edge on a
+sample far too small to size a position from. Treat gate 5 (100 demo trades per
+symbol) as unstarted for EURUSD, and investigate whether the entry filters are
+adversely selecting the survivors before adjusting parameters.
 
 ## Data needed from the operator
 

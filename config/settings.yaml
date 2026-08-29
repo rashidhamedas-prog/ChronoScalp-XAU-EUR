@@ -302,6 +302,17 @@ execution:
 
 backtest:
   initial_balance: 10000
+  # Walk each bar as open -> low -> high -> close (up bar) or open -> high ->
+  # low -> close (down bar) and re-check stops on every leg. Live polls every
+  # few seconds, so a stop trailed up on the high can be taken by the pullback
+  # inside the same bar; the old close-only model could not represent that and
+  # therefore reported far fewer stop-outs than live produced. Set false only
+  # to reproduce pre-2026-08-29 numbers.
+  intrabar_stop_management: true
+  # Apply the spread outlier guard, volatility regime guard, three-strikes
+  # pause, and bar-time daily loss limit that main.py applies. Off means the
+  # summary lists them as not modelled.
+  model_live_gates: true
   commission_per_lot: 7.0
   default_spread_pips:
     XAUUSD: 20

@@ -13,7 +13,7 @@ tasks:
     branch: "ai/TASK-003-loss-rootcause-eurusd"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-26T13:20:00Z"
-    heartbeat_at: "2026-08-26T13:20:00Z"
+    heartbeat_at: "2026-08-29T15:40:00Z"
     depends_on: []
     file_claims:
       - "config/settings.yaml"
@@ -24,19 +24,33 @@ tasks:
       - "src/chronoscalp/execution/mt5_broker.py"
       - "src/chronoscalp/execution/broker.py"
       - "src/chronoscalp/execution/paper_broker.py"
+      - "src/chronoscalp/execution/position_logic.py"
+      - "src/chronoscalp/backtest/engine.py"
       - "src/chronoscalp/main.py"
       - "docs/STRATEGY_DELTA.md"
+      - "docs/ROADMAP.md"
       - "src/chronoscalp/execution/mt5_utils.py"
       - "tests/test_delta_strategy.py"
       - "tests/test_risk.py"
       - "tests/test_trade_journal.py"
       - "tests/test_institutional_v3.py"
       - "tests/test_execution_utils.py"
+      - "tests/test_backtest_engine.py"
+      - "tests/test_backtest_live_parity.py"
+      - "tests/test_cost_stress_window.py"
+      - "scripts/run_cost_stress_validate.py"
       - "scripts/_vps_forensic_audit.ps1"
       - "scripts/_vps_halt_entries.ps1"
       - "scripts/_vps_trade_window.ps1"
       - "scripts/_vps_journal_stats.py"
       - "scripts/_vps_atr_spread_probe.py"
+      - "scripts/_vps_inspect_before_safe_deploy.ps1"
+      - "scripts/_vps_probe_procs_and_overlay.ps1"
+      - "scripts/_vps_safe_code_update.ps1"
+      - "scripts/_vps_validate_new_geometry.ps1"
+      - "scripts/_vps_detach_new_geometry.ps1"
+      - "scripts/_vps_run_new_geometry_fg.ps1"
+      - "scripts/_vps_poll_new_geometry.ps1"
       - ".ai-dos/tasks/active.yaml"
       - ".ai-dos/tasks/handoff.md"
       - ".ai-dos/project/status.md"
@@ -47,6 +61,8 @@ tasks:
       - "Delta sizes stops from a configurable higher-timeframe ATR with a per-symbol override block, so an M1 noise-scale stop is no longer possible."
       - "EURUSD and XAUUSD each have explicit Delta parameters; no strategy silently blocks a symbol the operator selected."
       - "Risk stays capped at 1% per trade, 3% portfolio heat, and min 1.5 R:R; CHRONOSCALP_CONFIRM_LIVE untouched."
+      - "Backtest manages stops intrabar (OHLC path), so a stop trailed during a bar can be hit later in that same bar as it is live."
+      - "Backtest applies the spread outlier guard, volatility regime guard, three-strikes pause, and bar-time daily loss limit; LIVE_ONLY_GATES lists only what genuinely stays unmodelled."
       - "pytest, ruff, and black pass; live re-enable stays blocked until broker-native backtest + walk-forward evidence exists for both symbols."
     validation:
       - ".venv/Scripts/python.exe -m pytest -q --basetemp .tmp_pytest_task003"
@@ -61,6 +77,12 @@ tasks:
       institutional_guards.py and tests/test_institutional_guards.py were
       unclaimed. Reason recorded in handoff.md. Live entries are halted via the
       STOP_TRADING kill-switch marker on the VPS for the duration of this task.
+      2026-08-29 second reclaim for backtest/live parity work: backtest/engine.py,
+      execution/position_logic.py, tests/test_backtest_engine.py, docs/ROADMAP.md
+      from TASK-002 (heartbeat 2026-08-25T12:05, >4 days stale) and
+      scripts/run_cost_stress_validate.py from TASK-001 (heartbeat 2026-08-17,
+      12 days stale). Needed because the post-fix backtest cannot validate the
+      trailing-stop fix while the engine still trails once per bar close.
   - id: "TASK-002"
     title: "Independent multi-strategy execution + xau_vwap_pullback (shadow-only)"
     status: "in_progress"

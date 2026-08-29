@@ -335,8 +335,16 @@ class RiskManager:
         current_spread_pips: float,
         *,
         min_reward_risk_ratio: float | None = None,
+        at: datetime | None = None,
     ) -> bool:
-        if self.daily_tracker.daily_loss_limit_hit():
+        """Gate a signal on daily loss, R:R, net-of-cost R:R, and spread.
+
+        ``at`` is the evaluation time. Live callers leave it None (wall clock);
+        the backtest passes bar time, without which the tracker rolls its day
+        over against the real calendar and the daily loss limit never fires on
+        historical P&L.
+        """
+        if self.daily_tracker.daily_loss_limit_hit(at):
             return False
 
         # Hard floor is non-negotiable — scoped callers (e.g. ultra_scalp) may
