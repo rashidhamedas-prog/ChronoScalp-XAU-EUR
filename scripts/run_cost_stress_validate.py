@@ -60,6 +60,22 @@ def _window_bounds_from_raw(
     return start, end, meta
 
 
+def _align_tz(ts: pd.Timestamp | None, index: pd.Index) -> pd.Timestamp | None:
+    """Match ``ts`` to the tz-awareness of ``index`` so comparisons are legal.
+
+    History is loaded with a tz-aware UTC index, while ``--from``/``--to``
+    parse to naive timestamps. Comparing the two raises
+    ``TypeError: Cannot compare tz-naive and tz-aware datetime-like objects``,
+    which previously made the explicit-window arguments unusable.
+    """
+    if ts is None:
+        return None
+    index_tz = getattr(index, "tz", None)
+    if index_tz is not None:
+        return ts.tz_localize(index_tz) if ts.tzinfo is None else ts.tz_convert(index_tz)
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
+
+
 def _slice_with_warmup(
     df: pd.DataFrame, start: datetime | None, end: datetime | None
 ) -> pd.DataFrame:
@@ -68,8 +84,8 @@ def _slice_with_warmup(
         return df
     if start is None and end is None:
         return df
-    start_ts = pd.Timestamp(start) if start is not None else None
-    end_ts = pd.Timestamp(end) if end is not None else None
+    start_ts = _align_tz(pd.Timestamp(start), df.index) if start is not None else None
+    end_ts = _align_tz(pd.Timestamp(end), df.index) if end is not None else None
     if start_ts is not None:
         before = df[df.index < start_ts]
         warmup = before.tail(_WARMUP_BARS)
@@ -120,9 +136,7 @@ def _load_enriched(
             atr_period=ind.get("atr_period", 14),
             rvol_period=ind.get("rvol_period", 20),
         )
-        df = enrich_with_smc(
-            df, rvol_min=float(settings.strategy.get("liquidity_rvol_min", 1.5))
-        )
+        df = enrich_with_smc(df, rvol_min=float(settings.strategy.get("liquidity_rvol_min", 1.5)))
         data[tf] = df
     return data
 
