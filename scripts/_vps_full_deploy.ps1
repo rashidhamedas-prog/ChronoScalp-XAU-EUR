@@ -1,6 +1,14 @@
 # Full ChronoScalp deploy ON the Windows VPS (run as Administrator).
 # Pulls origin/main, restarts panel / Control API / live bot / Telegram.
-# Clears STOP_TRADING marker so entries can resume after deploy.
+#
+# By default this clears the STOP_TRADING marker so entries resume. Pass
+# -KeepHalt to deploy code and restart processes while leaving the kill switch
+# exactly as it is: resuming live risk is a separate decision from shipping
+# code, and a deploy that silently re-enables entries has already caused one
+# unintended live session here.
+param(
+    [switch]$KeepHalt
+)
 $ErrorActionPreference = "Continue"
 $root = "C:\ChronoScalp\ChronoScalp-XAU-EUR"
 Set-Location $root
@@ -43,9 +51,14 @@ function Stop-Matching([string]$pattern) {
       }
 }
 
-# Clear sticky kill switch (env should already be CHRONOSCALP_STOP_TRADING=no)
-Remove-Item (Join-Path $root "data\state\STOP_TRADING") -Force -ErrorAction SilentlyContinue
-Write-Output ("KILL_FILE_GONE=" + (-not (Test-Path (Join-Path $root "data\state\STOP_TRADING"))))
+$killFile = Join-Path $root "data\state\STOP_TRADING"
+if ($KeepHalt) {
+    Write-Output ("KILL_SWITCH_PRESERVED=" + (Test-Path $killFile))
+} else {
+    # Clear sticky kill switch (env should already be CHRONOSCALP_STOP_TRADING=no)
+    Remove-Item $killFile -Force -ErrorAction SilentlyContinue
+    Write-Output ("KILL_FILE_GONE=" + (-not (Test-Path $killFile)))
+}
 
 New-NetFirewallRule -DisplayName "ChronoScalp Panel 8501" -Direction Inbound -Protocol TCP -LocalPort 8501 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "ChronoScalp API 8510" -Direction Inbound -Protocol TCP -LocalPort 8510 -Action Allow -ErrorAction SilentlyContinue | Out-Null
@@ -119,4 +132,5 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 Write-Output ("HAS_news_straddle=" + (Test-Path (Join-Path $root "src\chronoscalp\strategy\news_straddle_engine.py")))
 Write-Output ("HAS_keyboards=" + (Test-Path (Join-Path $root "src\chronoscalp\telegram\keyboards.py")))
 Write-Output ("ENV_EXISTS=" + (Test-Path (Join-Path $root ".env")))
+Write-Output ("KILL_SWITCH_FINAL=" + (Test-Path $killFile))
 Write-Output "DONE"
