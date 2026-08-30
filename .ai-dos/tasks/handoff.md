@@ -2,7 +2,65 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
-## 2026-08-29 TASK-003 post-fix validation + backtest/live parity engine
+## 2026-08-30 TASK-003 parity results, per-symbol evidence surfaced, full deploy
+
+- Time (UTC): 2026-08-30T10:30:00Z
+- Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer
+- Objective: operator asked to apply every change to the live bot and the
+  Telegram bot, merge, deploy, and run a final test.
+
+### Parity engine results (VPS broker data, window 2026-06-27 → 2026-08-11)
+
+| Symbol | engine | n | win% | PF | E[R] | maxDD | return |
+|---|---|---|---|---|---|---|---|
+| XAUUSD | `bar_close` | 50 | 50.0 | 1.942 | +0.358 | 7.94% | +9.44% |
+| XAUUSD | `intrabar_ohlc_path` | 48 | **62.5** | 1.754 | +0.284 | 6.14% | +7.00% |
+| EURUSD | either | 4 | 0.0 | 0.00 | −1.00 | 4.05% | −2.03% |
+
+Gold at 1.5× costs: PF 1.751 / E[R] +0.283.
+
+The win rate rising while expectancy falls is the live signature reproduced —
+intrabar trailing closes more trades early for small gains instead of reaching
+full TP. **Positive expectancy surviving that engine plus 1.5× cost stress is
+the first defensible evidence Delta has had for XAUUSD.**
+
+EURUSD is byte-identical under both engines: all four trades hit their initial
+stop before reaching 1R, so trailing never engaged. The result is not sensitive
+to stop management — the entries did not work at all.
+
+### Changes this round
+
+- `strategy/live_gates.py`: `symbol_validation_state` / `unvalidated_live_symbols`
+  read a new `strategy.<id>.symbol_validation` block. Anything unrecorded is
+  `UNVALIDATED` — absence of evidence is never read as evidence. **Reported,
+  not enforced**: the operator explicitly asked for EURUSD to be tradeable, so
+  the code makes the risk unmissable rather than overriding the decision.
+- `config/settings.yaml`: records the measured verdicts (`XAUUSD: validated`,
+  `EURUSD: failed`) with the numbers that earned them, next to the geometry.
+- `telegram/control_bot.py`: `/status` gained a risk-geometry block (trailing
+  gate, spread-guard baseline, Delta stop-ATR source) and a Delta evidence
+  block with a per-symbol ✅/❌/❔ and a warning when an unvalidated symbol is
+  live-selected. The live bleed happened while a stale config was running and
+  nothing on screen said so; this closes that.
+- `main.py`: startup logs a `Stop geometry:` line and warns per strategy about
+  symbols with no positive evidence.
+
+### Branch state
+
+All `ai/TASK-00{1,2,3}` branches are already merged into `origin/main`. Three
+`cursor/*performance-report*` branches remain unmerged and are **not** merged
+here: two are competing implementations of the same Persian HTML report
+(`src/chronoscalp/reporting/account_report_fa.py` 948 lines vs
+`src/chronoscalp/reports/performance_report.py` 788 lines, different module
+paths) and the third is only a generated HTML artefact with a hardcoded account
+number. Merging both would duplicate the feature. Left for an explicit operator
+decision rather than merged blind before a live deploy.
+
+### Live state
+
+Entries remain **halted** unless the operator clears the kill switch. Processes
+were restarted onto the new code so the fixes are actually loaded in memory —
+before this they were running pre-fix code despite the repo being updated.
 
 - Time (UTC): 2026-08-29T16:10:00Z
 - Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer

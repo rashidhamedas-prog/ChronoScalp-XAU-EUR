@@ -332,6 +332,68 @@ def test_status_reports_delta_when_enabled(bot: TelegramControlBot) -> None:
     assert "delta" in text
 
 
+def test_status_shows_the_loaded_stop_geometry(bot: TelegramControlBot) -> None:
+    """The operator must be able to confirm a restart picked up the loss fixes.
+
+    The live bleed ran on a stale config and nothing on screen said so.
+    """
+    bot.settings.risk.update({"trailing_start_r_multiple": 1.0, "trailing_stop_atr_multiple": 1.5})
+    bot.settings.risk["spread_ma_guard"] = {"enabled": True, "multiplier": 2.5}
+    bot.settings.strategy["higher_trend"] = ["M15", "M5"]
+    bot.settings.strategy["delta"] = {"stop_atr_source": "htf", "stop_atr_htf_index": 1}
+
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "از 1R به بعد" in text
+    assert "median×2.5" in text
+    assert "ATR M5" in text
+
+
+def test_status_flags_a_trigger_atr_stop_as_unfixed(bot: TelegramControlBot) -> None:
+    bot.settings.strategy["delta"] = {"stop_atr_source": "trigger"}
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "کندل تریگر" in text
+    assert "⚠️" in text
+
+
+def test_status_warns_when_an_unvalidated_symbol_is_live_selected(
+    bot: TelegramControlBot,
+) -> None:
+    bot.settings.symbols = ["XAUUSD", "EURUSD"]
+    bot.settings.strategy["delta"] = {
+        "allowed_symbols": ["XAUUSD", "EURUSD"],
+        "symbol_validation": {"XAUUSD": "validated", "EURUSD": "failed"},
+    }
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "XAUUSD ✅" in text
+    assert "EURUSD ❌" in text
+    assert "بدون شواهد سودآوری" in text
+
+
+def test_status_has_no_warning_when_only_validated_symbols_are_active(
+    bot: TelegramControlBot,
+) -> None:
+    bot.settings.symbols = ["XAUUSD"]
+    bot.settings.strategy["delta"] = {
+        "allowed_symbols": ["XAUUSD"],
+        "symbol_validation": {"XAUUSD": "validated", "EURUSD": "failed"},
+    }
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "XAUUSD ✅" in text
+    assert "بدون شواهد سودآوری" not in text
+
+
+def test_status_survives_a_config_without_delta(bot: TelegramControlBot) -> None:
+    """A profile that never enabled Delta must not break /status."""
+    bot.settings.strategy.pop("delta", None)
+    bot.handle(42, "/status")
+    text = bot.send.call_args.args[1]
+    assert "وضعیت ChronoScalp" in text
+
+
 def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     bot.handle(42, "تنظیمات")
     kb = bot.send.call_args.kwargs["reply_markup"]

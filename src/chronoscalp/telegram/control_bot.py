@@ -398,12 +398,80 @@ class TelegramControlBot:
             f"تأیید Live (.env): {live_ok}",
             f"mistake_memory={mm}",
         ]
+        lines.extend(self._risk_geometry_lines())
+        lines.extend(self._symbol_evidence_lines())
         if mt5_ipc:
             lines.append(
                 "هشدار MT5: IPC timeout — فرآیند روشن است ولی به ترمینال وصل نیست. "
                 "MetaTrader را ببندید و دوباره باز/لاگین کنید."
             )
         self.send(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
+
+    def _risk_geometry_lines(self) -> list[str]:
+        """Stop-geometry knobs the 2026-08-26 loss fixes turned on.
+
+        The operator needs to confirm from Telegram that a restarted process
+        actually loaded them; the live bleed happened while a stale config was
+        running and nothing on screen said so.
+        """
+        risk = self.settings.risk or {}
+        delta = (self.settings.strategy or {}).get("delta") or {}
+        spread_ma = risk.get("spread_ma_guard") or {}
+        start_r = float(risk.get("trailing_start_r_multiple", 0.0) or 0.0)
+        trail_atr = float(risk.get("trailing_stop_atr_multiple", 0.0) or 0.0)
+        guard = (
+            f"median×{float(spread_ma.get('multiplier', 0) or 0):.2g}"
+            if spread_ma.get("enabled", True)
+            else "off"
+        )
+        lines = [
+            "— هندسه ریسک —",
+            f"تریلینگ: از {start_r:.2g}R به بعد، {trail_atr:.2g}×ATR",
+            f"گارد اسپرد: {guard}",
+        ]
+        source = str(delta.get("stop_atr_source", "trigger") or "trigger")
+        if source == "htf":
+            idx = int(delta.get("stop_atr_htf_index", 0) or 0)
+            higher = list(self.settings.strategy.get("higher_trend") or [])
+            frame = higher[idx] if 0 <= idx < len(higher) else f"index {idx}"
+            lines.append(f"استاپ Delta: از ATR {frame} (نه کندل تریگر M1)")
+        else:
+            lines.append("استاپ Delta: از ATR کندل تریگر ⚠️ (اصلاح اعمال نشده)")
+        return lines
+
+    def _symbol_evidence_lines(self) -> list[str]:
+        """Per-symbol Delta validation verdict, plus a warning when it is risky.
+
+        Delta holds positive broker-native evidence on XAUUSD and none on
+        EURUSD. Selecting EURUSD stays allowed; doing it without seeing that
+        must not be.
+        """
+        from chronoscalp.strategy.live_gates import (
+            FAILED,
+            symbol_validation_state,
+            unvalidated_live_symbols,
+        )
+
+        strategy_cfg = self.settings.strategy or {}
+        delta = strategy_cfg.get("delta") or {}
+        allowed = [str(s) for s in (delta.get("allowed_symbols") or [])]
+        active = [s for s in self.settings.symbols if s in allowed] if allowed else []
+        if not active:
+            return ["— شواهد Delta —", "Delta روی هیچ نماد فعالی مجاز نیست"]
+
+        marks = {"validated": "✅", FAILED: "❌", "unvalidated": "❔"}
+        states = [
+            f"{symbol} {marks.get(symbol_validation_state(strategy_cfg, 'delta', symbol), '❔')}"
+            for symbol in active
+        ]
+        lines = ["— شواهد Delta —", "  ".join(states)]
+        risky = unvalidated_live_symbols(strategy_cfg, "delta", active)
+        if risky:
+            lines.append(
+                f"⚠️ بدون شواهد سودآوری: {', '.join(risky)} — "
+                "معامله زنده روی این نمادها ریسک تأییدنشده است"
+            )
+        return lines
 
     def _cmd_pnl(self, chat_id: int, _text: str = "") -> None:
         mode = self._detect_mode()

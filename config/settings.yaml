@@ -99,6 +99,18 @@ strategy:
         min_stop_atr: 1.50
         max_stop_atr: 3.50
         reward_risk_ratio: 2.00
+    # Recorded broker-native verdict per symbol. Surfaced by the live-loop
+    # startup gate profile and Telegram status so an unvalidated symbol cannot
+    # be enabled unknowingly. Reported, never enforced — enabling anyway stays
+    # the operator's decision. Only edit from a recorded validation run
+    # (docs/STRATEGY_DELTA.md), never to justify a live enable.
+    symbol_validation:
+      # 2026-08-29 parity engine, 2026-06-27..2026-08-11: 48 trades, WR 62.5%,
+      # PF 1.754, E[R] +0.284, maxDD 6.14%; PF 1.751 at 1.5x costs.
+      XAUUSD: validated
+      # 2026-08-29 same window and engine: 4 trades, 0% wins, E[R] exactly
+      # -1.00 — every one a full stop-out, none reached breakeven or the trail.
+      EURUSD: failed
   atr_stop_multiple: 1.5
   atr_target_multiple: 2.25
   min_signal_confidence: 0.55

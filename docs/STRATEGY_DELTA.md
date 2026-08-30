@@ -107,12 +107,32 @@ Prior EURUSD results (`data/_analysis/validate_EURUSD_last45d.json`,
 pre-fix unconditional trailing stop. They do not transfer to the current
 geometry in either direction — re-measure rather than cite them.
 
-### Measured 2026-08-29 (window 2026-06-27 → 2026-08-11, bar-close engine)
+### Measured 2026-08-29 (window 2026-06-27 → 2026-08-11)
 
-| Symbol | n | win% | PF | E[R] | maxDD | return |
-|---|---|---|---|---|---|---|
-| XAUUSD | 50 | 50.0 | 1.942 | +0.358 | 7.94% | +9.44% |
-| EURUSD | 4 | 0.0 | 0.00 | −1.00 | 4.05% | −2.03% |
+Both engines, same code and same broker-native data. Check a report's
+`stop_management` field to know which produced it.
+
+| Symbol | engine | n | win% | PF | E[R] | maxDD | return |
+|---|---|---|---|---|---|---|---|
+| XAUUSD | `bar_close` | 50 | 50.0 | 1.942 | +0.358 | 7.94% | +9.44% |
+| XAUUSD | `intrabar_ohlc_path` | 48 | **62.5** | 1.754 | +0.284 | 6.14% | +7.00% |
+| EURUSD | `bar_close` | 4 | 0.0 | 0.00 | −1.00 | 4.05% | −2.03% |
+| EURUSD | `intrabar_ohlc_path` | 4 | 0.0 | 0.00 | −1.00 | 4.05% | −2.03% |
+
+At 1.5× costs the gold parity run holds at PF 1.751 / E[R] +0.283, so the edge
+is not a cost artefact.
+
+The gold win rate *rising* to 62.5% while expectancy *falls* to +0.284R is the
+live signature reproduced: with intrabar stop management the trail closes more
+trades early for small gains instead of letting them reach full TP. That is
+what the live journal showed and what the bar-close engine could not express.
+Positive expectancy surviving that engine is the first defensible evidence
+Delta has had for XAUUSD.
+
+EURUSD is identical under both engines because all four trades hit their
+initial stop before ever reaching 1R, so the trailing logic never engaged. The
+result is not sensitive to stop management at all — the entries simply did not
+work.
 
 **EURUSD Delta is not live-eligible.** Four trades in 46 days, every one a full
 stop-out, expectancy exactly −1.00R — no trade reached breakeven or the trail.

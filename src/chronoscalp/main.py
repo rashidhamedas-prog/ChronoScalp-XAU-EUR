@@ -85,7 +85,7 @@ from chronoscalp.risk.portfolio_heat import (
 )
 from chronoscalp.risk.position_sizing import RiskManager
 from chronoscalp.smc.structure import enrich_with_smc
-from chronoscalp.strategy.live_gates import blocks_real_live_orders
+from chronoscalp.strategy.live_gates import blocks_real_live_orders, unvalidated_live_symbols
 from chronoscalp.strategy.multi_timeframe import (
     MultiTimeframeStrategy,
     is_shadow_only,
@@ -1421,6 +1421,16 @@ class TradingBot:
             self.spread_ma_enabled,
             self.daily_loss_limit_enabled,
         )
+        logger.info(
+            "Stop geometry: trailing_start={}R trailing_atr={} delta_stop_atr_source={}({}) "
+            "spread_ma_multiplier={}",
+            risk_cfg.get("trailing_start_r_multiple"),
+            risk_cfg.get("trailing_stop_atr_multiple"),
+            (strategy_cfg.get("delta") or {}).get("stop_atr_source", "trigger"),
+            (strategy_cfg.get("delta") or {}).get("stop_atr_htf_index"),
+            (risk_cfg.get("spread_ma_guard") or {}).get("multiplier"),
+        )
+        self._log_unvalidated_symbols(strategy_cfg, active)
         if not active:
             logger.warning(
                 "No entry strategy is enabled — the bot will never open a position. "
@@ -1434,6 +1444,30 @@ class TradingBot:
                 "Do not rely on them as risk controls.",
                 len(inert),
                 ", ".join(inert),
+            )
+
+    def _log_unvalidated_symbols(self, strategy_cfg: dict, active: list[str]) -> None:
+        """Warn when an enabled strategy will trade a symbol it has no edge on.
+
+        Reported, not enforced — the operator chose the symbol list. But Delta
+        measured PF 1.754 on XAUUSD and four straight full stop-outs on EURUSD
+        in the same window, so which symbol is carrying that verdict belongs in
+        the startup record rather than only in a doc.
+        """
+        for strategy_id in active:
+            block = strategy_cfg.get(strategy_id)
+            if not isinstance(block, dict) or "symbol_validation" not in block:
+                continue
+            allowed = [str(s) for s in (block.get("allowed_symbols") or [])]
+            scope = [s for s in self.settings.symbols if not allowed or s in allowed]
+            risky = unvalidated_live_symbols(strategy_cfg, strategy_id, scope)
+            if not risky:
+                continue
+            logger.warning(
+                "{} has no positive broker-native evidence for {} — live risk on "
+                "these symbols is unvalidated (see docs/STRATEGY_DELTA.md)",
+                strategy_id,
+                ", ".join(risky),
             )
 
     def _note_skip(self, reason: str) -> None:

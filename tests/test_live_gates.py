@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from chronoscalp.config import Settings
 from chronoscalp.saas.broker_wizard import apply_enabled_strategies
 from chronoscalp.strategy.live_gates import (
+    FAILED,
+    UNVALIDATED,
+    VALIDATED,
     blocks_real_live_orders,
     force_shadow_if_not_live_ready,
     is_strategy_live_ready,
+    symbol_validation_state,
+    unvalidated_live_symbols,
 )
 from chronoscalp.strategy.multi_timeframe import is_shadow_only
 
@@ -57,3 +63,43 @@ def test_apply_enabled_strategies_live_enables_xau_when_gate_open(tmp_path: Path
     assert xau["shadow_only"] is False
     assert xau.get("live_ready") is True
     assert is_shadow_only(data["strategy"], "xau_vwap_pullback") is False
+
+
+def test_symbol_validation_reads_the_recorded_verdict():
+    cfg = {"delta": {"symbol_validation": {"XAUUSD": "validated", "EURUSD": "failed"}}}
+    assert symbol_validation_state(cfg, "delta", "XAUUSD") == VALIDATED
+    assert symbol_validation_state(cfg, "delta", "EURUSD") == FAILED
+
+
+def test_absence_of_evidence_is_never_read_as_evidence():
+    """An unlisted symbol, a missing block, and junk all mean unvalidated."""
+    assert symbol_validation_state({"delta": {}}, "delta", "GBPUSD") == UNVALIDATED
+    assert symbol_validation_state({}, "delta", "XAUUSD") == UNVALIDATED
+    assert (
+        symbol_validation_state(
+            {"delta": {"symbol_validation": {"XAUUSD": "probably fine"}}}, "delta", "XAUUSD"
+        )
+        == UNVALIDATED
+    )
+    # A non-dict block must not raise.
+    assert symbol_validation_state({"delta": {"symbol_validation": []}}, "delta", "XAUUSD") == (
+        UNVALIDATED
+    )
+
+
+def test_unvalidated_live_symbols_flags_failed_and_unknown_but_not_validated():
+    cfg = {"delta": {"symbol_validation": {"XAUUSD": "validated", "EURUSD": "failed"}}}
+    risky = unvalidated_live_symbols(cfg, "delta", ["XAUUSD", "EURUSD", "GBPUSD"])
+    assert risky == ["EURUSD", "GBPUSD"]
+    assert unvalidated_live_symbols(cfg, "delta", ["XAUUSD"]) == []
+
+
+def test_shipped_config_records_the_measured_delta_verdicts():
+    """Guards the 2026-08-29 evidence against a silent config edit.
+
+    XAUUSD earned its verdict (PF 1.754, E[R] +0.284 on the parity engine);
+    EURUSD produced four straight full stop-outs at exactly -1.00R.
+    """
+    strategy_cfg = Settings().strategy
+    assert symbol_validation_state(strategy_cfg, "delta", "XAUUSD") == VALIDATED
+    assert symbol_validation_state(strategy_cfg, "delta", "EURUSD") == FAILED
