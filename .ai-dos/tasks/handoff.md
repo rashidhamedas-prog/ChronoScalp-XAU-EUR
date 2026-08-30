@@ -96,13 +96,37 @@ Entries remain **halted**. Merged effective config confirms
 `trailing_start_r_multiple=1.0`, `spread_ma_guard.multiplier=2.5`,
 `stop_atr_source=htf`, and the per-symbol overrides and verdicts.
 
-### Open decision for the operator
+### Operator decisions taken (2026-08-30)
 
-The live overlay has Delta `allowed_symbols: [XAUUSD, EURUSD]` and
-`symbols: [XAUUSD, EURUSD]`. Clearing the kill switch therefore resumes live
-EURUSD Delta, whose only measured evidence is 4 trades at exactly −1.00R. The
-operator asked for EURUSD to trade, so this was left as configured and made
-loud rather than silently changed. Resolve before lifting the halt.
+Presented with the evidence, the operator chose:
+
+1. **EURUSD stays live on Delta** despite the −1.00R verdict — risk accepted
+   knowingly. The overlay keeps `allowed_symbols: [XAUUSD, EURUSD]`. Nothing
+   was silently changed; the verdict is surfaced in the startup log and
+   Telegram `/status`.
+2. **Kill switch lifted** — entries resumed at 2026-08-30T08:32Z on
+   `HEAD=c846da0`. Verified: `KILL_SWITCH=False`, no "Kill switch active"
+   warning, bot/Telegram/API/panel all running, and the live log prints
+   `Stop geometry: trailing_start=1.0R trailing_atr=1.5 delta_stop_atr_source=htf(M5) spread_ma_multiplier=2.5`.
+3. **One report implementation merged**, the other two branches dropped. All
+   remote branches are now deleted; only `origin/main` remains.
+
+### Risk gap worth revisiting
+
+The live overlay sets `daily_loss_limit_enabled: false` while
+`max_daily_loss_pct: 3.0` is configured, so the daily-loss brake is **off**:
+the 3% figure is documentation, not a control. Per-trade 1%, min 1.5 R:R, and
+3% portfolio heat are all enforced. This was the operator's existing overlay
+setting and was left alone, but resuming live right after a losing streak with
+no daily circuit-breaker is worth a deliberate decision rather than inheritance.
+
+### Next session
+
+Watch the first XAUUSD Delta trades against the parity backtest's signature:
+expect a 60%-ish win rate with modest average wins (trail-outs), not 50% with
+large wins. A materially different shape means the parity model is still
+missing something. EURUSD Delta should be expected to lose until its entry
+filters are redesigned — it is running on accepted risk, not on evidence.
 
 - Time (UTC): 2026-08-29T16:10:00Z
 - Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer
