@@ -407,6 +407,13 @@ class TelegramControlBot:
             )
         self.send(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
 
+    def _higher_trend_names(self) -> list[str]:
+        """Higher timeframes the running bot uses, tolerant of test doubles."""
+        resolve = getattr(self.settings, "higher_trend_names", None)
+        if not callable(resolve):
+            return [str(tf) for tf in (self.settings.strategy.get("higher_trend") or [])]
+        return resolve(ultra_scalp=bool(self.settings.strategy.get("use_ultra_scalp", False)))
+
     def _risk_geometry_lines(self) -> list[str]:
         """Stop-geometry knobs the 2026-08-26 loss fixes turned on.
 
@@ -432,8 +439,10 @@ class TelegramControlBot:
         source = str(delta.get("stop_atr_source", "trigger") or "trigger")
         if source == "htf":
             idx = int(delta.get("stop_atr_htf_index", 0) or 0)
-            higher = list(self.settings.strategy.get("higher_trend") or [])
-            frame = higher[idx] if 0 <= idx < len(higher) else f"index {idx}"
+            higher = self._higher_trend_names()
+            # delta.reference_stop_atr clamps the index to the frames it was
+            # handed, so report the frame that will actually be used.
+            frame = higher[min(idx, len(higher) - 1)] if higher else f"index {idx}"
             lines.append(f"استاپ Delta: از ATR {frame} (نه کندل تریگر M1)")
         else:
             lines.append("استاپ Delta: از ATR کندل تریگر ⚠️ (اصلاح اعمال نشده)")

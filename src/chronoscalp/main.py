@@ -130,7 +130,7 @@ class TradingBot:
         self.use_news_straddle = use_news_straddle
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
         if use_ultra_scalp:
-            higher_raw = scalp_tf.get("higher_trend") or ["M15", "M5"]
+            higher_raw = settings.higher_trend_names(ultra_scalp=True)
             trigger_raw = scalp_tf.get("entry_trigger") or ["S15"]
             self.higher_timeframes = [Timeframe(tf) for tf in higher_raw]
             self.trigger_timeframe = Timeframe(trigger_raw[-1])
@@ -150,9 +150,7 @@ class TradingBot:
                 self.poll_interval,
             )
         else:
-            self.higher_timeframes = [
-                Timeframe(tf) for tf in settings.raw["timeframes"]["higher_trend"]
-            ]
+            self.higher_timeframes = [Timeframe(tf) for tf in settings.higher_trend_names()]
             self.trigger_timeframe = Timeframe(settings.raw["timeframes"]["entry_trigger"][-1])
             self.poll_interval = int(settings.execution.get("poll_interval_seconds", 5))
             self.fetch_timeframes = list(STANDARD_TIMEFRAMES)
@@ -1427,7 +1425,7 @@ class TradingBot:
             risk_cfg.get("trailing_start_r_multiple"),
             risk_cfg.get("trailing_stop_atr_multiple"),
             (strategy_cfg.get("delta") or {}).get("stop_atr_source", "trigger"),
-            (strategy_cfg.get("delta") or {}).get("stop_atr_htf_index"),
+            self._delta_stop_frame_name(strategy_cfg),
             (risk_cfg.get("spread_ma_guard") or {}).get("multiplier"),
         )
         self._log_unvalidated_symbols(strategy_cfg, active)
@@ -1445,6 +1443,21 @@ class TradingBot:
                 len(inert),
                 ", ".join(inert),
             )
+
+    def _delta_stop_frame_name(self, strategy_cfg: dict) -> str:
+        """Timeframe Delta's stop distance is measured on, for the startup log.
+
+        Logging the raw index made the gate profile unreadable: ``htf(1)`` does
+        not say whether the M1-ATR fix is actually in effect.
+        """
+        delta = strategy_cfg.get("delta") or {}
+        if str(delta.get("stop_atr_source", "trigger")).lower() != "htf":
+            return str(self.trigger_timeframe.value)
+        frames = [tf.value for tf in self.higher_timeframes]
+        if not frames:
+            return str(self.trigger_timeframe.value)
+        index = min(max(0, int(delta.get("stop_atr_htf_index", 0) or 0)), len(frames) - 1)
+        return str(frames[index])
 
     def _log_unvalidated_symbols(self, strategy_cfg: dict, active: list[str]) -> None:
         """Warn when an enabled strategy will trade a symbol it has no edge on.

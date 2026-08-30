@@ -166,6 +166,19 @@ class Settings:
             raise KeyError(f"No contract spec for symbol '{symbol}' in config/symbols.yaml")
         return dict(spec)
 
+    def higher_trend_names(self, *, ultra_scalp: bool = False) -> list[str]:
+        """Higher-timeframe names the trend filter uses, as plain strings.
+
+        Ultra-scalp runs its own timeframe set, so anything reporting which
+        frame a stop or trend is measured on has to respect that branch or it
+        will name the wrong one.
+        """
+        frames = self.raw.get("timeframes") or {}
+        if ultra_scalp:
+            scalp = frames.get("ultra_scalp") or {}
+            return [str(tf) for tf in (scalp.get("higher_trend") or ["M15", "M5"])]
+        return [str(tf) for tf in (frames.get("higher_trend") or [])]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

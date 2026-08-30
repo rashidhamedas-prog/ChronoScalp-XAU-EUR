@@ -339,7 +339,7 @@ def test_status_shows_the_loaded_stop_geometry(bot: TelegramControlBot) -> None:
     """
     bot.settings.risk.update({"trailing_start_r_multiple": 1.0, "trailing_stop_atr_multiple": 1.5})
     bot.settings.risk["spread_ma_guard"] = {"enabled": True, "multiplier": 2.5}
-    bot.settings.strategy["higher_trend"] = ["M15", "M5"]
+    bot.settings.higher_trend_names = lambda **_kw: ["M15", "M5"]
     bot.settings.strategy["delta"] = {"stop_atr_source": "htf", "stop_atr_htf_index": 1}
 
     bot.handle(42, "/status")
@@ -347,6 +347,16 @@ def test_status_shows_the_loaded_stop_geometry(bot: TelegramControlBot) -> None:
     assert "از 1R به بعد" in text
     assert "median×2.5" in text
     assert "ATR M5" in text
+
+
+def test_status_names_the_real_frame_when_the_index_overshoots(
+    bot: TelegramControlBot,
+) -> None:
+    """delta.reference_stop_atr clamps the index, so status must clamp too."""
+    bot.settings.higher_trend_names = lambda **_kw: ["M15", "M5"]
+    bot.settings.strategy["delta"] = {"stop_atr_source": "htf", "stop_atr_htf_index": 9}
+    bot.handle(42, "/status")
+    assert "ATR M5" in bot.send.call_args.args[1]
 
 
 def test_status_flags_a_trigger_atr_stop_as_unfixed(bot: TelegramControlBot) -> None:
