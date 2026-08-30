@@ -56,11 +56,53 @@ paths) and the third is only a generated HTML artefact with a hardcoded account
 number. Merging both would duplicate the feature. Left for an explicit operator
 decision rather than merged blind before a live deploy.
 
-### Live state
+### Deploy path bugs found and fixed
 
-Entries remain **halted** unless the operator clears the kill switch. Processes
-were restarted onto the new code so the fixes are actually loaded in memory —
-before this they were running pre-fix code despite the repo being updated.
+Two defects made "deploy" silently not reach the running bot:
+
+1. `_vps_full_deploy.ps1` called `_vps_restart_live.py`, whose `stop_bot()`
+   reports `Stop incomplete` when the process outlives its timeout. `start_bot()`
+   then refuses because it still sees the pid, and the `data\user\bot.stopped`
+   marker it wrote survives. `watch_bot.ps1` honours that marker, so the bot
+   stayed **down** while git and the watchdog both looked healthy. Reproduced on
+   two consecutive deploys. The deploy now kills, confirms death, clears the
+   marker, and hands the start to `watch_bot.ps1` — which starts detached, so
+   the bot also survives the SSH session closing.
+2. The Streamlit panel had no watchdog, so any SSH-started panel died with the
+   session and nothing restored it. Added `watch_panel.ps1` +
+   `install_panel_watchdog.ps1` (`ChronoScalpWatchPanel`, SYSTEM, 5 min),
+   mirroring the API/bot/Telegram tasks.
+
+`_vps_full_deploy.ps1` also gained `-KeepHalt`, because its default is to delete
+the kill-switch marker: shipping code and resuming live risk should not be the
+same action.
+
+Note for future VPS scripts: PowerShell 5.1 on the VPS reads uploaded files as
+ANSI, so a non-ASCII character (em dash) inside a **string** is a parse error.
+Keep VPS `.ps1` strings ASCII-only.
+
+### Verified live state (2026-08-30T08:16Z)
+
+`HEAD=0a9ca88`. Bot, Telegram, API, and panel all running. Proof the process
+actually loaded the fixes, from the live log rather than from git:
+
+```
+Stop geometry: trailing_start=1.0R trailing_atr=1.5 delta_stop_atr_source=htf(M5) spread_ma_multiplier=2.5
+WARNING delta has no positive broker-native evidence for EURUSD
+WARNING Kill switch active at startup - new entries disabled
+```
+
+Entries remain **halted**. Merged effective config confirms
+`trailing_start_r_multiple=1.0`, `spread_ma_guard.multiplier=2.5`,
+`stop_atr_source=htf`, and the per-symbol overrides and verdicts.
+
+### Open decision for the operator
+
+The live overlay has Delta `allowed_symbols: [XAUUSD, EURUSD]` and
+`symbols: [XAUUSD, EURUSD]`. Clearing the kill switch therefore resumes live
+EURUSD Delta, whose only measured evidence is 4 trades at exactly −1.00R. The
+operator asked for EURUSD to trade, so this was left as configured and made
+loud rather than silently changed. Resolve before lifting the halt.
 
 - Time (UTC): 2026-08-29T16:10:00Z
 - Task / owner / role: TASK-003 / cursor:claude-opus-5 / architect+implementer
