@@ -1,8 +1,14 @@
-# Pull origin/main and run the full deploy with the kill switch preserved.
+# Pull origin/main and run the full deploy, on the VPS.
 #
 # Exists as its own file because nested quoting through `ssh powershell -Command`
-# mangles both the git path and the -KeepHalt switch. Upload and run this
-# instead of composing the command remotely.
+# mangles both the git path and switch parameters. Upload and run this instead
+# of composing the command remotely.
+#
+# Default resumes entries (clears the STOP_TRADING marker). Pass -KeepHalt to
+# ship code and restart processes while leaving the kill switch untouched.
+param(
+    [switch]$KeepHalt
+)
 $ErrorActionPreference = "Continue"
 $root = "C:\ChronoScalp\ChronoScalp-XAU-EUR"
 Set-Location $root
@@ -31,6 +37,11 @@ if ($overlayHashBefore -ne "") {
     Write-Output ("OVERLAY_UNCHANGED=" + ($overlayHashBefore -eq $overlayHashAfter))
 }
 
-Write-Output "===== DEPLOY (KeepHalt) ====="
-& (Join-Path $root "scripts\_vps_full_deploy.ps1") -KeepHalt
-Write-Output "DEPLOY_KEEP_HALT_DONE"
+if ($KeepHalt) {
+    Write-Output "===== DEPLOY (KeepHalt) ====="
+    & (Join-Path $root "scripts\_vps_full_deploy.ps1") -KeepHalt
+} else {
+    Write-Output "===== DEPLOY (entries will resume) ====="
+    & (Join-Path $root "scripts\_vps_full_deploy.ps1")
+}
+Write-Output "DEPLOY_DONE"
