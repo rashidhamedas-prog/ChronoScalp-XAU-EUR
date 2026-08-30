@@ -260,3 +260,87 @@ def fetch_closed_position_exit_price(ticket: int) -> float | None:
     import MetaTrader5 as mt5
 
     return closing_deal_exit_price(mt5.history_deals_get(position=ticket))
+
+
+def closed_trades_from_deals(deals: object) -> list[dict]:
+    """Journal-shaped closed trades rebuilt from raw MT5 deal history.
+
+    Only positions carrying :data:`CHRONOSCALP_MAGIC` count, so manual trades
+    on the same account are ignored. Exit price is volume-weighted across every
+    closing leg via :func:`closing_deal_exit_price`, which matters because a
+    partially closed position has several out-legs at different prices and
+    because ``DEAL_ENTRY_OUT_BY`` (3) is a close too, not just ``OUT`` (1).
+
+    This is the only way to recover a true exit price for a position the broker
+    closed on its own: the live journal records those at entry price, which
+    silently zeroes their R-multiple. Kept free of the MT5 import so it can be
+    unit-tested on any platform.
+    """
+    from datetime import UTC, datetime
+
+    by_position: dict[int, list] = {}
+    for deal in deals or ():
+        if int(getattr(deal, "magic", 0) or 0) != CHRONOSCALP_MAGIC:
+            continue
+        position_id = int(getattr(deal, "position_id", 0) or 0)
+        if position_id <= 0:
+            continue
+        by_position.setdefault(position_id, []).append(deal)
+
+    rows: list[dict] = []
+    for position_id, group in by_position.items():
+        opening = next((d for d in group if int(getattr(d, "entry", -1)) == 0), None)
+        closing = [d for d in group if int(getattr(d, "entry", -1)) in (1, 3)]
+        if opening is None or not closing:
+            continue
+        exit_price = closing_deal_exit_price(group)
+        if exit_price is None:
+            continue
+        pnl = float(
+            sum(
+                float(getattr(d, "profit", 0.0) or 0.0)
+                + float(getattr(d, "swap", 0.0) or 0.0)
+                + float(getattr(d, "commission", 0.0) or 0.0)
+                for d in group
+            )
+        )
+        # ORDER_TYPE_BUY = 0, BUY_LIMIT = 2 both open long.
+        direction = "buy" if int(getattr(opening, "type", 0) or 0) in (0, 2) else "sell"
+        last_out = max(closing, key=lambda d: int(getattr(d, "time", 0) or 0))
+        comment = str(getattr(opening, "comment", "") or "")
+        rows.append(
+            {
+                "ticket": position_id,
+                "symbol": str(getattr(opening, "symbol", "") or ""),
+                "direction": direction,
+                "volume": float(getattr(opening, "volume", 0.0) or 0.0),
+                "entry_price": float(getattr(opening, "price", 0.0) or 0.0),
+                "exit_price": float(exit_price),
+                "open_time": datetime.fromtimestamp(
+                    int(getattr(opening, "time", 0) or 0), tz=UTC
+                ).isoformat(),
+                "close_time": datetime.fromtimestamp(
+                    int(getattr(last_out, "time", 0) or 0), tz=UTC
+                ).isoformat(),
+                "pnl": round(pnl, 2),
+                "r_multiple": 0.0,
+                "exit_reason": "mt5_import",
+                "mode": "live",
+                "strategy": resolve_strategy_tag(comment=comment),
+                "reason": comment,
+            }
+        )
+    rows.sort(key=lambda row: str(row["close_time"]))
+    return rows
+
+
+def fetch_closed_trades_history(date_from: object, date_to: object) -> list[dict]:
+    """Closed ChronoScalp trades from MT5 deal history in ``[date_from, date_to]``."""
+    _require_windows()
+    import MetaTrader5 as mt5
+
+    deals = mt5.history_deals_get(date_from, date_to)
+    if deals is None:
+        logger.warning("No MT5 deals returned: {}", mt5.last_error())
+        return []
+    return closed_trades_from_deals(deals)

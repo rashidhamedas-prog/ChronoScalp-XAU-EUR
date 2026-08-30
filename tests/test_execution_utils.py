@@ -295,6 +295,152 @@ def test_closing_deal_exit_price_volume_weights_partial_closes():
     assert closing_deal_exit_price(deals) == pytest.approx(2015.0)
 
 
+def test_closed_trades_from_deals_rebuilds_a_position_with_a_real_exit_price():
+    """The journal records broker-closed trades at entry price; deals do not."""
+    from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC, closed_trades_from_deals
+
+    deals = [
+        SimpleNamespace(
+            magic=CHRONOSCALP_MAGIC,
+            position_id=555,
+            entry=0,
+            type=0,
+            symbol="XAUUSD",
+            volume=1.0,
+            price=2000.0,
+            time=1_700_000_000,
+            profit=0.0,
+            swap=0.0,
+            commission=-2.0,
+            comment="cs:delta",
+        ),
+        SimpleNamespace(
+            magic=CHRONOSCALP_MAGIC,
+            position_id=555,
+            entry=1,
+            type=1,
+            symbol="XAUUSD",
+            volume=1.0,
+            price=2010.0,
+            time=1_700_003_600,
+            profit=1000.0,
+            swap=-1.0,
+            commission=-2.0,
+            comment="",
+        ),
+    ]
+    rows = closed_trades_from_deals(deals)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket"] == 555
+    assert row["direction"] == "buy"
+    assert row["entry_price"] == 2000.0
+    assert row["exit_price"] == 2010.0
+    assert row["pnl"] == 995.0
+    assert row["exit_reason"] == "mt5_import"
+    assert row["close_time"] > row["open_time"]
+
+
+def test_closed_trades_from_deals_volume_weights_a_partial_close():
+    """Two out-legs at different prices must average, not take the first."""
+    from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC, closed_trades_from_deals
+
+    def out(price: float, volume: float, entry: int, when: int):
+        return SimpleNamespace(
+            magic=CHRONOSCALP_MAGIC,
+            position_id=7,
+            entry=entry,
+            type=1,
+            symbol="EURUSD",
+            volume=volume,
+            price=price,
+            time=when,
+            profit=0.0,
+            swap=0.0,
+            commission=0.0,
+            comment="",
+        )
+
+    deals = [
+        SimpleNamespace(
+            magic=CHRONOSCALP_MAGIC,
+            position_id=7,
+            entry=0,
+            type=1,
+            symbol="EURUSD",
+            volume=2.0,
+            price=1.1000,
+            time=100,
+            profit=0.0,
+            swap=0.0,
+            commission=0.0,
+            comment="cs:delta",
+        ),
+        out(1.0900, 1.0, 1, 200),
+        # DEAL_ENTRY_OUT_BY is a close too; the old loop only matched entry == 1.
+        out(1.0800, 1.0, 3, 300),
+    ]
+    rows = closed_trades_from_deals(deals)
+    assert len(rows) == 1
+    assert rows[0]["exit_price"] == pytest.approx(1.0850)
+    assert rows[0]["direction"] == "sell"
+    # close_time comes from the last out-leg, not the first.
+    assert rows[0]["close_time"].startswith("1970-01-01T00:05:00")
+
+
+def test_closed_trades_from_deals_ignores_manual_and_still_open_positions():
+    from chronoscalp.execution.mt5_utils import CHRONOSCALP_MAGIC, closed_trades_from_deals
+
+    deals = [
+        # Someone else's trade on the same account.
+        SimpleNamespace(
+            magic=999,
+            position_id=1,
+            entry=0,
+            type=0,
+            symbol="XAUUSD",
+            volume=1.0,
+            price=2000.0,
+            time=1,
+            profit=0.0,
+            swap=0.0,
+            commission=0.0,
+            comment="",
+        ),
+        SimpleNamespace(
+            magic=999,
+            position_id=1,
+            entry=1,
+            type=1,
+            symbol="XAUUSD",
+            volume=1.0,
+            price=2010.0,
+            time=2,
+            profit=10.0,
+            swap=0.0,
+            commission=0.0,
+            comment="",
+        ),
+        # Ours, but no closing leg yet.
+        SimpleNamespace(
+            magic=CHRONOSCALP_MAGIC,
+            position_id=2,
+            entry=0,
+            type=0,
+            symbol="XAUUSD",
+            volume=1.0,
+            price=2000.0,
+            time=3,
+            profit=0.0,
+            swap=0.0,
+            commission=0.0,
+            comment="cs:delta",
+        ),
+    ]
+    assert closed_trades_from_deals(deals) == []
+    assert closed_trades_from_deals(None) == []
+
+
 def test_closing_deal_exit_price_returns_none_without_closing_legs():
     assert closing_deal_exit_price([]) is None
     assert closing_deal_exit_price(None) is None
