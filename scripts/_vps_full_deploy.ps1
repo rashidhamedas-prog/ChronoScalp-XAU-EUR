@@ -84,12 +84,33 @@ Start-Process -FilePath $py `
 Write-Output "API_START_ISSUED"
 
 # --- Trading bot ---
+# Not via _vps_restart_live.py: its stop_bot() reports "Stop incomplete" when
+# the process outlives its timeout, start_bot() then refuses because it still
+# sees the pid, and the data\user\bot.stopped marker it wrote survives. The
+# watchdog honours that marker, so the bot stays down while git and the
+# watchdog both look healthy. Observed on every deploy.
+#
+# Kill, confirm death, clear the marker, and hand the start to watch_bot.ps1,
+# which starts detached from this session, so the bot also survives the SSH
+# connection that ran this deploy closing.
 Write-Output "BOT_RESTART_BEGIN"
-try {
-    & $py scripts\_vps_restart_live.py
-} catch {
-    Write-Output ("BOT_RESTART_ERR=" + $_.Exception.Message)
+Stop-Matching 'run_live\.py'
+$gone = $false
+foreach ($i in 1..15) {
+    Start-Sleep -Seconds 2
+    $left = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and ($_.CommandLine -match 'run_live\.py') })
+    if ($left.Count -eq 0) { $gone = $true; break }
+    foreach ($p in $left) { & taskkill.exe /F /PID $p.ProcessId 2>&1 | Out-Null }
 }
+Write-Output ("BOT_STOPPED=" + $gone)
+Remove-Item (Join-Path $root "data\user\bot.stopped") -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $root "data\user\bot.pid") -Force -ErrorAction SilentlyContinue
+schtasks /Run /TN ChronoScalpWatchBot 2>&1 | Out-String | Write-Output
+Start-Sleep -Seconds 40
+$bots = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and ($_.CommandLine -match 'run_live\.py') })
+Write-Output ("BOT_PROC_COUNT=" + $bots.Count)
 Write-Output "BOT_RESTART_END"
 
 # --- Telegram ---
