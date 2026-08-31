@@ -73,6 +73,19 @@ def telegram_error_summary(exc: BaseException) -> str:
     """Describe a Telegram HTTP failure without URL, token, or request body."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
     name = type(exc).__name__
+    raw = str(exc).strip()
+    # ``_api`` re-raises with this function's output as the message. Surface
+    # that short reason (ReadTimeout / ConnectionError) without echoing a
+    # requests URL that may contain the bot token.
+    if (
+        raw
+        and raw != name
+        and "http" not in raw.lower()
+        and "bot" not in raw.lower()
+        and "/" not in raw
+        and " " not in raw
+    ):
+        name = raw
     if status is not None:
         return f"{name} status={status}"
     return name
@@ -145,11 +158,17 @@ class TelegramControlBot:
         ``getUpdates`` long-polls for ``timeout`` seconds; the HTTP read
         budget must be larger or the control loop dies with ReadTimeout and
         never reaches ``handle`` (VPS evidence: no Positions/Logs after restart).
+
+        ``sendMessage`` uses a short budget plus retries in ``send``. A 35s
+        hang blocked the poll loop on VPS (2026-08-31: inbound status/menu
+        arrived, then ``ConnectionError``, operator saw no reply).
         """
         if method == "getUpdates":
             poll = float(params.get("timeout") or 25)
             return (15.0, poll + 45.0)
-        return max(35.0, self.timeout)
+        if method == "sendMessage":
+            return (5.0, 10.0)
+        return max(15.0, self.timeout)
 
     def _api(self, method: str, **params: Any) -> dict[str, Any]:
         """POST to Telegram Bot API with explicit UTF-8 JSON (Persian-safe)."""
@@ -198,16 +217,25 @@ class TelegramControlBot:
         }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
-        try:
-            self._api("sendMessage", **payload)
-        except requests.RequestException as exc:
-            logger.warning(
-                "Telegram sendMessage failed chat_id={} {}",
-                chat_id,
-                telegram_error_summary(exc),
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Telegram sendMessage failed chat_id={}", chat_id)
+        attempts = 3
+        for attempt in range(1, attempts + 1):
+            try:
+                self._api("sendMessage", **payload)
+                return
+            except requests.RequestException as exc:
+                summary = telegram_error_summary(exc)
+                logger.warning(
+                    "Telegram sendMessage failed chat_id={} attempt={}/{} {}",
+                    chat_id,
+                    attempt,
+                    attempts,
+                    summary,
+                )
+                if attempt < attempts:
+                    time.sleep(0.35 * attempt)
+            except Exception:  # noqa: BLE001
+                logger.exception("Telegram sendMessage failed chat_id={}", chat_id)
+                return
 
     def _authorized(self, chat_id: str | int) -> bool:
         if not self.allowed_chat:
@@ -1748,8 +1776,15 @@ class TelegramControlBot:
                     except Exception:  # noqa: BLE001
                         logger.exception("Failed handling telegram message")
             except requests.RequestException as exc:
-                logger.warning("Telegram poll error: {}", telegram_error_summary(exc))
-                time.sleep(5)
+                summary = telegram_error_summary(exc)
+                # Long-poll ReadTimeout / dropped TLS is routine on this VPS
+                # path to api.telegram.org. Sleeping 5s after each one made
+                # the keyboard feel dead on top of the missed send.
+                if summary in {"ReadTimeout", "ConnectTimeout", "ConnectionError"}:
+                    logger.info("Telegram poll idle: {}", summary)
+                    continue
+                logger.warning("Telegram poll error: {}", summary)
+                time.sleep(2)
             except Exception:  # noqa: BLE001
                 logger.exception("Telegram bot loop error")
                 time.sleep(5)

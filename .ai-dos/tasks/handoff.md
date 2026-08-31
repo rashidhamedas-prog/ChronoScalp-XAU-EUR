@@ -2,6 +2,45 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-31 TASK-004 Telegram unresponsive: send retry + poll idle
+
+- Time (UTC): 2026-08-31T12:15:00Z
+- Task / owner / role: TASK-004 / cursor:grok-4.6 / implementer
+- Objective: operator said Telegram is slow and does not answer; asked for a
+  full bot test.
+
+### VPS evidence (45.90.98.99, 2026-08-31 ~05:08 PDT)
+
+Live `run_live.py` pid 6960 ticking on `main` `d15e638`. Kill switch off.
+Telegram PIDs 2528/3964 (venv + child) up since 03:12. Inbound handle for
+`status` then `menu`; `sendMessage` `ConnectionError`. Debug NDJSON shows
+repeated `getUpdates` `ReadTimeout` (loop then slept 5s). First inspect
+missed processes due to SSH quoting; they were running.
+
+### Product
+
+- `sendMessage` HTTP timeout (5s, 10s), 3 attempts, 0.35s backoff
+- `telegram_error_summary` surfaces short wrapped reasons without URLs
+- Long-poll ReadTimeout/ConnectionError continues immediately (no 5s sleep)
+- 1% / 1.5 R:R / 3% heat and `CHRONOSCALP_CONFIRM_LIVE` unchanged
+
+### Live bot snapshot (not a Telegram defect)
+
+Entries skipping: gold/EUR `low_rvol` vs 1.15/1.20, `news_straddle_place_blocked`
+(Finnhub 403), `ultra_scalp:broker_unsupported` / netting-unknown on a second
+XAU ticket. MT5 `terminal64` ws≈8.2 MB but quotes still flowing.
+
+### Gates (this session)
+
+- `pytest -q --basetemp .tmp_pytest_task004_tg` → exit 0
+- `ruff check src tests` → All checks passed
+- `black --check` on `control_bot.py` + telegram tests → unchanged
+
+### Next action
+
+Merge `ai/TASK-004-telegram-unresponsive` to main, deploy
+`control_bot.py` + `_vps_restart_telegram_only.ps1`. Operator taps Status.
+
 ## 2026-08-31 TASK-004 symbol-owned catalogs; strategy picker removed
 
 - Time (UTC): 2026-08-31T10:30:00Z

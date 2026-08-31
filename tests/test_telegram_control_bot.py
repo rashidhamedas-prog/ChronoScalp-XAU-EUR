@@ -694,3 +694,75 @@ def test_telegram_poll_error_omits_token(bot: TelegramControlBot, caplog, monkey
     summary = telegram_error_summary(requests.RequestException(poison))
     assert token not in summary
     assert "api.telegram.org" not in summary
+
+
+def test_telegram_error_summary_keeps_short_reason() -> None:
+    import requests
+
+    wrapped = requests.RequestException("ConnectionError")
+    assert telegram_error_summary(wrapped) == "ConnectionError"
+
+
+def test_send_retries_then_succeeds(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import requests
+
+    calls = {"n": 0}
+
+    def fake_post(*_a: object, **kwargs: object) -> MagicMock:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise requests.ConnectionError("connection dropped")
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status = lambda: None
+        response.json.return_value = {"ok": True, "result": {}}
+        return response
+
+    monkeypatch.setattr("chronoscalp.telegram.control_bot.requests.post", fake_post)
+    monkeypatch.setattr("chronoscalp.telegram.control_bot.time.sleep", lambda _s: None)
+    # Fixture replaced send with a MagicMock — restore the real method.
+    bot.send = TelegramControlBot.send.__get__(bot, TelegramControlBot)  # type: ignore[method-assign]
+    bot.send(42, "hi")
+    assert calls["n"] == 3
+    timeout = None
+
+    def capture_timeout(*_a: object, **kwargs: object) -> MagicMock:
+        nonlocal timeout
+        timeout = kwargs.get("timeout")
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status = lambda: None
+        response.json.return_value = {"ok": True, "result": {}}
+        return response
+
+    monkeypatch.setattr("chronoscalp.telegram.control_bot.requests.post", capture_timeout)
+    bot.send(42, "again")
+    assert timeout == (5.0, 10.0)
+
+
+def test_poll_readtimeout_retries_without_sleep(
+    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import requests
+
+    calls = {"n": 0, "slept": []}
+
+    def _api(method: str, **_params: object) -> dict:
+        calls["n"] += 1
+        if method == "deleteWebhook":
+            return {"ok": True}
+        if calls["n"] >= 4:
+            raise KeyboardInterrupt()
+        raise requests.RequestException("ReadTimeout")
+
+    monkeypatch.setattr(bot, "_api", _api)
+    monkeypatch.setattr(
+        "chronoscalp.telegram.control_bot.time.sleep",
+        lambda seconds: calls["slept"].append(seconds),
+    )
+    with contextlib.suppress(KeyboardInterrupt):
+        bot.run_forever()
+    assert calls["slept"] == []
+    assert calls["n"] >= 4

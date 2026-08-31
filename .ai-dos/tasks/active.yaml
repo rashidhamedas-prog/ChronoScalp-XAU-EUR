@@ -10,10 +10,10 @@ tasks:
       implementer: "cursor:grok-4.6"
       reviewer: "independent-agent-required-before-merge"
       security: "independent-agent-required-before-merge"
-    branch: "ai/TASK-004-symbol-owned-strategies"
+    branch: "ai/TASK-004-telegram-unresponsive"
     worktree: "D:/soft/Claud/porje/ChronoScalp s3"
     claimed_at: "2026-08-31T10:00:00Z"
-    heartbeat_at: "2026-08-31T10:30:00Z"
+    heartbeat_at: "2026-08-31T12:15:00Z"
     depends_on: []
     file_claims:
       - "config/settings.yaml"
