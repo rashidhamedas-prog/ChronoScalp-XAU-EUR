@@ -1,7 +1,8 @@
 """Telegram control plane for ChronoScalp.
 
 Covers process start/stop, P&L, kill switch, broker connection, and
-panel-equivalent control settings (symbols / strategies / risk / live gate).
+panel-equivalent control settings (symbols / hours / risk / live gate).
+Strategies are owned by each symbol — there is no separate strategy picker.
 
 Live start still requires ``CHRONOSCALP_CONFIRM_LIVE=yes`` — this bot never
 bypasses that gate; ``/live_confirm yes`` is an explicit operator action
@@ -27,7 +28,6 @@ from chronoscalp.saas.broker_wizard import (
     apply_active_symbols,
     apply_broker_to_settings_yaml,
     apply_daily_loss_limit_enabled,
-    apply_enabled_strategies,
     apply_mistake_memory_enabled,
     apply_risk_preset,
     apply_trade_open_copy_chat_id,
@@ -48,7 +48,7 @@ from chronoscalp.saas.process_control import (
     tail_logs,
 )
 from chronoscalp.saas.user_config import UserConfigStore
-from chronoscalp.strategy.live_gates import is_strategy_live_ready
+from chronoscalp.strategy.symbol_catalog import format_catalog_lines, strategies_for_symbols
 from chronoscalp.telegram.keyboards import (
     ALIASES,
     CONN_KEYBOARD,
@@ -57,13 +57,10 @@ from chronoscalp.telegram.keyboards import (
     MAIN_KEYBOARD,
     OANDA_ENV_KEYBOARD,
     SETTINGS_KEYBOARD,
-    STRATEGY_LABEL_TO_KEY,
     STRATEGY_LABELS,
-    cycle_strategy_selection,
     hours_keyboard,
     parse_toggle_label,
     risk_keyboard,
-    strategies_keyboard,
     symbols_keyboard,
     trade_notify_keyboard,
 )
@@ -290,7 +287,7 @@ class TelegramControlBot:
             chat_id,
             "⚙️ تنظیمات — همه گزینه‌ها از منو (بدون تایپ).\n"
             f"ساعات فعلی: {self._trading_hours_label()}\n"
-            "نماد · استراتژی · ساعات · ریسک · اعلان معامله · اتصال · تأیید Live",
+            "نماد (با کاتالوگ استراتژی) · ساعات · ریسک · اعلان معامله · اتصال · تأیید Live",
             reply_markup=SETTINGS_KEYBOARD,
         )
 
@@ -374,7 +371,10 @@ class TelegramControlBot:
         mt5_ipc = "IPC timeout" in recent or "MT5 initialize() failed" in recent
         broker = self.settings.execution.get("broker", "?")
         symbols = ", ".join(self.settings.symbols) if self.settings.symbols else "—"
-        strategies = ", ".join(self._current_strategies()) or "(MACD/trend only)"
+        catalog_lines = self._catalog_lines()
+        strategies = (
+            " | ".join(catalog_lines) if catalog_lines else "(هیچ کاتالوگی برای نمادهای فعال نیست)"
+        )
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
         mm = "on" if self._mistake_memory_enabled() else "off"
         source = self._settings_source()
@@ -389,7 +389,8 @@ class TelegramControlBot:
             f"پروفایل: provider={user.broker.provider} mode={user.broker.mode}",
             f"بروکر اجرا: {broker}",
             f"نمادها: {symbols}",
-            f"استراتژی‌ها: {strategies}",
+            "استراتژی‌ها (از روی نماد):",
+            *([f"  {line}" for line in catalog_lines] or [f"  {strategies}"]),
             f"منبع تنظیم: {source} (بعد از Stop/Start)",
             f"multi_strategy_mode={ms_mode}",
             f"xau_vwap_pullback shadow_only={xau_shadow}",
@@ -791,6 +792,7 @@ class TelegramControlBot:
         from chronoscalp.risk.position_sizing import resolve_active_risk_pct
 
         strats = self._current_strategies()
+        catalog_lines = self._catalog_lines()
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
         hours = self._trading_hours_label()
@@ -802,7 +804,8 @@ class TelegramControlBot:
             self._connection_summary()
             + "\n\nکنترل / Control\n"
             + f"symbols={symbols}\n"
-            + f"strategies={','.join(strats) or '(MACD/trend only)'}\n"
+            + "strategies_from_symbols:\n"
+            + ("".join(f"  {line}\n" for line in catalog_lines) or "  (none)\n")
             + f"source={self._settings_source()} (restart required)\n"
             + f"multi_strategy_mode={self.settings.execution.get('multi_strategy_mode', 'comparison')}\n"
             + (
@@ -1058,9 +1061,14 @@ class TelegramControlBot:
         return list(self.settings.available_symbols) or list(self.settings.symbols)
 
     def _current_strategies(self) -> list[str]:
-        from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+        return strategies_for_symbols(self.settings.strategy, self.settings.symbols)
 
-        return resolve_enabled_strategies(self.settings.strategy).names()
+    def _catalog_lines(self) -> list[str]:
+        return format_catalog_lines(
+            self.settings.strategy,
+            self.settings.symbols,
+            labels=STRATEGY_LABELS,
+        )
 
     def _settings_source(self) -> str:
 
@@ -1077,27 +1085,6 @@ class TelegramControlBot:
             return list(pending.get("selected") or [])
         return list(self.settings.symbols)
 
-    def _current_shadow_strategies(self) -> list[str]:
-        from chronoscalp.strategy.multi_timeframe import is_shadow_only
-
-        return [
-            name
-            for name in self._current_strategies()
-            if is_shadow_only(self.settings.strategy, name)
-        ]
-
-    def _strategies_menu_state(self, chat_id: int) -> list[str]:
-        pending = self._pending.get(chat_id)
-        if pending and pending.get("flow") == "strategies_menu":
-            return list(pending.get("selected") or [])
-        return self._current_strategies()
-
-    def _strategies_shadow_state(self, chat_id: int) -> list[str]:
-        pending = self._pending.get(chat_id)
-        if pending and pending.get("flow") == "strategies_menu":
-            return list(pending.get("shadow") or [])
-        return self._current_shadow_strategies()
-
     def _send_symbols_menu(self, chat_id: int, *, note: str = "") -> None:
         catalog = self._symbol_catalog()
         selected = self._symbols_menu_state(chat_id)
@@ -1107,44 +1094,37 @@ class TelegramControlBot:
             "selected": selected,
         }
         active = ", ".join(selected) or "(هیچکدام)"
+        preview = format_catalog_lines(self.settings.strategy, selected, labels=STRATEGY_LABELS)
+        preview_txt = "\n".join(f"  {line}" for line in preview) or "  (هیچکدام)"
         msg = (
             "نمادها — روی هر نماد بزنید تا روشن/خاموش شود، بعد «ذخیره نمادها».\n"
-            f"انتخاب فعلی: {active}"
+            "با ذخیره، تمام استراتژی‌های همان نماد (اسکلپ، دلتا، SMC، خبر، …) "
+            "خودکار فعال می‌شود. انتخاب جداگانهٔ استراتژی وجود ندارد.\n"
+            f"انتخاب فعلی: {active}\n{preview_txt}"
         )
         if note:
             msg = f"{note}\n\n{msg}"
         self.send(chat_id, msg, reply_markup=symbols_keyboard(catalog, selected))
 
-    def _send_strategies_menu(self, chat_id: int, *, note: str = "") -> None:
-        selected = self._strategies_menu_state(chat_id)
-        shadow = self._strategies_shadow_state(chat_id)
-        self._pending[chat_id] = {
-            "flow": "strategies_menu",
-            "step": "pick",
-            "selected": selected,
-            "shadow": shadow,
-        }
-        labels = [STRATEGY_LABELS.get(k, k) for k in selected]
-        active = ", ".join(labels) if labels else "(فقط MACD/trend)"
-        msg = (
-            "استراتژی‌ها — انتخاب چندتایی یعنی اجرای هم‌زمان همه (نه بهترین سیگنال).\n"
-            "روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره استراتژی‌ها».\n"
-            "پولبک VWAP: ⬜ خاموش → 👁 shadow (بدون سفارش) → ✅ فعال.\n"
-            "تغییر فقط بعد از Stop سپس Start روی ربات معاملاتی اعمال می‌شود.\n"
-            f"دلتا (طلا) · SMC · نقدینگی+حجم · اسکلپ S15 · استرادل خبر · پولبک VWAP\n"
-            f"انتخاب فعلی: {active}"
-        )
-        if note:
-            msg = f"{note}\n\n{msg}"
-        self.send(chat_id, msg, reply_markup=strategies_keyboard(selected, shadow))
-
     def _cmd_symbols_menu(self, chat_id: int, _text: str = "") -> None:
         self._reload_settings()
         self._send_symbols_menu(chat_id)
 
-    def _cmd_strategies_menu(self, chat_id: int, _text: str = "") -> None:
+    def _cmd_strategies_catalog(self, chat_id: int, _text: str = "") -> None:
+        """Read-only catalog. The operator cannot pick engines anymore."""
         self._reload_settings()
-        self._send_strategies_menu(chat_id)
+        self._pending.pop(chat_id, None)
+        lines = self._catalog_lines()
+        body = "\n".join(f"• {line}" for line in lines) or "• هیچ نمادی انتخاب نشده"
+        self.send(
+            chat_id,
+            "استراتژی‌ها از روی نماد می‌آیند — گزینه‌ای برای روشن/خاموش کردن "
+            "جداگانه وجود ندارد.\n"
+            "طلا: دلتا · SMC · نقدینگی · اسکلپ M1 · خبر · پولبک VWAP\n"
+            "یورو: دلتا · SMC · نقدینگی · اسکلپ M1 · خبر\n\n"
+            f"{body}\n\nبرای تغییر، نمادها را عوض کنید سپس Stop/Start.",
+            reply_markup=CONTROL_KEYBOARD,
+        )
 
     def _cmd_symbols_all(self, chat_id: int, _text: str = "") -> None:
         catalog = self._symbol_catalog()
@@ -1170,46 +1150,13 @@ class TelegramControlBot:
             return
         self._reload_settings()
         self._pending.pop(chat_id, None)
+        preview = format_catalog_lines(self.settings.strategy, saved, labels=STRATEGY_LABELS)
+        preview_txt = "\n".join(f"• {line}" for line in preview)
         self.send(
             chat_id,
-            f"✅ نمادها ذخیره شد: {', '.join(saved)}\nربات را Stop سپس Start کنید.",
-            reply_markup=CONTROL_KEYBOARD,
-        )
-
-    def _cmd_strategies_all(self, chat_id: int, _text: str = "") -> None:
-        live_keys = [k for k in STRATEGY_LABELS if k != "xau_vwap_pullback"]
-        self._pending[chat_id] = {
-            "flow": "strategies_menu",
-            "step": "pick",
-            "selected": live_keys,
-            "shadow": [],
-        }
-        self._send_strategies_menu(
-            chat_id,
-            note="همه استراتژی‌های زنده انتخاب شدند. پولبک VWAP پیش‌فرض خاموش می‌ماند.",
-        )
-
-    def _cmd_strategies_none(self, chat_id: int, _text: str = "") -> None:
-        self._pending[chat_id] = {
-            "flow": "strategies_menu",
-            "step": "pick",
-            "selected": [],
-            "shadow": [],
-        }
-        self._send_strategies_menu(chat_id, note="فقط MACD/trend (بدون confluence).")
-
-    def _cmd_strategies_save(self, chat_id: int, _text: str = "") -> None:
-        selected = self._strategies_menu_state(chat_id)
-        shadow = self._strategies_shadow_state(chat_id)
-        saved = apply_enabled_strategies(selected, shadow=shadow)
-        self._reload_settings()
-        self._pending.pop(chat_id, None)
-        label = (
-            ", ".join(STRATEGY_LABELS.get(s, s) for s in saved) if saved else "(MACD/trend only)"
-        )
-        self.send(
-            chat_id,
-            f"✅ استراتژی‌ها ذخیره شد: {label}\nربات را Stop سپس Start کنید.",
+            f"✅ نمادها ذخیره شد: {', '.join(saved)}\n"
+            f"{preview_txt}\n"
+            "ربات را Stop سپس Start کنید.",
             reply_markup=CONTROL_KEYBOARD,
         )
 
@@ -1233,31 +1180,8 @@ class TelegramControlBot:
         }
         self._send_symbols_menu(chat_id)
 
-    def _toggle_strategy_pick(self, chat_id: int, label_or_key: str) -> None:
-        key = STRATEGY_LABEL_TO_KEY.get(label_or_key) or (
-            label_or_key if label_or_key in STRATEGY_LABELS else None
-        )
-        if key is None:
-            self._send_strategies_menu(chat_id, note=f"استراتژی ناشناخته: {label_or_key}")
-            return
-        selected = list(self._strategies_menu_state(chat_id))
-        shadow = list(self._strategies_shadow_state(chat_id))
-        selected, shadow = cycle_strategy_selection(
-            key,
-            selected,
-            shadow,
-            allow_live=is_strategy_live_ready(self.settings.strategy, key),
-        )
-        self._pending[chat_id] = {
-            "flow": "strategies_menu",
-            "step": "pick",
-            "selected": selected,
-            "shadow": shadow,
-        }
-        self._send_strategies_menu(chat_id)
-
     def _handle_menu_toggle(self, chat_id: int, text: str) -> bool:
-        """Handle ✅/⬜ taps inside symbols/strategies pickers (no typing)."""
+        """Handle ✅/⬜ taps inside the symbols picker (no typing)."""
         payload = parse_toggle_label(text)
         if payload is None:
             return False
@@ -1266,18 +1190,10 @@ class TelegramControlBot:
         if flow == "symbols_menu":
             self._toggle_symbol_pick(chat_id, payload)
             return True
-        if flow == "strategies_menu":
-            self._toggle_strategy_pick(chat_id, payload)
-            return True
-        # Not in a picker — open the matching menu if payload looks known.
         catalog_u = {s.upper() for s in self._symbol_catalog()}
         if payload.upper() in catalog_u:
             self._cmd_symbols_menu(chat_id)
             self._toggle_symbol_pick(chat_id, payload)
-            return True
-        if payload in STRATEGY_LABEL_TO_KEY or payload in STRATEGY_LABELS:
-            self._cmd_strategies_menu(chat_id)
-            self._toggle_strategy_pick(chat_id, payload)
             return True
         return False
 
@@ -1300,29 +1216,11 @@ class TelegramControlBot:
             return
         self._reload_settings()
         self._pending.pop(chat_id, None)
+        preview = format_catalog_lines(self.settings.strategy, saved, labels=STRATEGY_LABELS)
+        preview_txt = "\n".join(f"• {line}" for line in preview)
         self.send(
             chat_id,
-            f"✅ نمادها: {', '.join(saved)}\nربات را Stop سپس Start کنید.",
-            reply_markup=CONTROL_KEYBOARD,
-        )
-
-    def _cmd_strategies(self, chat_id: int, text: str = "") -> None:
-        args = self._args(text)
-        if not args:
-            self._cmd_strategies_menu(chat_id)
-            return
-        raw = " ".join(args)
-        self._apply_strategies_csv(chat_id, raw)
-
-    def _apply_strategies_csv(self, chat_id: int, raw: str) -> None:
-        parts = [p.strip() for p in raw.replace("،", ",").split(",") if p.strip()]
-        saved = apply_enabled_strategies(parts)
-        self._reload_settings()
-        self._pending.pop(chat_id, None)
-        label = ", ".join(saved) if saved else "(MACD/trend only)"
-        self.send(
-            chat_id,
-            f"✅ استراتژی‌ها: {label}\nربات را Stop سپس Start کنید.",
+            f"✅ نمادها: {', '.join(saved)}\n{preview_txt}\nربات را Stop سپس Start کنید.",
             reply_markup=CONTROL_KEYBOARD,
         )
 
@@ -1686,7 +1584,7 @@ class TelegramControlBot:
                 return True
 
         # symbols_menu / strategies_menu use button toggles, not free text.
-        if flow in ("symbols_menu", "strategies_menu"):
+        if flow in ("symbols_menu",):
             return False
 
         if flow == "trade_notify_id" and step == "chat":
@@ -1776,11 +1674,12 @@ class TelegramControlBot:
             "symbols_all": self._cmd_symbols_all,
             "symbols_none": self._cmd_symbols_none,
             "symbols_save": self._cmd_symbols_save,
-            "strategies_menu": self._cmd_strategies_menu,
-            "strategies": self._cmd_strategies,
-            "strategies_all": self._cmd_strategies_all,
-            "strategies_none": self._cmd_strategies_none,
-            "strategies_save": self._cmd_strategies_save,
+            "strategies_catalog": self._cmd_strategies_catalog,
+            "strategies_menu": self._cmd_strategies_catalog,
+            "strategies": self._cmd_strategies_catalog,
+            "strategies_all": self._cmd_strategies_catalog,
+            "strategies_none": self._cmd_strategies_catalog,
+            "strategies_save": self._cmd_strategies_catalog,
             "hours_menu": self._cmd_hours_menu,
             "risk_menu": self._cmd_risk_menu,
             "hours_london_ny": self._cmd_hours_london_ny,

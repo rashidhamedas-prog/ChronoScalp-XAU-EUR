@@ -2,6 +2,56 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-31 TASK-004 symbol-owned catalogs; strategy picker removed
+
+- Time (UTC): 2026-08-31T10:30:00Z
+- Task / owner / role: TASK-004 / cursor:grok-4.6 / architect+implementer
+- Objective: operator reported no live opens again; asked for per-symbol
+  strategy books and the removal of the strategy picker.
+
+### Live evidence (VPS 45.90.98.99, 2026-08-31 ~02:18–02:56 local)
+
+Bot running, kill switch off, symbols XAUUSD+EURUSD. Overlay
+`enabled_strategies=[liquidity_volume, delta, xau_vwap_pullback]` — SMC and
+news off. No `Opened` lines. Dominant skips:
+
+- EURUSD / XAUUSD `low_rvol` against the shared 1.50 institutional gate
+  (live bars 0.47–1.46)
+- XAUUSD `spread_ma`: 12–13 > median 4–5 × 2.5 (normal gold quote on this
+  broker, not an outlier)
+- VWAP `symbol_blocked` on EURUSD (correct)
+- Finnhub calendar still HTTP 403
+
+### Product
+
+- `strategy.symbol_catalogs` + `derive_strategies_from_symbols: true`
+- Gold book: delta, SMC, liquidity, M1 scalp, news, VWAP
+- EUR book: delta, SMC, liquidity, M1 scalp, news
+- Telegram/panel/API strategy picker removed; status shows the catalog
+- Per-symbol RVOL (gold 1.15 / EUR 1.20), news tokens, gold spread floor 12
+- S15 ultra mode stays off (`use_s15_trigger: false`); scalp is an M1 candidate
+- 1% / 1.5 R:R / 3% heat and `CHRONOSCALP_CONFIRM_LIVE` unchanged
+
+### Claim reclaim
+
+Stale TASK-003 (heartbeat 2026-08-29) and TASK-002 (heartbeat 2026-08-25)
+overlapping product files listed on TASK-004. TASK-001 `strategy/delta.py`
+reclaimed for the shared `merge_symbol_overrides` alias.
+
+### Gates (this session)
+
+- `pytest -q --basetemp .tmp_pytest_task004_full` → exit 0
+- `ruff check src tests scripts/app.py` → All checks passed
+- `black` on touched files after format → clean
+
+### Next action
+
+Push `ai/TASK-004-symbol-owned-strategies` and deploy with
+`_vps_safe_code_update.ps1` (or full deploy). Overlay `enabled_strategies`
+is ignored at runtime; catalogs come from committed `settings.yaml`.
+Watch the first session for gold spread floor + rvol 1.15 producing a
+candidate. Finnhub 403 still blocks news events.
+
 ## 2026-08-30 TASK-003 parity results, per-symbol evidence surfaced, full deploy
 
 - Time (UTC): 2026-08-30T10:30:00Z

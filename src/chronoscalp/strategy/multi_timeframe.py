@@ -21,6 +21,12 @@ from chronoscalp.logging_setup import logger
 from chronoscalp.ml.features import extract_setup_features
 from chronoscalp.ml.scorer import is_configured, predict_setup_probability
 from chronoscalp.strategy.confluence import confluence_ok, liquidity_volume_confirms, smc_confirms
+from chronoscalp.strategy.symbol_catalog import (
+    derive_from_symbols_enabled,
+    merge_symbol_overrides,
+    strategies_for_symbol,
+    strategies_for_symbols,
+)
 from chronoscalp.utils.types import Signal, SignalType, Timeframe, TrendDirection
 
 
@@ -114,25 +120,40 @@ class EnabledStrategies:
             out.append("xau_vwap_pullback")
         return out
 
+    @classmethod
+    def from_names(cls, names: list[str] | set[str]) -> EnabledStrategies:
+        keys = {str(n).strip().lower() for n in names}
+        return cls(
+            smc="smc_confluence" in keys,
+            liquidity="liquidity_volume" in keys,
+            ultra_scalp="ultra_scalp" in keys,
+            news_straddle="news_straddle" in keys,
+            delta="delta" in keys,
+            xau_vwap_pullback="xau_vwap_pullback" in keys,
+        )
 
-def resolve_enabled_strategies(strategy_cfg: dict) -> EnabledStrategies:
-    """Resolve enabled strategies from the list or boolean flags.
 
-    Prefers ``enabled_strategies`` when present. Empty list means no named
-    engines (legacy MACD/trend only). ``xau_vwap_pullback`` is never implied
-    by legacy flags — it must be listed or ``use_xau_vwap_pullback: true``.
+def resolve_enabled_strategies(
+    strategy_cfg: dict,
+    *,
+    symbol: str | None = None,
+    symbols: list[str] | tuple[str, ...] | None = None,
+) -> EnabledStrategies:
+    """Resolve enabled strategies from the symbol catalog, list, or flags.
+
+    When ``derive_strategies_from_symbols`` is on (the default), a ``symbol``
+    argument returns that market's book and ``symbols`` returns the union.
+    Research tests that pass only ``enabled_strategies`` still work — they
+    omit ``symbol`` / ``symbols``.
     """
+    if derive_from_symbols_enabled(strategy_cfg):
+        if symbol is not None:
+            return EnabledStrategies.from_names(strategies_for_symbol(strategy_cfg, symbol))
+        if symbols is not None:
+            return EnabledStrategies.from_names(strategies_for_symbols(strategy_cfg, symbols))
     enabled = strategy_cfg.get("enabled_strategies")
     if isinstance(enabled, list):
-        names = {str(x).strip().lower() for x in enabled}
-        return EnabledStrategies(
-            smc="smc_confluence" in names,
-            liquidity="liquidity_volume" in names,
-            ultra_scalp="ultra_scalp" in names,
-            news_straddle="news_straddle" in names,
-            delta="delta" in names,
-            xau_vwap_pullback="xau_vwap_pullback" in names,
-        )
+        return EnabledStrategies.from_names([str(x).strip().lower() for x in enabled])
     return EnabledStrategies(
         smc=bool(strategy_cfg.get("use_smc_confluence", True)),
         liquidity=bool(strategy_cfg.get("use_liquidity_volume", False)),
@@ -551,13 +572,14 @@ class MultiTimeframeStrategy:
         run_scalp: bool = True,
         run_institutional: bool = True,
     ) -> tuple[list[Signal], list[str]]:
-        enabled = resolve_enabled_strategies(self.strategy_cfg)
+        enabled = resolve_enabled_strategies(self.strategy_cfg, symbol=symbol)
         use_smc = enabled.smc
         use_liq = enabled.liquidity
         use_scalp = enabled.ultra_scalp
         use_delta = enabled.delta
         use_xau = enabled.xau_vwap_pullback
-        scalp_cfg = self.strategy_cfg.get("ultra_scalp") or {}
+        scalp_cfg = merge_symbol_overrides(self.strategy_cfg.get("ultra_scalp") or {}, symbol)
+        inst_cfg = merge_symbol_overrides(self.strategy_cfg, symbol)
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
         symbol_allows_scalp = ultra_scalp_allowed_for_symbol(symbol, scalp_cfg)
@@ -700,16 +722,10 @@ class MultiTimeframeStrategy:
                             timeframe=inst_tf,
                             use_smc_confluence=smc_flag,
                             use_liquidity_volume=liq_flag,
-                            min_reward_risk_ratio=float(
-                                self.strategy_cfg.get("min_reward_risk_ratio", 1.5)
-                            ),
-                            atr_stop_multiple=float(
-                                self.strategy_cfg.get("atr_stop_multiple", 1.5)
-                            ),
-                            atr_target_multiple=float(
-                                self.strategy_cfg.get("atr_target_multiple", 2.25)
-                            ),
-                            rvol_min=float(self.strategy_cfg.get("entry_rvol_min", 1.5)),
+                            min_reward_risk_ratio=float(inst_cfg.get("min_reward_risk_ratio", 1.5)),
+                            atr_stop_multiple=float(inst_cfg.get("atr_stop_multiple", 1.5)),
+                            atr_target_multiple=float(inst_cfg.get("atr_target_multiple", 2.25)),
+                            rvol_min=float(inst_cfg.get("entry_rvol_min", 1.5)),
                             strategy_id=strategy_id,
                         )
                     else:

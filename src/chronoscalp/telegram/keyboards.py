@@ -1,8 +1,9 @@
 """Telegram keyboards, labels, and help text for ChronoScalp control bot.
 
 Settings are **menu-only** (reply keyboards): tap to toggle / choose — no typing
-required for symbols, strategies, hours, or risk. Credential wizards (MT5/OANDA
-passwords) still accept typed secrets because those values cannot be enumerated.
+required for symbols, hours, or risk. Strategies follow the selected symbol.
+Credential wizards (MT5/OANDA passwords) still accept typed secrets because
+those values cannot be enumerated.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ BTN_CANCEL = "لغو"
 # --- Control / trading settings ---
 BTN_CTRL_SHOW = "نمایش کنترل"
 BTN_SYMBOLS = "نمادها"
-BTN_STRATEGIES = "استراتژی‌ها"
+BTN_STRATEGIES = "استراتژی نمادها"
 BTN_HOURS_LONDON = "سشن لندن/آمریکا"
 BTN_HOURS_24H = "۲۴ ساعته"
 BTN_RISK_05 = "ریسک ۰٫۵٪"
@@ -78,10 +79,10 @@ TOGGLE_SHADOW = "👁"
 SHADOW_CAPABLE_STRATEGIES: frozenset[str] = frozenset({"xau_vwap_pullback"})
 
 STRATEGY_LABELS: dict[str, str] = {
-    "delta": "دلتا (طلا)",
+    "delta": "دلتا",
     "smc_confluence": "SMC",
     "liquidity_volume": "نقدینگی+حجم",
-    "ultra_scalp": "اسکلپ S15",
+    "ultra_scalp": "اسکلپ M1",
     "news_straddle": "استرادل خبر",
     "xau_vwap_pullback": "پولبک VWAP (طلا)",
 }
@@ -312,8 +313,8 @@ HELP_TEXT = (
     "وضعیت · سود/زیان · پوزیشن‌ها · استارت Paper/Live · توقف ربات\n"
     "توقف ورود = فقط ورود جدید (فرآیند روشن می‌ماند) · ادامه ورود · لاگ\n\n"
     "تنظیمات (فقط از منو — بدون تایپ):\n"
-    "• نمادها → تیک بزنید → ذخیره نمادها\n"
-    "• استراتژی‌ها → دلتا / SMC / نقدینگی / اسکلپ / استرادل خبر → ذخیره\n"
+    "• نمادها → تیک بزنید → ذخیره نمادها. با هر نماد تمام استراتژی‌های همان نماد روشن می‌شود\n"
+    "• استراتژی نمادها → فقط نمایش کاتالوگ (انتخاب جداگانه وجود ندارد)\n"
     "• ساعات معامله → لندن/آمریکا یا ۲۴ ساعته\n"
     "• ریسک → ۰٫۵٪ / ۱٪ / ۱٫۵٪ (سقف امن ۱٪)\n"
     "• قفل ضرر روزانه → روشن/خاموش یا باز کردن قفل امروز\n"
@@ -402,9 +403,10 @@ ALIASES: dict[str, str] = {
     BTN_SYMBOLS: "symbols_menu",
     "نمادها": "symbols_menu",
     "/symbols": "symbols",
-    BTN_STRATEGIES: "strategies_menu",
-    "استراتژی‌ها": "strategies_menu",
-    "/strategies": "strategies",
+    BTN_STRATEGIES: "strategies_catalog",
+    "استراتژی نمادها": "strategies_catalog",
+    "استراتژی‌ها": "strategies_catalog",
+    "/strategies": "strategies_catalog",
     BTN_HOURS_MENU: "hours_menu",
     "ساعات معامله": "hours_menu",
     BTN_RISK_MENU: "risk_menu",

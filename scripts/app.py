@@ -41,7 +41,6 @@ from chronoscalp.saas import (  # noqa: E402
     apply_active_symbols,
     apply_broker_to_settings_yaml,
     apply_daily_loss_limit_enabled,
-    apply_enabled_strategies,
     apply_risk_preset,
     apply_trading_hours_mode,
     bot_is_running,
@@ -113,10 +112,10 @@ UI = {
         "daily_loss_save": "اعمال قفل ضرر روزانه",
         "daily_loss_unlock": "باز کردن قفل امروز + ری‌استارت",
         "symbols_label": "نمادهای فعال",
-        "symbols_hint": "یک یا چند نماد را انتخاب کنید. پیش‌فرض: همه.",
+        "symbols_hint": "نماد را انتخاب کنید؛ استراتژی‌های همان نماد (اسکلپ تا خبر) خودکار فعال می‌شوند.",
         "symbols_save": "اعمال نمادها",
-        "strategies_label": "استراتژی‌های فعال",
-        "strategies_hint": "یک یا چند استراتژی را همزمان انتخاب کنید (OR). پیش‌فرض: همه.",
+        "strategies_label": "استراتژی هر نماد",
+        "strategies_hint": "با انتخاب نماد، تمام استراتژی‌های همان نماد خودکار فعال می‌شود. انتخاب جداگانه وجود ندارد.",
         "strategies_save": "اعمال استراتژی‌ها",
         "strategy_delta": "دلتا (طلا / یورو — ساختار M15/M5 + ورود M1)",
         "strategy_smc": "SMC (Order Block / FVG / Sweep)",
@@ -432,8 +431,7 @@ def page_control(settings) -> None:
     running = bot_is_running()
     st.metric("Bot", _t("bot_running") if running else _t("bot_stopped"))
 
-    from chronoscalp.saas.broker_wizard import KNOWN_STRATEGIES
-    from chronoscalp.strategy.multi_timeframe import resolve_enabled_strategies
+    from chronoscalp.strategy.symbol_catalog import format_catalog_lines
 
     catalog = list(settings.available_symbols) or list(settings.symbols)
     # Prefer settings order for defaults, then any extra catalog entries
@@ -468,37 +466,10 @@ def page_control(settings) -> None:
         "news_straddle": _t("strategy_news"),
         "xau_vwap_pullback": "XAU VWAP pullback",
     }
-    enabled = resolve_enabled_strategies(settings.strategy)
-    default_strats = enabled.names()
-    if not default_strats:
-        default_strats = [s for s in KNOWN_STRATEGIES if s != "news_straddle"]
-
     st.markdown(f"#### {_t('strategies_label')}")
     st.caption(_t("strategies_hint"))
-    st.caption(
-        "XAU VWAP pullback is live_ready. 1% / 1.5R / 3% heat still apply. Restart after save."
-    )
-    selected_strats = st.multiselect(
-        _t("strategies_label"),
-        options=list(KNOWN_STRATEGIES),
-        default=default_strats,
-        format_func=lambda k: strategy_labels.get(k, k),
-        label_visibility="collapsed",
-        key="active_strategies_ms",
-    )
-    if st.button(_t("strategies_save"), key="save_strategies_btn"):
-        from chronoscalp.strategy.live_gates import is_strategy_live_ready
-
-        shadow: list[str] = []
-        if "xau_vwap_pullback" in selected_strats and not is_strategy_live_ready(
-            settings.strategy, "xau_vwap_pullback"
-        ):
-            shadow = ["xau_vwap_pullback"]
-        saved = apply_enabled_strategies(selected_strats, shadow=shadow)
-        get_settings.cache_clear()
-        st.success(", ".join(saved) if saved else "(MACD/trend only)")
-        st.info(_t("need_restart"))
-        st.rerun()
+    for line in format_catalog_lines(settings.strategy, settings.symbols, labels=strategy_labels):
+        st.write(line)
 
     from chronoscalp.filters.session_filter import (
         TRADING_HOURS_ALWAYS_ON_24H,

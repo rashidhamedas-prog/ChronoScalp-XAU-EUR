@@ -27,7 +27,6 @@ from chronoscalp.saas.broker_wizard import (
     KNOWN_STRATEGIES,
     apply_active_symbols,
     apply_daily_loss_limit_enabled,
-    apply_enabled_strategies,
     apply_risk_preset,
     apply_trading_hours_mode,
     disable_live_confirm,
@@ -35,6 +34,7 @@ from chronoscalp.saas.broker_wizard import (
 )
 from chronoscalp.saas.process_control import PID_FILE, bot_is_running, start_bot, stop_bot
 from chronoscalp.saas.user_config import UserConfigStore
+from chronoscalp.strategy.symbol_catalog import strategies_for_symbol
 
 ROOT = Path(__file__).resolve().parents[3]
 STATE_DIR = Path("data/state")
@@ -165,6 +165,10 @@ def create_app() -> FastAPI:
             "broker": settings.execution.get("broker"),
             "symbols": settings.symbols,
             "strategies": settings.strategy.get("enabled_strategies"),
+            "strategies_from_symbols": {
+                symbol: strategies_for_symbol(settings.strategy, symbol)
+                for symbol in settings.symbols
+            },
             "known_strategies": list(KNOWN_STRATEGIES),
             "trading_hours_mode": (settings.sessions or {}).get("trading_hours_mode"),
             "daily_loss_limit_enabled": bool(settings.risk.get("daily_loss_limit_enabled", True)),
@@ -274,18 +278,17 @@ def create_app() -> FastAPI:
         return {"ok": True, "symbols": saved}
 
     @app.post("/settings/strategies", dependencies=[Depends(_require_token)])
-    def set_strategies(body: StrategiesRequest) -> dict[str, Any]:
-        saved = apply_enabled_strategies(body.strategies)
-        from chronoscalp.saas.broker_wizard import OVERRIDES_PATH, _load_overrides
-
-        overlay = _load_overrides(OVERRIDES_PATH)
-        xau = (overlay.get("strategy") or {}).get("xau_vwap_pullback") or {}
+    def set_strategies(_body: StrategiesRequest) -> dict[str, Any]:
+        settings = get_settings()
         return {
-            "ok": True,
-            "strategies": saved,
+            "ok": False,
+            "ignored": True,
+            "message": "Strategies follow the selected symbols; use POST /settings/symbols.",
+            "strategies_from_symbols": {
+                symbol: strategies_for_symbol(settings.strategy, symbol)
+                for symbol in settings.symbols
+            },
             "known": list(KNOWN_STRATEGIES),
-            "xau_vwap_pullback_shadow_only": bool(xau.get("shadow_only", True)),
-            "xau_vwap_pullback_live_ready": bool(xau.get("live_ready", False)),
         }
 
     @app.post("/settings/hours", dependencies=[Depends(_require_token)])

@@ -318,6 +318,7 @@ def run_backtest(
     spread_ma_guard = SpreadMovingAverageGuard(
         window=int(spread_ma_cfg.get("window", 100)),
         multiplier=float(spread_ma_cfg.get("multiplier", 2.5)),
+        symbol_overrides=dict(spread_ma_cfg.get("symbol_overrides") or {}),
     )
     spread_ma_enabled = model_gates and bool(spread_ma_cfg.get("enabled", True))
 

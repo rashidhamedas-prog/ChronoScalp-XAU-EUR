@@ -7,6 +7,7 @@
 - [x] XAUUSD/EURUSD allowlist, unit tests, and operator documentation
 - [x] Telegram menu toggle, runtime persistence, and status visibility
 - [x] Streamlit panel strategy picker + unified `resolve_enabled_strategies` (incl. delta-only path)
+- [x] **Symbol-owned catalogs (2026-08-31):** operator picks symbols only. XAUUSD book = Delta + SMC + liquidity + M1 scalp + news + VWAP; EURUSD book = Delta + SMC + liquidity + M1 scalp + news. Telegram/panel strategy picker removed. Per-symbol RVOL, news tokens, and gold spread floor so a 13-point gold quote is not treated as an outlier. Overlay `enabled_strategies` is ignored while `derive_strategies_from_symbols` is true. 1%/1.5R/3% unchanged. S15 ultra mode stays off (`use_s15_trigger: false`).
 - [x] Broker-native history on VPS AUSCommercial-Demo: `XAUUSD`/`EURUSD` M1/M5/M15 (~100k M1/M5; not LiteFinance `_o`) — see `docs/STRATEGY_RESEARCH.md`
 - [x] Limited 45d baseline + 1.5× cost-stress (2026-08-12): XAUUSD survives (E[R]≈0.35, PF≈2.11); EURUSD fails (E[R]<0) — live still disabled
 - [x] Applied evidence to config: EURUSD removed from active symbols; Delta gold-only (`allowed_symbols: [XAUUSD]`)

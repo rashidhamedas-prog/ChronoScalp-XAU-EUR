@@ -103,6 +103,23 @@ def test_spread_guard_still_blocks_outliers_on_a_wide_symbol():
     assert not guard.allows("XAUUSD", 35.0)
 
 
+def test_spread_guard_gold_floor_accepts_typical_live_quote():
+    """Live 2026-08-31: gold printed 13 against a quiet median of 4-5.
+
+    That is a normal AUSCommercial-Demo gold spread, not an outlier. Floor
+    the baseline at 12 so 13 passes while 40 still fails.
+    """
+    guard = SpreadMovingAverageGuard(
+        window=20,
+        multiplier=2.5,
+        symbol_overrides={"XAUUSD": {"min_baseline_pips": 12.0, "multiplier": 2.5}},
+    )
+    for _ in range(20):
+        guard.observe("XAUUSD", 4.0)
+    assert guard.allows("XAUUSD", 13.0)
+    assert not guard.allows("XAUUSD", 40.0)
+
+
 def test_volatility_allows_bounds():
     assert volatility_allows(1.0, 1000.0, min_ratio=0.0005, max_ratio=0.02)
     assert not volatility_allows(0.1, 1000.0, min_ratio=0.0005, max_ratio=0.02)

@@ -104,6 +104,8 @@ def _make_bot(
     settings.raw["news_filter"]["enabled"] = False
     settings.raw["symbols"] = ["XAUUSD"]
     settings.raw["broker_symbol_aliases"] = {}
+    settings.raw["strategy"]["derive_strategies_from_symbols"] = False
+    settings.raw["strategy"].pop("symbol_catalogs", None)
     settings.raw["strategy"]["enabled_strategies"] = strategies or ["delta", "liquidity_volume"]
     settings.raw["strategy"]["use_news_straddle"] = "news_straddle" in (
         strategies or ["delta", "liquidity_volume"]

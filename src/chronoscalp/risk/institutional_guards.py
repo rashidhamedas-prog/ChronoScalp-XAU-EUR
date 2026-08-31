@@ -77,11 +77,31 @@ class SpreadMovingAverageGuard:
     rejects a large share of perfectly normal spreads. The median is unmoved by
     those spikes, so ``multiplier`` means what it reads as — "this quote is N
     times the typical spread".
+
+    ``symbol_overrides`` may set per-root ``multiplier`` and
+    ``min_baseline_pips``. Gold on AUSCommercial-Demo quotes ~12-13 points as
+    a normal spread; a quiet-session median of 4 must not treat that as an
+    outlier.
     """
 
     window: int = 100
     multiplier: float = 2.5
+    symbol_overrides: dict[str, dict] = field(default_factory=dict)
     _history: dict[str, deque[float]] = field(default_factory=dict)
+
+    def _root(self, symbol: str) -> str:
+        return str(symbol or "").strip().upper().split("_", 1)[0]
+
+    def _params(self, symbol: str) -> tuple[float, float]:
+        root = self._root(symbol)
+        block: dict = {}
+        if isinstance(self.symbol_overrides, dict):
+            raw = self.symbol_overrides.get(root) or self.symbol_overrides.get(symbol) or {}
+            if isinstance(raw, dict):
+                block = raw
+        multiplier = float(block.get("multiplier", self.multiplier) or self.multiplier)
+        min_baseline = float(block.get("min_baseline_pips", 0.0) or 0.0)
+        return multiplier, min_baseline
 
     def observe(self, symbol: str, spread_pips: float) -> None:
         hist = self._history.setdefault(symbol, deque(maxlen=self.window))
@@ -99,14 +119,16 @@ class SpreadMovingAverageGuard:
         median = self.baseline(symbol)
         if median is None:
             return True
-        ok = spread_pips <= median * self.multiplier
+        multiplier, min_baseline = self._params(symbol)
+        floor = max(median, min_baseline) if min_baseline > 0 else median
+        ok = spread_pips <= floor * multiplier
         if not ok:
             logger.info(
                 "{} spread guard: {:.2f} > median{:.2f}*{:.2f}",
                 symbol,
                 spread_pips,
-                median,
-                self.multiplier,
+                floor,
+                multiplier,
             )
         return ok
 
