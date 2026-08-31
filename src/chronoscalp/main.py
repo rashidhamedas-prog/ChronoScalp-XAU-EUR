@@ -123,13 +123,15 @@ class TradingBot:
 
         self.settings = settings
         self.mode = mode
-        enabled = resolve_enabled_strategies(settings.strategy)
+        enabled = resolve_enabled_strategies(settings.strategy, symbols=settings.symbols)
         use_ultra_scalp = enabled.ultra_scalp
         use_news_straddle = enabled.news_straddle
         self.use_ultra_scalp = use_ultra_scalp
         self.use_news_straddle = use_news_straddle
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
-        if use_ultra_scalp:
+        ultra_cfg = settings.strategy.get("ultra_scalp") or {}
+        use_s15_trigger = bool(use_ultra_scalp and ultra_cfg.get("use_s15_trigger", False))
+        if use_s15_trigger:
             higher_raw = settings.higher_trend_names(ultra_scalp=True)
             trigger_raw = scalp_tf.get("entry_trigger") or ["S15"]
             self.higher_timeframes = [Timeframe(tf) for tf in higher_raw]
@@ -213,6 +215,7 @@ class TradingBot:
         self.spread_ma_guard = SpreadMovingAverageGuard(
             window=int(spread_ma_cfg.get("window", 100)),
             multiplier=float(spread_ma_cfg.get("multiplier", 2.5)),
+            symbol_overrides=dict(spread_ma_cfg.get("symbol_overrides") or {}),
         )
         self.spread_ma_enabled = bool(spread_ma_cfg.get("enabled", True))
         self.corr_cfg = risk_cfg.get("correlation") or {}
@@ -1390,7 +1393,7 @@ class TradingBot:
         rather than only in the 5-minute skip heartbeat.
         """
         strategy_cfg = self.settings.strategy
-        enabled = resolve_enabled_strategies(strategy_cfg)
+        enabled = resolve_enabled_strategies(strategy_cfg, symbols=self.settings.symbols)
         active = enabled.names()
         sessions_cfg = self.settings.sessions
         risk_cfg = self.settings.risk
@@ -1432,8 +1435,8 @@ class TradingBot:
         if not active:
             logger.warning(
                 "No entry strategy is enabled — the bot will never open a position. "
-                "Enable one via Telegram Settings -> Strategies or "
-                "strategy.enabled_strategies in config."
+                "Select a symbol that has a catalog (XAUUSD / EURUSD) or set "
+                "strategy.symbol_catalogs in config."
             )
         inert = unenforced_override_keys(getattr(self.settings, "runtime_overrides", {}))
         if inert:
@@ -1665,7 +1668,7 @@ class TradingBot:
                 self._manage_open_position(symbol, now)
                 self._harvest_pending_fills(symbol, now)
 
-                enabled = resolve_enabled_strategies(self.settings.strategy)
+                enabled = resolve_enabled_strategies(self.settings.strategy, symbol=symbol)
                 use_smc, use_liq, use_scalp, use_news_straddle = (
                     enabled.smc,
                     enabled.liquidity,
@@ -1734,7 +1737,7 @@ class TradingBot:
                         not run_straddle
                         and allow_new_entries
                         and news_session_ok
-                        and self.news_straddle.is_scalp_paused(now, currency)
+                        and self.news_straddle.is_scalp_paused(now, currency, symbol=symbol)
                     ):
                         # Enter pause/place path even when not yet PENDING.
                         run_straddle = True

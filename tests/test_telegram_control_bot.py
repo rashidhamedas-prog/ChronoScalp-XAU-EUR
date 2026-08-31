@@ -41,6 +41,24 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         available_symbols=["XAUUSD", "EURUSD", "USDJPY"],
         risk={"active_risk_per_trade_pct": 1.0, "max_risk_per_trade_pct": 1.0},
         strategy={
+            "derive_strategies_from_symbols": True,
+            "symbol_catalogs": {
+                "XAUUSD": [
+                    "delta",
+                    "smc_confluence",
+                    "liquidity_volume",
+                    "ultra_scalp",
+                    "news_straddle",
+                    "xau_vwap_pullback",
+                ],
+                "EURUSD": [
+                    "delta",
+                    "smc_confluence",
+                    "liquidity_volume",
+                    "ultra_scalp",
+                    "news_straddle",
+                ],
+            },
             "enabled_strategies": ["smc_confluence"],
             "use_smc_confluence": True,
             "use_liquidity_volume": False,
@@ -286,50 +304,25 @@ def test_symbols_menu_toggle_and_save(
     assert "✅" in bot.send.call_args.args[1]
 
 
-def test_strategies_menu_toggle_news_straddle(
-    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    saved: list[list[str]] = []
-
-    monkeypatch.setattr(
-        "chronoscalp.telegram.control_bot.apply_enabled_strategies",
-        lambda parts, shadow=None, **_k: saved.append(list(parts)) or list(parts),
-    )
-    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
-
+def test_strategies_button_is_read_only_catalog(bot: TelegramControlBot) -> None:
     bot.handle(42, "استراتژی‌ها")
-    bot.handle(42, "⬜ استرادل خبر")
-    assert "news_straddle" in bot._pending[42]["selected"]
-    bot.handle(42, "ذخیره استراتژی‌ها")
-    assert saved and "news_straddle" in saved[-1] and "smc_confluence" in saved[-1]
+    text = bot.send.call_args.args[1]
+    assert "از روی نماد" in text
+    assert "XAUUSD" in text
+    assert "دلتا" in text
+    assert "ذخیره استراتژی" not in text
+    kb = bot.send.call_args.kwargs.get("reply_markup") or {}
+    labels = {b["text"] for row in kb.get("keyboard", []) for b in row}
+    assert not any("ذخیره استراتژی" in label for label in labels)
 
 
-def test_strategies_menu_controls_and_persists_delta(
-    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    saved: list[list[str]] = []
-
-    monkeypatch.setattr(
-        "chronoscalp.telegram.control_bot.apply_enabled_strategies",
-        lambda parts, shadow=None, **_k: saved.append(list(parts)) or list(parts),
-    )
-    monkeypatch.setattr(bot, "_reload_settings", lambda: None)
-
-    bot.handle(42, "استراتژی‌ها")
-    kb = bot.send.call_args.kwargs["reply_markup"]
-    assert any("دلتا" in (button.get("text") or "") for row in kb["keyboard"] for button in row)
-
-    bot.handle(42, "⬜ دلتا (طلا)")
-    assert "delta" in bot._pending[42]["selected"]
-    bot.handle(42, "ذخیره استراتژی‌ها")
-    assert saved and "delta" in saved[-1]
-
-
-def test_status_reports_delta_when_enabled(bot: TelegramControlBot) -> None:
-    bot.settings.strategy["enabled_strategies"] = ["delta", "smc_confluence"]
+def test_status_lists_per_symbol_catalog(bot: TelegramControlBot) -> None:
     bot.handle(42, "/status")
     text = bot.send.call_args.args[1]
-    assert "delta" in text
+    assert "از روی نماد" in text
+    assert "XAUUSD" in text
+    assert "دلتا" in text
+    assert "پولبک VWAP" in text
 
 
 def test_status_shows_the_loaded_stop_geometry(bot: TelegramControlBot) -> None:
@@ -409,7 +402,7 @@ def test_settings_hub_has_all_sections(bot: TelegramControlBot) -> None:
     kb = bot.send.call_args.kwargs["reply_markup"]
     labels = {b["text"] for row in kb["keyboard"] for b in row}
     assert "نمادها" in labels
-    assert "استراتژی‌ها" in labels
+    assert "استراتژی نمادها" in labels
     assert "ساعات معامله" in labels
     assert "ریسک معامله" in labels
     assert "اتصال" in labels
@@ -631,44 +624,17 @@ def test_status_warns_when_logs_show_mt5_ipc(bot: TelegramControlBot) -> None:
     assert "IPC timeout" in bot.send.call_args.args[1]
 
 
-def test_strategies_menu_says_simultaneous_and_hides_xau_from_all(
-    bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    bot.handle(42, "استراتژی‌ها")
+def test_gold_catalog_includes_vwap_eur_does_not(bot: TelegramControlBot) -> None:
+    bot.settings.symbols = ["XAUUSD", "EURUSD"]
+    bot.handle(42, "استراتژی نمادها")
     text = bot.send.call_args.args[1]
-    assert "هم‌زمان" in text
-    kb = bot.send.call_args.kwargs["reply_markup"]
-    labels = {b["text"] for row in kb["keyboard"] for b in row}
-    assert any("VWAP" in label for label in labels)
-    assert not any(label.startswith("✅") and "VWAP" in label for label in labels)
-
-    bot.handle(42, "همه استراتژی‌ها ✓")
-    assert "xau_vwap_pullback" not in bot._pending[42]["selected"]
-
-
-def test_xau_vwap_cycles_shadow_then_off_when_not_live_ready(bot: TelegramControlBot) -> None:
-    bot.handle(42, "استراتژی‌ها")
-    bot.handle(42, "⬜ پولبک VWAP (طلا)")
-    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
-    assert "xau_vwap_pullback" in bot._pending[42]["shadow"]
-    bot.handle(42, "👁 پولبک VWAP (طلا)")
-    assert "xau_vwap_pullback" not in bot._pending[42]["selected"]
-    assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
-
-
-def test_xau_vwap_cycles_to_live_when_live_ready(bot: TelegramControlBot) -> None:
-    bot.settings.strategy["xau_vwap_pullback"] = {
-        "enabled": True,
-        "shadow_only": False,
-        "live_ready": True,
-    }
-    bot.handle(42, "استراتژی‌ها")
-    bot.handle(42, "⬜ پولبک VWAP (طلا)")
-    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
-    assert "xau_vwap_pullback" in bot._pending[42]["shadow"]
-    bot.handle(42, "👁 پولبک VWAP (طلا)")
-    assert "xau_vwap_pullback" in bot._pending[42]["selected"]
-    assert "xau_vwap_pullback" not in bot._pending[42]["shadow"]
+    gold_line = next(line for line in text.splitlines() if line.startswith("• XAUUSD"))
+    eur_line = next(line for line in text.splitlines() if line.startswith("• EURUSD"))
+    assert "پولبک VWAP" in gold_line
+    assert "پولبک VWAP" not in eur_line
+    assert "اسکلپ M1" in gold_line
+    assert "اسکلپ M1" in eur_line
+    assert 42 not in bot._pending
 
 
 def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:

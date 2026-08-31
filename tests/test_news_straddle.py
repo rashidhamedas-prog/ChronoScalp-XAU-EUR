@@ -100,6 +100,20 @@ def test_spread_shield_blocks_wide_spread():
     assert NewsCalendarManager.is_spread_acceptable(2.5, 2.0) is False
 
 
+def test_news_title_filter_is_per_symbol():
+    engine = _engine(
+        [],
+        title_tokens=["nfp"],
+        symbol_overrides={
+            "XAUUSD": {"title_tokens": ["gold", "fomc"], "max_spread_pips": 25.0},
+            "EURUSD": {"title_tokens": ["ecb"], "max_spread_pips": 2.5},
+        },
+    )
+    assert engine._title_filter("XAUUSD") == frozenset({"gold", "fomc"})
+    assert engine._title_filter("EURUSD") == frozenset({"ecb"})
+    assert engine.cfg_for("XAUUSD")["max_spread_pips"] == 25.0
+
+
 def test_event_title_tokens():
     event = NewsEvent(
         timestamp=datetime(2026, 7, 29, 12, 30, tzinfo=UTC),

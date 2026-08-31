@@ -28,6 +28,7 @@ from chronoscalp.strategy.news_skip_reasons import (
     NewsSkipReason,
     idle_calendar_skip,
 )
+from chronoscalp.strategy.symbol_catalog import merge_symbol_overrides
 from chronoscalp.utils.strategy_tags import normalize_strategy_tag
 from chronoscalp.utils.types import (
     PendingOrder,
@@ -130,39 +131,47 @@ class DynamicNewsStraddleEngine:
     def comment_prefix(self) -> str:
         return str(self.cfg.get("comment_prefix", COMMENT_PREFIX))
 
-    def _title_filter(self) -> frozenset[str] | None:
-        raw = self.cfg.get("title_tokens")
+    def cfg_for(self, symbol: str) -> dict[str, Any]:
+        """News knobs for one symbol (gold vs EUR events and spread caps)."""
+        return merge_symbol_overrides(self.cfg, symbol)
+
+    def _title_filter(self, symbol: str = "") -> frozenset[str] | None:
+        raw = self.cfg_for(symbol).get("title_tokens") if symbol else self.cfg.get("title_tokens")
         if raw is None:
             return None  # use default high-impact tokens
         if isinstance(raw, list) and not raw:
             return frozenset()  # empty list = accept all high-impact
         return frozenset(str(t).lower() for t in raw)
 
-    def is_scalp_paused(self, moment: datetime, currency: str | None) -> bool:
+    def is_scalp_paused(self, moment: datetime, currency: str | None, symbol: str = "") -> bool:
+        cfg = self.cfg_for(symbol) if symbol else self.cfg
         paused, upcoming = self.calendar.is_scalp_paused(
             moment,
-            pause_minutes_before=self.pause_minutes_before,
-            pause_seconds_after=self.expiry_seconds,
+            pause_minutes_before=float(cfg.get("pause_minutes_before", self.pause_minutes_before)),
+            pause_seconds_after=float(cfg.get("expiry_seconds", self.expiry_seconds)),
             currency=currency,
         )
         if not paused or upcoming is None:
             return False
-        return event_matches_straddle_titles(upcoming.event, self._title_filter())
+        return event_matches_straddle_titles(upcoming.event, self._title_filter(symbol))
 
-    def atr_distance(self, m1_df: pd.DataFrame) -> float | None:
+    def atr_distance(self, m1_df: pd.DataFrame, symbol: str = "") -> float | None:
         """Return ATR(M1) * multiplier in price units, or None if insufficient data."""
-        if m1_df is None or m1_df.empty or len(m1_df) < self.atr_period + 1:
+        cfg = self.cfg_for(symbol) if symbol else self.cfg
+        period = int(cfg.get("atr_period", self.atr_period))
+        multiplier = float(cfg.get("atr_multiplier", self.atr_multiplier))
+        if m1_df is None or m1_df.empty or len(m1_df) < period + 1:
             return None
         if "atr" in m1_df.columns and pd.notna(m1_df["atr"].iloc[-1]):
             atr_val = float(m1_df["atr"].iloc[-1])
         else:
-            series = atr_series(m1_df, period=self.atr_period)
+            series = atr_series(m1_df, period=period)
             if series.empty or pd.isna(series.iloc[-1]):
                 return None
             atr_val = float(series.iloc[-1])
         if atr_val <= 0:
             return None
-        return atr_val * self.atr_multiplier
+        return atr_val * multiplier
 
     def build_bracket_signals(
         self,
@@ -225,8 +234,10 @@ class DynamicNewsStraddleEngine:
                 session=session,
             )
 
-        if not NewsCalendarManager.is_spread_acceptable(spread_pips, self.max_spread_pips):
-            msg = f"spread_too_high:{spread_pips:.2f}>{self.max_spread_pips:.2f}"
+        cfg = self.cfg_for(symbol)
+        max_spread = float(cfg.get("max_spread_pips", self.max_spread_pips))
+        if not NewsCalendarManager.is_spread_acceptable(spread_pips, max_spread):
+            msg = f"spread_too_high:{spread_pips:.2f}>{max_spread:.2f}"
             logger.warning("[STRADDLE CANCELLED] {} {}", symbol, msg)
             return StraddleTickResult(
                 symbol=symbol,
@@ -235,7 +246,7 @@ class DynamicNewsStraddleEngine:
                 message=msg,
             )
 
-        distance = self.atr_distance(m1_df)
+        distance = self.atr_distance(m1_df, symbol=symbol)
         if distance is None:
             return StraddleTickResult(
                 symbol=symbol,
@@ -556,7 +567,7 @@ class DynamicNewsStraddleEngine:
                 action=reason.value,
             )
 
-        if not event_matches_straddle_titles(upcoming.event, self._title_filter()):
+        if not event_matches_straddle_titles(upcoming.event, self._title_filter(symbol)):
             return StraddleTickResult(
                 symbol=symbol,
                 phase=StraddlePhase.IDLE,
@@ -575,8 +586,11 @@ class DynamicNewsStraddleEngine:
                 symbol=symbol, phase=StraddlePhase.IDLE, action="event_done", session=session
             )
 
+        place_before = float(
+            self.cfg_for(symbol).get("place_seconds_before", self.place_seconds_before)
+        )
         in_place, _ = self.calendar.is_straddle_placement_window(
-            now, place_seconds_before=self.place_seconds_before, currency=currency
+            now, place_seconds_before=place_before, currency=currency
         )
         if not in_place:
             self.sessions[symbol] = StraddleSession(

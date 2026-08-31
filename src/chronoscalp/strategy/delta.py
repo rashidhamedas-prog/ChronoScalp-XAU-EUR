@@ -80,14 +80,9 @@ def merge_symbol_config(config: dict[str, Any], symbol: str) -> dict[str, Any]:
     XAUUSD moves in dollars while EURUSD moves in fractions of a pip, so one
     shared stop band cannot fit both. Each symbol may override any Delta key.
     """
-    merged = dict(config)
-    overrides = config.get("symbol_overrides") or {}
-    if isinstance(overrides, dict):
-        root = _root(symbol)
-        for key, values in overrides.items():
-            if _root(str(key)) == root and isinstance(values, dict):
-                merged.update(values)
-    return merged
+    from chronoscalp.strategy.symbol_catalog import merge_symbol_overrides
+
+    return merge_symbol_overrides(config, symbol)
 
 
 def reference_stop_atr(
