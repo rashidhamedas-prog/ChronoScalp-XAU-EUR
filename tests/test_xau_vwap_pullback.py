@@ -241,11 +241,13 @@ def test_default_config_is_live_ready():
     data = yaml.safe_load((CONFIG_DIR / "settings.yaml").read_text(encoding="utf-8"))
     strat = data["strategy"]
     xau = strat.get("xau_vwap_pullback") or {}
-    assert xau.get("enabled") is True
-    assert xau.get("shadow_only") is False
+    assert xau.get("enabled") is False
+    assert xau.get("shadow_only") is True
     assert xau.get("live_ready") is True
-    assert "xau_vwap_pullback" in (strat.get("enabled_strategies") or [])
-    assert is_shadow_only(strat, "xau_vwap_pullback") is False
+    assert "xau_vwap_pullback" not in (strat.get("enabled_strategies") or [])
+    catalogs = strat.get("symbol_catalogs") or {}
+    assert "xau_vwap_pullback" not in (catalogs.get("XAUUSD") or [])
+    assert is_shadow_only(strat, "xau_vwap_pullback") is True
 
 
 def test_no_lookahead_truncation_regime():

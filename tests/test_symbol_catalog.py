@@ -12,20 +12,18 @@ from chronoscalp.strategy.symbol_catalog import (
 )
 
 
-def test_default_gold_book_has_vwap_and_news() -> None:
+def test_default_gold_book_is_delta_and_scalp() -> None:
     names = strategies_for_symbol({}, "XAUUSD")
+    assert names == ["delta", "ultra_scalp"]
     assert names == list(DEFAULT_SYMBOL_CATALOGS["XAUUSD"])
-    assert "xau_vwap_pullback" in names
-    assert "news_straddle" in names
-    assert "ultra_scalp" in names
 
 
-def test_default_eur_book_excludes_gold_vwap() -> None:
+def test_default_eur_book_is_delta_and_scalp() -> None:
     names = strategies_for_symbol({}, "EURUSD")
+    assert names == ["delta", "ultra_scalp"]
     assert "xau_vwap_pullback" not in names
-    assert "delta" in names
-    assert "news_straddle" in names
-    assert "ultra_scalp" in names
+    assert "smc_confluence" not in names
+    assert "news_straddle" not in names
 
 
 def test_broker_suffix_uses_same_book() -> None:
@@ -38,8 +36,7 @@ def test_unknown_symbol_has_empty_book() -> None:
 
 def test_union_preserves_catalog_order() -> None:
     names = strategies_for_symbols({}, ["EURUSD", "XAUUSD"])
-    assert names[0] == "delta"
-    assert "xau_vwap_pullback" in names
+    assert names == ["delta", "ultra_scalp"]
     assert names.count("delta") == 1
 
 

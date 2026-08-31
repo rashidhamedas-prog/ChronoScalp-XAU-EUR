@@ -406,9 +406,6 @@ class TelegramControlBot:
         live_ok = "yes" if self.settings.secrets.live_trading_confirmed else "no"
         mm = "on" if self._mistake_memory_enabled() else "off"
         source = self._settings_source()
-        xau_cfg = self.settings.strategy.get("xau_vwap_pullback") or {}
-        xau_shadow = "on" if xau_cfg.get("shadow_only", True) else "off"
-        ms_mode = self.settings.execution.get("multi_strategy_mode", "comparison")
         user = UserConfigStore().config
         lines = [
             "وضعیت ChronoScalp",
@@ -417,11 +414,9 @@ class TelegramControlBot:
             f"پروفایل: provider={user.broker.provider} mode={user.broker.mode}",
             f"بروکر اجرا: {broker}",
             f"نمادها: {symbols}",
-            "استراتژی‌ها (از روی نماد):",
+            "استراتژی‌ها:",
             *([f"  {line}" for line in catalog_lines] or [f"  {strategies}"]),
             f"منبع تنظیم: {source} (بعد از Stop/Start)",
-            f"multi_strategy_mode={ms_mode}",
-            f"xau_vwap_pullback shadow_only={xau_shadow}",
             f"kill_switch: {ks}",
             f"دلیل: {reason}",
             f"تأیید Live (.env): {live_ok}",
@@ -819,7 +814,6 @@ class TelegramControlBot:
         self._reload_settings()
         from chronoscalp.risk.position_sizing import resolve_active_risk_pct
 
-        strats = self._current_strategies()
         catalog_lines = self._catalog_lines()
         risk = resolve_active_risk_pct(self.settings.risk)
         symbols = ", ".join(self.settings.symbols) or "—"
@@ -832,22 +826,9 @@ class TelegramControlBot:
             self._connection_summary()
             + "\n\nکنترل / Control\n"
             + f"symbols={symbols}\n"
-            + "strategies_from_symbols:\n"
+            + "strategies:\n"
             + ("".join(f"  {line}\n" for line in catalog_lines) or "  (none)\n")
             + f"source={self._settings_source()} (restart required)\n"
-            + f"multi_strategy_mode={self.settings.execution.get('multi_strategy_mode', 'comparison')}\n"
-            + (
-                "xau_vwap_pullback="
-                + (
-                    "shadow"
-                    if (self.settings.strategy.get("xau_vwap_pullback") or {}).get(
-                        "shadow_only", True
-                    )
-                    and "xau_vwap_pullback" in strats
-                    else ("on" if "xau_vwap_pullback" in strats else "off")
-                )
-                + "\n"
-            )
             + f"trading_hours={hours}\n"
             + f"risk_effective={risk}%\n"
             + f"daily_loss_limit={daily_loss}"
@@ -1125,9 +1106,8 @@ class TelegramControlBot:
         preview = format_catalog_lines(self.settings.strategy, selected, labels=STRATEGY_LABELS)
         preview_txt = "\n".join(f"  {line}" for line in preview) or "  (هیچکدام)"
         msg = (
-            "نمادها — روی هر نماد بزنید تا روشن/خاموش شود، بعد «ذخیره نمادها».\n"
-            "با ذخیره، تمام استراتژی‌های همان نماد (اسکلپ، دلتا، SMC، خبر، …) "
-            "خودکار فعال می‌شود. انتخاب جداگانهٔ استراتژی وجود ندارد.\n"
+            "نمادها — روی هر نماد بزنید، بعد «ذخیره نمادها».\n"
+            "طلا و یورو: دلتا + اسکلپ M1\n"
             f"انتخاب فعلی: {active}\n{preview_txt}"
         )
         if note:
@@ -1146,10 +1126,7 @@ class TelegramControlBot:
         body = "\n".join(f"• {line}" for line in lines) or "• هیچ نمادی انتخاب نشده"
         self.send(
             chat_id,
-            "استراتژی‌ها از روی نماد می‌آیند — گزینه‌ای برای روشن/خاموش کردن "
-            "جداگانه وجود ندارد.\n"
-            "طلا: دلتا · SMC · نقدینگی · اسکلپ M1 · خبر · پولبک VWAP\n"
-            "یورو: دلتا · SMC · نقدینگی · اسکلپ M1 · خبر\n\n"
+            "هر نماد فقط دلتا و اسکلپ M1 دارد.\n\n"
             f"{body}\n\nبرای تغییر، نمادها را عوض کنید سپس Stop/Start.",
             reply_markup=CONTROL_KEYBOARD,
         )

@@ -43,21 +43,8 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         strategy={
             "derive_strategies_from_symbols": True,
             "symbol_catalogs": {
-                "XAUUSD": [
-                    "delta",
-                    "smc_confluence",
-                    "liquidity_volume",
-                    "ultra_scalp",
-                    "news_straddle",
-                    "xau_vwap_pullback",
-                ],
-                "EURUSD": [
-                    "delta",
-                    "smc_confluence",
-                    "liquidity_volume",
-                    "ultra_scalp",
-                    "news_straddle",
-                ],
+                "XAUUSD": ["delta", "ultra_scalp"],
+                "EURUSD": ["delta", "ultra_scalp"],
             },
             "enabled_strategies": ["smc_confluence"],
             "use_smc_confluence": True,
@@ -307,9 +294,9 @@ def test_symbols_menu_toggle_and_save(
 def test_strategies_button_is_read_only_catalog(bot: TelegramControlBot) -> None:
     bot.handle(42, "استراتژی‌ها")
     text = bot.send.call_args.args[1]
-    assert "از روی نماد" in text
-    assert "XAUUSD" in text
     assert "دلتا" in text
+    assert "XAUUSD" in text
+    assert "اسکلپ M1" in text
     assert "ذخیره استراتژی" not in text
     kb = bot.send.call_args.kwargs.get("reply_markup") or {}
     labels = {b["text"] for row in kb.get("keyboard", []) for b in row}
@@ -319,10 +306,11 @@ def test_strategies_button_is_read_only_catalog(bot: TelegramControlBot) -> None
 def test_status_lists_per_symbol_catalog(bot: TelegramControlBot) -> None:
     bot.handle(42, "/status")
     text = bot.send.call_args.args[1]
-    assert "از روی نماد" in text
+    assert "استراتژی" in text
     assert "XAUUSD" in text
     assert "دلتا" in text
-    assert "پولبک VWAP" in text
+    assert "اسکلپ M1" in text
+    assert "پولبک VWAP" not in text
 
 
 def test_status_shows_the_loaded_stop_geometry(bot: TelegramControlBot) -> None:
@@ -624,16 +612,16 @@ def test_status_warns_when_logs_show_mt5_ipc(bot: TelegramControlBot) -> None:
     assert "IPC timeout" in bot.send.call_args.args[1]
 
 
-def test_gold_catalog_includes_vwap_eur_does_not(bot: TelegramControlBot) -> None:
+def test_gold_and_eur_catalogs_are_delta_and_scalp(bot: TelegramControlBot) -> None:
     bot.settings.symbols = ["XAUUSD", "EURUSD"]
     bot.handle(42, "استراتژی نمادها")
     text = bot.send.call_args.args[1]
     gold_line = next(line for line in text.splitlines() if line.startswith("• XAUUSD"))
     eur_line = next(line for line in text.splitlines() if line.startswith("• EURUSD"))
-    assert "پولبک VWAP" in gold_line
-    assert "پولبک VWAP" not in eur_line
-    assert "اسکلپ M1" in gold_line
-    assert "اسکلپ M1" in eur_line
+    assert "دلتا" in gold_line and "اسکلپ M1" in gold_line
+    assert "دلتا" in eur_line and "اسکلپ M1" in eur_line
+    assert "پولبک VWAP" not in text
+    assert "SMC" not in gold_line
     assert 42 not in bot._pending
 
 
@@ -641,8 +629,8 @@ def test_status_shows_settings_source_and_mode(bot: TelegramControlBot) -> None:
     bot.handle(42, "/status")
     text = bot.send.call_args.args[1]
     assert "منبع تنظیم" in text
-    assert "multi_strategy_mode" in text
-    assert "shadow_only" in text
+    assert "دلتا" in text
+    assert "shadow_only" not in text
 
 
 def test_getupdates_http_timeout_outlives_long_poll(

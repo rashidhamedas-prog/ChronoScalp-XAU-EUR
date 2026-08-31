@@ -47,35 +47,24 @@ strategy:
   # institutional = sweep+MSS+RVOL+SMC; legacy_macd = old MACD path
   entry_engine: institutional
   require_trend_alignment: true
-  # Selecting a symbol activates that symbol's catalog. The operator no longer
-  # picks engines. Overlay enabled_strategies is ignored while this is true.
+  # Selecting a symbol activates Delta + M1 scalp. Overlay enabled_strategies
+  # is ignored while this is true.
   derive_strategies_from_symbols: true
   symbol_catalogs:
     XAUUSD:
       - delta
-      - smc_confluence
-      - liquidity_volume
       - ultra_scalp
-      - news_straddle
-      - xau_vwap_pullback
     EURUSD:
       - delta
-      - smc_confluence
-      - liquidity_volume
       - ultra_scalp
-      - news_straddle
   enabled_strategies:
-    - smc_confluence
-    - liquidity_volume
     - delta
-    - xau_vwap_pullback
     - ultra_scalp
-    - news_straddle
-  use_smc_confluence: true
-  use_liquidity_volume: true
+  use_smc_confluence: false
+  use_liquidity_volume: false
   use_ultra_scalp: true
-  use_news_straddle: true
-  use_xau_vwap_pullback: true
+  use_news_straddle: false
+  use_xau_vwap_pullback: false
   liquidity_rvol_min: 1.5
   # Shared institutional floor; per-symbol books override via symbol_overrides.
   # Live 2026-08-31: gold/EUR bars sat at rvol 0.80-1.46 against a 1.50 gate,
@@ -216,10 +205,9 @@ strategy:
         atr_multiplier: 2.0
 
   xau_vwap_pullback:
-    # Operator live-enabled 2026-08-23. 1%/1.5R/3% heat unchanged.
-    # Walk-forward checklist in docs/STRATEGY_XAU_VWAP_PULLBACK.md is still advised.
-    enabled: true
-    shadow_only: false
+    # Kept for research / tests. Not in the live catalog.
+    enabled: false
+    shadow_only: true
     live_ready: true
     allowed_symbols: [XAUUSD]
     ema_slope_bars: 3

@@ -12,9 +12,8 @@ Strategy Delta is implemented in `strategy/delta.py` for XAUUSD/EURUSD. Treat
 `docs/STRATEGY_DELTA.md` as its specification. Do not enable it for live money
 until the validation checklist there is complete.
 Telegram no longer has a strategy picker. Selecting a symbol activates that
-symbol's catalog (gold: Delta + SMC + liquidity + M1 scalp + news + VWAP;
-EUR: Delta + SMC + liquidity + M1 scalp + news). Overlay `enabled_strategies`
-is ignored while `derive_strategies_from_symbols` is true.
+symbol's catalog (gold and EUR: Delta + M1 scalp). Overlay
+`enabled_strategies` is ignored while `derive_strategies_from_symbols` is true.
 
 Phases 1–4 of the roadmap are scaffolded with real (not placeholder) logic:
 data pipeline, indicators, SMC structure detection, session/news filters, risk

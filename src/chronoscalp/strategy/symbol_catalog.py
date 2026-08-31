@@ -1,10 +1,8 @@
 """Per-symbol strategy catalogs — selecting a symbol enables its engines.
 
-Operators pick symbols only. Each symbol owns the engines whose setup can
-actually fire on that market. A gold VWAP pullback never evaluates EURUSD;
-an ECB news straddle is not required for XAUUSD. Overlay
-``enabled_strategies`` is ignored whenever catalogs are present so a stale
-picker cannot silently disable news, SMC, or scalp.
+Operators pick symbols only. Gold and EUR each run Delta plus an M1 scalp.
+Overlay ``enabled_strategies`` is ignored whenever catalogs are present so a
+stale picker cannot silently change the live book.
 """
 
 from __future__ import annotations
@@ -23,23 +21,9 @@ KNOWN_STRATEGY_IDS: frozenset[str] = frozenset(
 )
 
 # Built-in catalogs used when config omits ``symbol_catalogs``.
-# These are the live XAUUSD / EURUSD books — not a generic FX template.
 DEFAULT_SYMBOL_CATALOGS: dict[str, tuple[str, ...]] = {
-    "XAUUSD": (
-        "delta",
-        "smc_confluence",
-        "liquidity_volume",
-        "ultra_scalp",
-        "news_straddle",
-        "xau_vwap_pullback",
-    ),
-    "EURUSD": (
-        "delta",
-        "smc_confluence",
-        "liquidity_volume",
-        "ultra_scalp",
-        "news_straddle",
-    ),
+    "XAUUSD": ("delta", "ultra_scalp"),
+    "EURUSD": ("delta", "ultra_scalp"),
 }
 
 

@@ -2,6 +2,50 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-08-31 TASK-004 Delta + M1 scalp only
+
+- Time (UTC): 2026-08-31T21:35:00Z
+- Task / owner / role: TASK-004 / cursor:grok-4.6 / implementer
+- Objective: operator asked why the live bot still opened nothing, then to
+  keep only Delta + one scalp per gold/EUR and strip extra catalog copy
+  from Telegram.
+
+### Live evidence (VPS 45.90.98.99, 2026-08-31 ~14:29 local)
+
+Kill switch off. Overlay still listed liquidity/delta/VWAP; catalogs overrode
+it to the full book. Zero `Opened` lines. Dominant skips:
+
+- `news_straddle_place_blocked` every tick (Finnhub 403)
+- `delta:regime_neutral` on both symbols
+- SMC/liquidity `low_rvol` (EUR 0.14–0.62 vs 1.20)
+- scalp `weak_impulse` / `low_rvol`
+- occasional EUR `spread_ma` (4.5–4.9 > median 0.60 × 2.5)
+
+### Product
+
+- Default and settings catalogs: `delta` + `ultra_scalp` for XAUUSD and EURUSD
+- SMC / liquidity / news / VWAP flags off; VWAP `enabled: false`
+- Telegram status/catalog/help and panel hints no longer list the dropped
+  engines or VWAP shadow
+- 1% / 1.5 R:R / 3% heat and `CHRONOSCALP_CONFIRM_LIVE` unchanged
+
+### Claim reclaim
+
+`tests/test_xau_vwap_pullback.py` and
+`config/runtime_overrides.demo_shadow.example.yaml` from stale TASK-002
+(heartbeat 2026-08-25).
+
+### Gates (this session)
+
+- `pytest -q --basetemp .tmp_pytest_task004_full` → exit 0
+- `ruff check src tests scripts/app.py` → All checks passed
+- `black --check` on touched Python files → 8 files unchanged
+
+### Next action
+
+Merge to main, deploy, patch VPS overlay `enabled_strategies` to
+`[delta, ultra_scalp]`, restart live + Telegram.
+
 ## 2026-08-31 TASK-004 Telegram unresponsive: send retry + poll idle
 
 - Time (UTC): 2026-08-31T12:15:00Z
