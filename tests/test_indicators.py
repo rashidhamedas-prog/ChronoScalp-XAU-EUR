@@ -5,12 +5,14 @@ import pandas as pd
 import pytest
 
 from chronoscalp.indicators.technical import (
+    adx,
     atr,
     bollinger_bands,
     ema,
     enrich_with_indicators,
     macd,
     rsi,
+    stochastic,
 )
 
 
@@ -82,9 +84,31 @@ def test_enrich_with_indicators_adds_expected_columns():
         "bb_lower",
         "atr",
         "rvol",
+        "ema_20",
+        "adx",
+        "plus_di",
+        "minus_di",
+        "stoch_k",
+        "stoch_d",
     }
     assert expected.issubset(set(enriched.columns))
     assert len(enriched) == len(df)
+
+
+def test_adx_in_uptrend_has_plus_di_above_minus_di():
+    df = _make_ohlcv(n=80, trend=0.4, seed=1)
+    result = adx(df)
+    last = result.dropna().iloc[-1]
+    assert 0 <= last["adx"] <= 100
+    assert last["plus_di"] > last["minus_di"]
+
+
+def test_stochastic_bounds():
+    df = _make_ohlcv()
+    result = stochastic(df)
+    valid = result.dropna()
+    assert (valid["stoch_k"] >= 0).all()
+    assert (valid["stoch_k"] <= 100).all()
 
 
 def test_relative_volume_above_average_when_spike():

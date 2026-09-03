@@ -2,6 +2,35 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-09-03 TASK-005 operator style: ADX + Stochastic
+
+- Time (UTC): 2026-09-03T21:55:00Z
+- Task / owner / role: TASK-005 / cursor:grok-4.6 / implementer
+- Reclaimed stale TASK-001 `tests/test_delta_strategy.py` (heartbeat 2026-08-17).
+
+### Operator style (MT5 magic=0, 14d, login 55625500)
+
+- 400 manual tickets → 16 bursts, basket WR 87.5%, +$58,395.
+- Gold: 7 bursts, 6 winners, **all** Iran 13:00–18:00, M15 ADX ≥ 22.
+  Large SELL baskets faded RSI 69–78 / Stoch 80+ spikes. BUY baskets were
+  M5 Stoch 21–33 pullbacks while H1/M15 stayed above the fast EMA.
+- EUR: 0.01 grids + 5-lot hedges / mixed BUY+SELL. Directional subset
+  sold M5 overbought while H1 was below EMA. Grid and 6–25 lot gold
+  scale-in are **not** copied.
+
+### Product
+
+- Indicators: Wilder ADX + stochastic on every enriched frame.
+- Delta `operator_style`: gold fade/pullback + sweep; EUR fade/pullback only.
+- Gold `reward_risk_ratio: 1.50` (the floor, not below it).
+- 1% / 1.5R / 3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- 75% ticket WR is not claimed.
+
+### Next action
+
+pytest/ruff, commit, merge to main, patch VPS overlay catalogs + restart.
+Do not copy martingale/grid.
+
 ## 2026-09-03 TASK-005 Delta + news straddle; halt M1 scalp
 
 - Time (UTC): 2026-09-03T20:50:00Z
