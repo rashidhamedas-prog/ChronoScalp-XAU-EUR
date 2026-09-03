@@ -12,7 +12,6 @@ from typing import Any
 
 import pandas as pd
 
-from chronoscalp.strategy.operator_style import evaluate_operator_style
 from chronoscalp.utils.types import Signal, SignalType, Timeframe, TrendDirection
 
 
@@ -158,38 +157,13 @@ def generate_delta_signal(
     if rvol < float(cfg.get("rvol_min", 1.15)):
         return _none(symbol, "low_rvol")
 
-    style_cfg = cfg.get("operator_style") or {}
-    style_on = bool(style_cfg.get("enabled", False))
-    allowed_setups = {
-        str(item)
-        for item in (
-            style_cfg.get("allowed_setups")
-            or ["sweep_reclaim", "breakout_retest", "fade_extension", "htf_pullback"]
-        )
-    }
-    sweep_allowed = bool(allowed_setups & {"sweep_reclaim", "breakout_retest"})
-    m15 = higher_frames[0] if higher_frames else None
-    m5 = higher_frames[1] if len(higher_frames) > 1 else m15
-    style_setup = ""
-    direction = TrendDirection.NEUTRAL
-    if style_on:
-        verdict = evaluate_operator_style(m15, m5, config=style_cfg)
-        if verdict.reason == "weak_adx":
-            return _none(symbol, "weak_adx")
-        if verdict.allow and verdict.setup in allowed_setups:
-            direction = verdict.direction
-            style_setup = verdict.setup
-        elif not sweep_allowed:
-            return _none(symbol, verdict.reason or "no_operator_setup")
-
-    if not style_setup:
-        direction = delta_regime(
-            higher_frames,
-            ema_period=ema_period,
-            slope_bars=max(1, int(cfg.get("slope_bars", 3))),
-        )
-        if direction == TrendDirection.NEUTRAL:
-            return _none(symbol, "regime_neutral")
+    direction = delta_regime(
+        higher_frames,
+        ema_period=ema_period,
+        slope_bars=max(1, int(cfg.get("slope_bars", 3))),
+    )
+    if direction == TrendDirection.NEUTRAL:
+        return _none(symbol, "regime_neutral")
 
     history = trigger_df.iloc[-(lookback + 2) : -2]
     range_high = float(history["high"].max())
@@ -197,38 +171,26 @@ def generate_delta_signal(
     close = float(last["close"])
     candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
     body = abs(close - float(last["open"]))
-
-    if style_setup:
-        if direction == TrendDirection.BULLISH:
-            structural_stop = min(float(prev["low"]), float(last["low"]))
-            signal_type = SignalType.BUY
-        else:
-            structural_stop = max(float(prev["high"]), float(last["high"]))
-            signal_type = SignalType.SELL
-        setup = style_setup
+    if body / candle_range < float(cfg.get("min_body_fraction", 0.45)):
+        return _none(symbol, "weak_close")
+    if direction == TrendDirection.BULLISH:
+        sweep = float(prev["low"]) < range_low and float(prev["close"]) > range_low
+        retest = float(prev["close"]) > range_high and float(last["low"]) <= range_high < close
+        confirmed = close > float(last["open"]) and close > float(prev["close"])
+        if not confirmed or not (sweep or retest):
+            return _none(symbol, "no_long_trigger")
+        structural_stop = min(float(prev["low"]), float(last["low"]))
+        signal_type = SignalType.BUY
+        setup = "sweep_reclaim" if sweep else "breakout_retest"
     else:
-        if body / candle_range < float(cfg.get("min_body_fraction", 0.45)):
-            return _none(symbol, "weak_close")
-        if direction == TrendDirection.BULLISH:
-            sweep = float(prev["low"]) < range_low and float(prev["close"]) > range_low
-            retest = float(prev["close"]) > range_high and float(last["low"]) <= range_high < close
-            confirmed = close > float(last["open"]) and close > float(prev["close"])
-            if not confirmed or not (sweep or retest):
-                return _none(symbol, "no_long_trigger")
-            structural_stop = min(float(prev["low"]), float(last["low"]))
-            signal_type = SignalType.BUY
-            setup = "sweep_reclaim" if sweep else "breakout_retest"
-        else:
-            sweep = float(prev["high"]) > range_high and float(prev["close"]) < range_high
-            retest = float(prev["close"]) < range_low and float(last["high"]) >= range_low > close
-            confirmed = close < float(last["open"]) and close < float(prev["close"])
-            if not confirmed or not (sweep or retest):
-                return _none(symbol, "no_short_trigger")
-            structural_stop = max(float(prev["high"]), float(last["high"]))
-            signal_type = SignalType.SELL
-            setup = "sweep_reclaim" if sweep else "breakout_retest"
-        if setup not in allowed_setups:
-            return _none(symbol, "setup_not_allowed")
+        sweep = float(prev["high"]) > range_high and float(prev["close"]) < range_high
+        retest = float(prev["close"]) < range_low and float(last["high"]) >= range_low > close
+        confirmed = close < float(last["open"]) and close < float(prev["close"])
+        if not confirmed or not (sweep or retest):
+            return _none(symbol, "no_short_trigger")
+        structural_stop = max(float(prev["high"]), float(last["high"]))
+        signal_type = SignalType.SELL
+        setup = "sweep_reclaim" if sweep else "breakout_retest"
 
     ref_atr = reference_stop_atr(cfg, atr, higher_frames)
     buffer = float(cfg.get("stop_buffer_atr", 0.20)) * ref_atr

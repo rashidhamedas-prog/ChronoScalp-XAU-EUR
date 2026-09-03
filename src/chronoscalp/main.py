@@ -1948,6 +1948,7 @@ class TradingBot:
                     use_smc
                     or use_liq
                     or enabled.delta
+                    or enabled.operator_style
                     or enabled.xau_vwap_pullback
                     or (not use_scalp)
                 )

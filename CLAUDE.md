@@ -12,8 +12,8 @@ Strategy Delta is implemented in `strategy/delta.py` for XAUUSD/EURUSD. Treat
 `docs/STRATEGY_DELTA.md` as its specification. Do not enable it for live money
 until the validation checklist there is complete.
 Telegram no longer has a strategy picker. Selecting a symbol activates that
-symbol's catalog (gold: Delta + news straddle; EUR: fade/pullback Delta +
-news straddle). Overlay `enabled_strategies` is ignored while
+symbol's catalog (gold: Delta + operator style + news straddle; EUR: operator
+style + news straddle). Overlay `enabled_strategies` is ignored while
 `derive_strategies_from_symbols` is true.
 
 Phases 1–4 of the roadmap are scaffolded with real (not placeholder) logic:
@@ -87,6 +87,7 @@ for ChronoScalp. Mirrored in `.cursor/rules/auto-commit-push.mdc` and
 | Add/adjust an indicator | `src/chronoscalp/indicators/technical.py` |
 | Change entry/trend-alignment logic | `src/chronoscalp/strategy/multi_timeframe.py` |
 | Change position sizing / breakeven / trailing | `src/chronoscalp/risk/position_sizing.py` |
+| Operator-style fade/pullback | `src/chronoscalp/strategy/operator_style.py` |
 | Add a news source | `src/chronoscalp/filters/news_filter.py` |
 | Control via Telegram | `src/chronoscalp/telegram/control_bot.py`, `scripts/telegram_control_bot.py` |
 | News ATR straddle | `filters/news_calendar.py`, `strategy/news_straddle_engine.py`, Broker pending APIs |

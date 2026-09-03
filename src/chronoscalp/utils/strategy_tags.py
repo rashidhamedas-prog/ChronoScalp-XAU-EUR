@@ -9,6 +9,7 @@ STRATEGY_NEWS_STRADDLE = "news_straddle"
 STRATEGY_SMC = "smc_confluence"
 STRATEGY_LIQUIDITY = "liquidity_volume"
 STRATEGY_DELTA = "delta"
+STRATEGY_OPERATOR_STYLE = "operator_style"
 STRATEGY_XAU_VWAP_PULLBACK = "xau_vwap_pullback"
 STRATEGY_UNKNOWN = "unknown"
 
@@ -20,6 +21,7 @@ STRATEGY_REPORT_ORDER: tuple[str, ...] = (
     STRATEGY_SMC,
     STRATEGY_LIQUIDITY,
     STRATEGY_DELTA,
+    STRATEGY_OPERATOR_STYLE,
     STRATEGY_XAU_VWAP_PULLBACK,
     STRATEGY_UNKNOWN,
 )
@@ -44,6 +46,7 @@ def normalize_strategy_tag(raw: str | None) -> str:
         (STRATEGY_SMC, ("smc_confluence", "smc")),
         (STRATEGY_LIQUIDITY, ("liquidity_volume", "liquidity_sweep", "liquidity")),
         (STRATEGY_DELTA, ("delta",)),
+        (STRATEGY_OPERATOR_STYLE, ("operator_style", "operatorstyle")),
         (STRATEGY_XAU_VWAP_PULLBACK, ("xau_vwap_pullback", "xauvwappullback")),
     )
     if head == "news":
@@ -60,6 +63,7 @@ def normalize_strategy_tag(raw: str | None) -> str:
         STRATEGY_SMC,
         STRATEGY_LIQUIDITY,
         STRATEGY_DELTA,
+        STRATEGY_OPERATOR_STYLE,
         STRATEGY_XAU_VWAP_PULLBACK,
     }:
         return head

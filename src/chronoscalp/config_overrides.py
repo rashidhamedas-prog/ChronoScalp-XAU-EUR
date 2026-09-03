@@ -19,6 +19,7 @@ KNOWN_STRATEGIES = frozenset(
         "ultra_scalp",
         "news_straddle",
         "delta",
+        "operator_style",
         "xau_vwap_pullback",
     }
 )
@@ -135,6 +136,7 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
             "use_ultra_scalp",
             "use_news_straddle",
             "use_delta",
+            "use_operator_style",
             "use_xau_vwap_pullback",
         ):
             if flag in strategy:

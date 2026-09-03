@@ -2,6 +2,30 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-09-03 TASK-005 standalone operator_style engine
+
+- Time (UTC): 2026-09-03T23:40:00Z
+- Task / owner / role: TASK-005 / cursor:grok-4.6 / implementer
+- Reclaimed stale TASK-002 (heartbeat 2026-08-25) claims:
+  `multi_timeframe.py`, `strategy_tags.py`, `config_overrides.py`,
+  `broker_wizard.py`, `tests/test_strategy.py`. `main.py` was on done
+  TASK-004.
+
+### Product
+
+- `operator_style` is its own engine: Iran 13:00–18:30, M15 ADX gate,
+  gold fade = stoch AND RSI, EUR fade may be stoch-only, fade_rollover,
+  HTF pullback with M5 confirmation. Cost-aware 1.50R geometry.
+- Unplugged from Delta. Delta gold `allowed_symbols: [XAUUSD]`, TP 1.80R.
+- Catalogs: gold delta+operator_style+news_straddle; EUR operator_style+news_straddle.
+- 1% / 1.5R / 3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+- 75% ticket WR is not claimed. Scale-in/grid/hedge not copied.
+
+### Next action
+
+pytest/ruff, commit, merge to main, patch VPS overlay catalogs to include
+`operator_style`, ASCII restart. Do not copy martingale/grid.
+
 ## 2026-09-03 TASK-005 operator style: ADX + Stochastic
 
 - Time (UTC): 2026-09-03T21:55:00Z

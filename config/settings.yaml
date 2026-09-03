@@ -50,22 +50,26 @@ strategy:
   # Selecting a symbol activates its catalog. Overlay enabled_strategies
   # is ignored while this is true. M1 ultra_scalp is off after the
   # 2026-08-27..09-03 live week: 46 CS_ultra_scalp tickets, -$6.9k.
-  # EURUSD Delta stays off the EUR book (failed 4/4 stop-outs, E[R] -1.00).
+  # EURUSD sweep-Delta stays off the EUR book (failed 4/4 stop-outs).
   derive_strategies_from_symbols: true
   symbol_catalogs:
     XAUUSD:
       - delta
+      - operator_style
       - news_straddle
     EURUSD:
-      - delta
+      - operator_style
       - news_straddle
   enabled_strategies:
     - delta
+    - operator_style
     - news_straddle
   use_smc_confluence: false
   use_liquidity_volume: false
   use_ultra_scalp: false
   use_news_straddle: true
+  use_delta: true
+  use_operator_style: true
   use_xau_vwap_pullback: false
   liquidity_rvol_min: 1.5
   # Shared institutional floor; per-symbol books override via symbol_overrides.
@@ -83,32 +87,15 @@ strategy:
       atr_stop_multiple: 1.8
       atr_target_multiple: 2.70
   delta:
-    # Catalog-owned: gold is validated (PF 1.75 / +0.28R). EURUSD sweep-Delta
-    # is failed (4 trades / −1.00R). EUR is back on the book as fade/pullback
-    # only (operator M5 overbought-in-H1-downtrend), not the failed sweep path.
-    allowed_symbols: [XAUUSD, EURUSD]
+    # Catalog-owned: gold is validated (PF 1.75 / +0.28R at 1.8R). EURUSD
+    # sweep-Delta is failed (4 trades / −1.00R) and stays off the EUR book.
+    allowed_symbols: [XAUUSD]
     structure_lookback: 12
     slope_bars: 3
     rvol_min: 1.15
     min_body_fraction: 0.45
     min_atr_close_ratio: 0.00004
     max_atr_close_ratio: 0.004
-    # Operator magic=0 gold (14d to 2026-09-03): 7 bursts, 86% basket WR,
-    # Iran 13:00-18:00, M15 ADX always ≥22. Large wins faded RSI/Stoch spikes;
-    # buys were M5 pullbacks in an HTF uptrend. Encode those two indicators.
-    # Do not copy 6-25 lot scale-in. Floor stays 1.5R (gold TP at the floor
-    # matches the operator's 2-12 minute / $4-6 hold better than 1.8R).
-    operator_style:
-      enabled: true
-      min_adx: 25
-      fade_rsi: 70
-      fade_stoch: 80
-      pullback_stoch: 25
-      allowed_setups:
-        - sweep_reclaim
-        - breakout_retest
-        - fade_extension
-        - htf_pullback
     # Scale stops off a higher timeframe, not the M1 trigger bar. Measured
     # 2026-08-26: XAUUSD M1 ATR $1.57 vs median M1 bar range $1.50, so the old
     # 0.8-2.5x M1 band ($1.26-$3.93) put the minimum stop *inside* one average
@@ -122,7 +109,7 @@ strategy:
     min_stop_spread_multiple: 2.0
     # Round-trip spread must stay under this share of the money at risk.
     max_cost_fraction_of_risk: 0.15
-    reward_risk_ratio: 1.50
+    reward_risk_ratio: 1.80
     # Per-symbol geometry: gold's M5 ATR is ~$4.26 while EURUSD's is ~2.0 pips,
     # and their M5/M1 ATR ratios differ (2.7x vs 2.2x), so one band cannot fit
     # both. Any Delta key above may be overridden per symbol.
@@ -130,20 +117,11 @@ strategy:
       XAUUSD:
         min_stop_atr: 0.80
         max_stop_atr: 2.00
-        reward_risk_ratio: 1.50
+        reward_risk_ratio: 1.80
       EURUSD:
         min_stop_atr: 1.50
         max_stop_atr: 3.50
-        reward_risk_ratio: 1.50
-        operator_style:
-          enabled: true
-          min_adx: 20
-          fade_rsi: 70
-          fade_stoch: 80
-          pullback_stoch: 25
-          allowed_setups:
-            - fade_extension
-            - htf_pullback
+        reward_risk_ratio: 1.80
     # Recorded broker-native verdict per symbol. Surfaced by the live-loop
     # startup gate profile and Telegram status so an unvalidated symbol cannot
     # be enabled unknowingly. Reported, never enforced — enabling anyway stays
@@ -156,6 +134,54 @@ strategy:
       # 2026-08-29 same window and engine: 4 trades, 0% wins, E[R] exactly
       # -1.00 — every one a full stop-out, none reached breakeven or the trail.
       EURUSD: failed
+  operator_style:
+    # Magic=0 gold (14d to 2026-09-03): 7 bursts, 86% *basket* WR, Iran
+    # 13:00-18:00, M15 ADX always ≥22. Large wins faded RSI/Stoch spikes;
+    # buys were M5 pullbacks in an HTF uptrend. One sell was a rollover
+    # (M15 still stretched, M5 already dumped). Encoded as a single 1%
+    # ticket — not 6-25 lot scale-in, not a EUR 0.01 grid, not a hedge.
+    # 75% ticket WR is not claimed. Gold fade requires stoch AND RSI;
+    # EUR directional sells were stoch-extreme with RSI ~62.
+    enabled: true
+    allowed_symbols: [XAUUSD, EURUSD]
+    require_session: true
+    session_timezone: Asia/Tehran
+    session_start: "13:00"
+    session_end: "18:30"
+    min_adx: 25
+    fade_rsi: 70
+    fade_stoch: 80
+    fade_require_both: true
+    pullback_stoch: 25
+    allowed_setups:
+      - fade_extension
+      - fade_rollover
+      - htf_pullback
+    structure_lookback: 3
+    stop_atr_source: htf
+    stop_atr_htf_index: 0
+    stop_buffer_atr: 0.20
+    min_stop_atr: 0.80
+    max_stop_atr: 2.00
+    min_stop_spread_multiple: 2.0
+    max_cost_fraction_of_risk: 0.15
+    reward_risk_ratio: 1.50
+    symbol_overrides:
+      XAUUSD:
+        min_adx: 25
+        fade_require_both: true
+        min_stop_atr: 0.80
+        max_stop_atr: 2.00
+        reward_risk_ratio: 1.50
+      EURUSD:
+        min_adx: 20
+        fade_require_both: false
+        min_stop_atr: 1.50
+        max_stop_atr: 3.50
+        reward_risk_ratio: 1.50
+    symbol_validation:
+      XAUUSD: unvalidated
+      EURUSD: unvalidated
   atr_stop_multiple: 1.5
   atr_target_multiple: 2.25
   min_signal_confidence: 0.55

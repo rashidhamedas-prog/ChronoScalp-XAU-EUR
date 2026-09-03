@@ -207,6 +207,7 @@ def apply_risk_preset(
 
 KNOWN_STRATEGIES: tuple[str, ...] = (
     "delta",
+    "operator_style",
     "smc_confluence",
     "liquidity_volume",
     "ultra_scalp",
@@ -326,6 +327,7 @@ def apply_enabled_strategies(
     strategy["use_ultra_scalp"] = "ultra_scalp" in seen
     strategy["use_news_straddle"] = "news_straddle" in seen
     strategy["use_delta"] = "delta" in seen
+    strategy["use_operator_style"] = "operator_style" in seen
     strategy["use_xau_vwap_pullback"] = "xau_vwap_pullback" in seen
     xau = dict(strategy.get("xau_vwap_pullback") or {})
     # Research gate lives in committed settings.yaml; UI/API cannot flip it.

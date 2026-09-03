@@ -102,6 +102,7 @@ class EnabledStrategies:
     ultra_scalp: bool = False
     news_straddle: bool = False
     delta: bool = False
+    operator_style: bool = False
     xau_vwap_pullback: bool = False
 
     def names(self) -> list[str]:
@@ -116,6 +117,8 @@ class EnabledStrategies:
             out.append("news_straddle")
         if self.delta:
             out.append("delta")
+        if self.operator_style:
+            out.append("operator_style")
         if self.xau_vwap_pullback:
             out.append("xau_vwap_pullback")
         return out
@@ -129,6 +132,7 @@ class EnabledStrategies:
             ultra_scalp="ultra_scalp" in keys,
             news_straddle="news_straddle" in keys,
             delta="delta" in keys,
+            operator_style="operator_style" in keys,
             xau_vwap_pullback="xau_vwap_pullback" in keys,
         )
 
@@ -160,6 +164,7 @@ def resolve_enabled_strategies(
         ultra_scalp=bool(strategy_cfg.get("use_ultra_scalp", False)),
         news_straddle=bool(strategy_cfg.get("use_news_straddle", False)),
         delta=bool(strategy_cfg.get("use_delta", False)),
+        operator_style=bool(strategy_cfg.get("use_operator_style", False)),
         xau_vwap_pullback=bool(strategy_cfg.get("use_xau_vwap_pullback", False)),
     )
 
@@ -577,6 +582,7 @@ class MultiTimeframeStrategy:
         use_liq = enabled.liquidity
         use_scalp = enabled.ultra_scalp
         use_delta = enabled.delta
+        use_operator = enabled.operator_style
         use_xau = enabled.xau_vwap_pullback
         scalp_cfg = merge_symbol_overrides(self.strategy_cfg.get("ultra_scalp") or {}, symbol)
         inst_cfg = merge_symbol_overrides(self.strategy_cfg, symbol)
@@ -585,12 +591,11 @@ class MultiTimeframeStrategy:
         symbol_allows_scalp = ultra_scalp_allowed_for_symbol(symbol, scalp_cfg)
         want_scalp = bool(use_scalp and run_scalp and symbol_allows_scalp)
         # Institutional / SMC / liquidity when those modes are on — or the
-        # legacy MACD path when nothing (including Delta) is selected.
-        # Delta-only must not also fire the institutional engine.
-        want_institutional = bool(run_institutional) and (
-            use_smc or use_liq or (not use_scalp and not use_delta and not use_xau)
-        )
+        # legacy MACD path when nothing specialized is selected.
+        specialized = use_scalp or use_delta or use_operator or use_xau
+        want_institutional = bool(run_institutional) and (use_smc or use_liq or not specialized)
         want_delta = bool(run_institutional and use_delta)
+        want_operator = bool(run_institutional and use_operator)
         want_xau = bool(run_institutional and use_xau)
 
         higher_frames = [
@@ -710,7 +715,7 @@ class MultiTimeframeStrategy:
                     inst_passes.append((STRATEGY_SMC, True, False))
                 if use_liq:
                     inst_passes.append((STRATEGY_LIQUIDITY, False, True))
-                if not inst_passes and (not use_scalp and not use_delta and not use_xau):
+                if not inst_passes and not specialized:
                     inst_passes.append(("institutional", False, False))
 
                 for strategy_id, smc_flag, liq_flag in inst_passes:
@@ -765,6 +770,29 @@ class MultiTimeframeStrategy:
                     candidates.append(delta_signal)
                 else:
                     skip_reasons.append(delta_signal.reason or "delta:no_signal")
+
+        if want_operator:
+            m5_df = data_by_timeframe.get(Timeframe.M5)
+            if m5_df is None:
+                m5_df = data_by_timeframe.get(trigger_timeframe)
+            if m5_df is None:
+                skip_reasons.append("operator_style:no_trigger_data")
+            else:
+                from chronoscalp.strategy.operator_style import generate_operator_style_signal
+
+                style_signal = generate_operator_style_signal(
+                    symbol,
+                    m5_df,
+                    higher_frames,
+                    config=dict(self.strategy_cfg.get("operator_style") or {}),
+                    symbol_spec=self.symbols_cfg.get(symbol),
+                    spread_pips=spread_pips,
+                )
+                style_signal = _apply_confidence(style_signal)
+                if style_signal.is_actionable:
+                    candidates.append(style_signal)
+                else:
+                    skip_reasons.append(style_signal.reason or "operator_style:no_signal")
 
         if want_xau:
             xau_tf = Timeframe.M1 if Timeframe.M1 in data_by_timeframe else trigger_timeframe
