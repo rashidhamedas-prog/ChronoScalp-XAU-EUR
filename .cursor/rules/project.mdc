@@ -7,8 +7,8 @@ Strategy Delta lives in `src/chronoscalp/strategy/delta.py`; its specification
 and required validation gates are in `docs/STRATEGY_DELTA.md`. Never describe
 it as guaranteed or live-ready before those gates pass.
 Telegram no longer has a strategy picker. Selecting a symbol activates that
-symbol's catalog (gold: Delta + news straddle; EUR: fade/pullback Delta +
-news straddle). Preserve status visibility of the per-symbol books and the
+symbol's catalog (gold: Delta + operator style + news straddle; EUR: operator
+style + news straddle). Preserve status visibility of the per-symbol books and the
 live/risk gates.
 
 # ChronoScalp XAU/EUR — Cursor Project Rules

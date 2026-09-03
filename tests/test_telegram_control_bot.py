@@ -43,8 +43,8 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         strategy={
             "derive_strategies_from_symbols": True,
             "symbol_catalogs": {
-                "XAUUSD": ["delta", "news_straddle"],
-                "EURUSD": ["delta", "news_straddle"],
+                "XAUUSD": ["delta", "operator_style", "news_straddle"],
+                "EURUSD": ["operator_style", "news_straddle"],
             },
             "enabled_strategies": ["smc_confluence"],
             "use_smc_confluence": True,
@@ -612,14 +612,15 @@ def test_status_warns_when_logs_show_mt5_ipc(bot: TelegramControlBot) -> None:
     assert "IPC timeout" in bot.send.call_args.args[1]
 
 
-def test_gold_and_eur_catalogs_are_delta_and_news_straddle(bot: TelegramControlBot) -> None:
+def test_gold_and_eur_catalogs_show_operator_style(bot: TelegramControlBot) -> None:
     bot.settings.symbols = ["XAUUSD", "EURUSD"]
     bot.handle(42, "استراتژی نمادها")
     text = bot.send.call_args.args[1]
     gold_line = next(line for line in text.splitlines() if line.startswith("• XAUUSD"))
     eur_line = next(line for line in text.splitlines() if line.startswith("• EURUSD"))
-    assert "دلتا" in gold_line and "استرادل خبر" in gold_line
-    assert "دلتا" in eur_line and "استرادل خبر" in eur_line
+    assert "دلتا" in gold_line and "سبک اپراتور" in gold_line and "استرادل خبر" in gold_line
+    assert "سبک اپراتور" in eur_line and "استرادل خبر" in eur_line
+    assert "دلتا" not in eur_line
     assert "پولبک VWAP" not in text
     assert "SMC" not in gold_line
     assert 42 not in bot._pending

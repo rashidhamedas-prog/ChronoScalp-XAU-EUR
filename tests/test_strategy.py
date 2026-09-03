@@ -151,6 +151,10 @@ def test_resolve_enabled_strategies_from_list():
     assert flags.delta is True
     xau = resolve_enabled_strategies({"enabled_strategies": ["xau_vwap_pullback"]})
     assert xau.xau_vwap_pullback and not xau.delta
+    style = resolve_enabled_strategies({"enabled_strategies": ["operator_style"]})
+    assert style.operator_style and not style.delta
+    flags_style = resolve_enabled_strategies({"use_operator_style": True})
+    assert flags_style.operator_style is True
 
 
 def test_ultra_scalp_impulse_buy():

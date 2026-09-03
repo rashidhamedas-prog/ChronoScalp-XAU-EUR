@@ -1,10 +1,10 @@
 """Per-symbol strategy catalogs — selecting a symbol enables its engines.
 
-Operators pick symbols only. Gold runs Delta plus a news straddle
-(pending BUY_STOP + SELL_STOP). EURUSD runs fade/pullback Delta plus the
-straddle — not the failed EUR sweep path. Overlay ``enabled_strategies``
-is ignored whenever catalogs are present so a stale picker cannot silently
-change the live book.
+Operators pick symbols only. Gold runs Delta, the operator-style fade/pullback
+engine, and a news straddle. EURUSD runs operator-style plus the straddle —
+not the failed EUR sweep-Delta path. Overlay ``enabled_strategies`` is ignored
+whenever catalogs are present so a stale picker cannot silently change the
+live book.
 """
 
 from __future__ import annotations
@@ -18,14 +18,15 @@ KNOWN_STRATEGY_IDS: frozenset[str] = frozenset(
         "ultra_scalp",
         "news_straddle",
         "delta",
+        "operator_style",
         "xau_vwap_pullback",
     }
 )
 
 # Built-in catalogs used when config omits ``symbol_catalogs``.
 DEFAULT_SYMBOL_CATALOGS: dict[str, tuple[str, ...]] = {
-    "XAUUSD": ("delta", "news_straddle"),
-    "EURUSD": ("delta", "news_straddle"),
+    "XAUUSD": ("delta", "operator_style", "news_straddle"),
+    "EURUSD": ("operator_style", "news_straddle"),
 }
 
 
