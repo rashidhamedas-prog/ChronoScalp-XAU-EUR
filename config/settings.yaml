@@ -57,6 +57,7 @@ strategy:
       - delta
       - news_straddle
     EURUSD:
+      - delta
       - news_straddle
   enabled_strategies:
     - delta
@@ -82,16 +83,32 @@ strategy:
       atr_stop_multiple: 1.8
       atr_target_multiple: 2.70
   delta:
-    # Catalog-owned: gold is validated (PF 1.75 / +0.28R). EURUSD is failed
-    # (4 trades / −1.00R) and is not in allowed_symbols — the EUR book is
-    # news-straddle only until a redesign has broker-native evidence.
-    allowed_symbols: [XAUUSD]
+    # Catalog-owned: gold is validated (PF 1.75 / +0.28R). EURUSD sweep-Delta
+    # is failed (4 trades / −1.00R). EUR is back on the book as fade/pullback
+    # only (operator M5 overbought-in-H1-downtrend), not the failed sweep path.
+    allowed_symbols: [XAUUSD, EURUSD]
     structure_lookback: 12
     slope_bars: 3
     rvol_min: 1.15
     min_body_fraction: 0.45
     min_atr_close_ratio: 0.00004
     max_atr_close_ratio: 0.004
+    # Operator magic=0 gold (14d to 2026-09-03): 7 bursts, 86% basket WR,
+    # Iran 13:00-18:00, M15 ADX always ≥22. Large wins faded RSI/Stoch spikes;
+    # buys were M5 pullbacks in an HTF uptrend. Encode those two indicators.
+    # Do not copy 6-25 lot scale-in. Floor stays 1.5R (gold TP at the floor
+    # matches the operator's 2-12 minute / $4-6 hold better than 1.8R).
+    operator_style:
+      enabled: true
+      min_adx: 25
+      fade_rsi: 70
+      fade_stoch: 80
+      pullback_stoch: 25
+      allowed_setups:
+        - sweep_reclaim
+        - breakout_retest
+        - fade_extension
+        - htf_pullback
     # Scale stops off a higher timeframe, not the M1 trigger bar. Measured
     # 2026-08-26: XAUUSD M1 ATR $1.57 vs median M1 bar range $1.50, so the old
     # 0.8-2.5x M1 band ($1.26-$3.93) put the minimum stop *inside* one average
@@ -105,7 +122,7 @@ strategy:
     min_stop_spread_multiple: 2.0
     # Round-trip spread must stay under this share of the money at risk.
     max_cost_fraction_of_risk: 0.15
-    reward_risk_ratio: 1.80
+    reward_risk_ratio: 1.50
     # Per-symbol geometry: gold's M5 ATR is ~$4.26 while EURUSD's is ~2.0 pips,
     # and their M5/M1 ATR ratios differ (2.7x vs 2.2x), so one band cannot fit
     # both. Any Delta key above may be overridden per symbol.
@@ -113,10 +130,20 @@ strategy:
       XAUUSD:
         min_stop_atr: 0.80
         max_stop_atr: 2.00
+        reward_risk_ratio: 1.50
       EURUSD:
         min_stop_atr: 1.50
         max_stop_atr: 3.50
-        reward_risk_ratio: 2.00
+        reward_risk_ratio: 1.50
+        operator_style:
+          enabled: true
+          min_adx: 20
+          fade_rsi: 70
+          fade_stoch: 80
+          pullback_stoch: 25
+          allowed_setups:
+            - fade_extension
+            - htf_pullback
     # Recorded broker-native verdict per symbol. Surfaced by the live-loop
     # startup gate profile and Telegram status so an unvalidated symbol cannot
     # be enabled unknowingly. Reported, never enforced — enabling anyway stays
