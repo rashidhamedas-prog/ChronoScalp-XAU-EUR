@@ -47,16 +47,16 @@ strategy:
   # institutional = sweep+MSS+RVOL+SMC; legacy_macd = old MACD path
   entry_engine: institutional
   require_trend_alignment: true
-  # Selecting a symbol activates Delta + news straddle. Overlay
-  # enabled_strategies is ignored while this is true. M1 ultra_scalp is off
-  # after the 2026-08-27..09-03 live week: 46 CS_ultra_scalp tickets, -$6.9k.
+  # Selecting a symbol activates its catalog. Overlay enabled_strategies
+  # is ignored while this is true. M1 ultra_scalp is off after the
+  # 2026-08-27..09-03 live week: 46 CS_ultra_scalp tickets, -$6.9k.
+  # EURUSD Delta stays off the EUR book (failed 4/4 stop-outs, E[R] -1.00).
   derive_strategies_from_symbols: true
   symbol_catalogs:
     XAUUSD:
       - delta
       - news_straddle
     EURUSD:
-      - delta
       - news_straddle
   enabled_strategies:
     - delta
@@ -83,9 +83,9 @@ strategy:
       atr_target_multiple: 2.70
   delta:
     # Catalog-owned: gold is validated (PF 1.75 / +0.28R). EURUSD is failed
-    # (4 trades / −1.00R) but stays in the EUR book because the operator
-    # selected the symbol — verdict is reported, not silently dropped.
-    allowed_symbols: [XAUUSD, EURUSD]
+    # (4 trades / −1.00R) and is not in allowed_symbols — the EUR book is
+    # news-straddle only until a redesign has broker-native evidence.
+    allowed_symbols: [XAUUSD]
     structure_lookback: 12
     slope_bars: 3
     rvol_min: 1.15

@@ -918,6 +918,17 @@ class TradingBot:
                     position.ticket,
                 )
                 self._sync_heat_after_fill(symbol, "news_straddle", reserved)
+        elif straddle_res.action and straddle_res.action not in (
+            "placed",
+            "oco_filled",
+            "filled",
+            "oco_retry",
+            "manage_open",
+            "waiting",
+            "already_active",
+            "noop",
+        ):
+            self._note_skip(f"{symbol}:news_straddle_{straddle_res.action}")
 
     def _committed_heat_pct(self, equity: float) -> float:
         return open_heat_from_dollar_risks(self._open_dollar_risks(), equity)
@@ -1899,11 +1910,15 @@ class TradingBot:
                             "already_active",
                             "noop",
                         ):
-                            if allow_new_entries:
+                            deferred_place = (
+                                straddle_res.action == "place_blocked" and news_wants_place
+                            )
+                            if allow_new_entries and not deferred_place:
                                 self._note_skip(f"{symbol}:news_straddle_{straddle_res.action}")
                             counters = self.attribution.for_strategy("news_straddle")
                             counters.evaluated += 1
-                            counters.record_internal_reject(straddle_res.action)
+                            if not deferred_place:
+                                counters.record_internal_reject(straddle_res.action)
 
                 if not allow_new_entries:
                     continue
