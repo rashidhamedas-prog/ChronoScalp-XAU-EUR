@@ -69,9 +69,21 @@ class NewsFilter:
         events = _load_manual_events(events_yaml_path)
         if api_key:
             try:
-                events = _fetch_events_from_api(api_key) or events
+                api_events = _fetch_events_from_api(api_key)
             except Exception as exc:  # noqa: BLE001 - never let a news-API outage crash trading
-                logger.warning("News API fetch failed, falling back to manual events file: {}", exc)
+                logger.warning(
+                    "News API fetch failed, falling back to {} YAML events: {}",
+                    len(events),
+                    exc,
+                )
+                api_events = None
+            if api_events:
+                events = api_events
+            else:
+                logger.warning(
+                    "News API returned no events; using {} YAML calendar rows",
+                    len(events),
+                )
 
         return cls(
             events=events,

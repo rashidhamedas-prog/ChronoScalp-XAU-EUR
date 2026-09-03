@@ -8,7 +8,16 @@
 - [x] Telegram menu toggle, runtime persistence, and status visibility
 - [x] Streamlit panel strategy picker + unified `resolve_enabled_strategies` (incl. delta-only path)
 - [x] **Symbol-owned catalogs:** operator picks symbols only. XAUUSD and EURUSD books are Delta + M1 scalp. Telegram/panel strategy picker removed. Overlay `enabled_strategies` is ignored while `derive_strategies_from_symbols` is true. 1%/1.5R/3% unchanged. S15 ultra mode stays off (`use_s15_trigger: false`).
-- [x] **Catalog slim (2026-08-31):** SMC, liquidity, news straddle, and VWAP removed from the live books after VPS logs showed they produced skip noise (Finnhub 403, low_rvol, spread_vs_median) and zero opens.
+- [x] **Catalog slim (2026-09-03):** live week 2026-08-27..09-03 on AUSCommercial-Demo
+  showed M1 `ultra_scalp` as the bleeder (46 tickets, MT5 PnL **−$6,947**, WR 37%).
+  Delta was the only bot book in profit (**+$510**, 7 tickets). Operator magic=0
+  gold was burst scale-in (9 baskets, 8 winners, +$57k) during Iran 13:00–18:00 —
+  not copyable at 1% risk (6–25 lots). Overlay had `always_on_24h` and
+  `daily_loss_limit_enabled: false`. Live books are now **Delta + news straddle**.
+  YAML calendar updated for NFP 2026-09-04 12:30 UTC (Finnhub 403 keeps YAML).
+  London window extended to 13:00 local so operator's 13:00 Iran gold hour is
+  not in the London/NY gap. 1%/1.5R/3% unchanged. Do not re-enable ultra_scalp
+  or 24h hours without a new broker-native window that beats Delta.
 - [x] Broker-native history on VPS AUSCommercial-Demo: `XAUUSD`/`EURUSD` M1/M5/M15 (~100k M1/M5; not LiteFinance `_o`) — see `docs/STRATEGY_RESEARCH.md`
 - [x] Limited 45d baseline + 1.5× cost-stress (2026-08-12): XAUUSD survives (E[R]≈0.35, PF≈2.11); EURUSD fails (E[R]<0) — live still disabled
 - [x] Applied evidence to config: EURUSD removed from active symbols; Delta gold-only (`allowed_symbols: [XAUUSD]`)
