@@ -1107,7 +1107,7 @@ class TelegramControlBot:
         preview_txt = "\n".join(f"  {line}" for line in preview) or "  (هیچکدام)"
         msg = (
             "نمادها — روی هر نماد بزنید، بعد «ذخیره نمادها».\n"
-            "طلا و یورو: دلتا + اسکلپ M1\n"
+            "طلا و یورو: دلتا + استرادل خبر\n"
             f"انتخاب فعلی: {active}\n{preview_txt}"
         )
         if note:
@@ -1126,7 +1126,7 @@ class TelegramControlBot:
         body = "\n".join(f"• {line}" for line in lines) or "• هیچ نمادی انتخاب نشده"
         self.send(
             chat_id,
-            "هر نماد فقط دلتا و اسکلپ M1 دارد.\n\n"
+            "هر نماد دلتا و استرادل خبر دارد.\n\n"
             f"{body}\n\nبرای تغییر، نمادها را عوض کنید سپس Stop/Start.",
             reply_markup=CONTROL_KEYBOARD,
         )

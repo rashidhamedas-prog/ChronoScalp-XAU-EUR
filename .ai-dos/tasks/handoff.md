@@ -2,6 +2,44 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-09-03 TASK-005 Delta + news straddle; halt M1 scalp
+
+- Time (UTC): 2026-09-03T20:50:00Z
+- Task / owner / role: TASK-005 / cursor:grok-4.6 / implementer
+- Objective: last-week live forensics (operator asked for >75% WR and +PnL,
+  news-straddle style dual pending, demo patch if evidence is strong).
+
+### Evidence (VPS 45.90.98.99, AUSCommercial-Demo 55625500)
+
+MT5 deals 2026-08-27..09-03 (truth; journal R is still corrupted on externals):
+
+- Bot magic 20260711: 53 tickets, WR 37.7%, **−$6,437**
+  - `CS_ultra_scalp` 46 / 37% / **−$6,947** (overnight 00-08 UTC bleed)
+  - `CS_delta` 7 / 43% / **+$510**
+- Operator magic=0: 400 tickets clustered into **22 bursts**, WR **86.4%**,
+  +$58,395. Gold: 9 bursts, 8 winners (Iran 13:00–18:00), 6–25 lots —
+  Instagram-style scale-in, not 1% risk. EURUSD: 0.01 grid ~21 tickets/burst.
+- Overlay: `always_on_24h`, `daily_loss_limit_enabled: false`,
+  `use_news_straddle: false`, catalogs still delta+ultra_scalp.
+- Finnhub calendar HTTP 403; YAML events were August-only so straddle idled.
+- Duplicate `run_live.py` (venv + Python312). Kill the Python312 copies.
+
+### Product
+
+- Catalogs: `delta` + `news_straddle` for XAUUSD and EURUSD
+- `use_ultra_scalp: false`; YAML NFP 2026-09-04 12:30 UTC + CPI/PPI/FOMC
+- Finnhub 403 keeps YAML; London window 08:00–13:00 local
+- 1% / 1.5 R:R / 3% heat and `CHRONOSCALP_CONFIRM_LIVE` unchanged
+- 75% WR with 1.5R is not claimed. Delta backtest was 62.5%; this week's
+  Delta sample is n=7. Next proof: NFP straddle 2026-09-04 and a
+  London/NY Delta window vs the 24h ultra_scalp book.
+
+### Next action
+
+Push branch, patch VPS overlay (london_ny, daily loss on, catalogs,
+kill duplicate PIDs), restart one live process. Do not copy 25-lot bursts.
+
+
 ## 2026-08-31 TASK-004 Delta + M1 scalp only
 
 - Time (UTC): 2026-08-31T21:35:00Z

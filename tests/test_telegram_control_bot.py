@@ -43,8 +43,8 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
         strategy={
             "derive_strategies_from_symbols": True,
             "symbol_catalogs": {
-                "XAUUSD": ["delta", "ultra_scalp"],
-                "EURUSD": ["delta", "ultra_scalp"],
+                "XAUUSD": ["delta", "news_straddle"],
+                "EURUSD": ["delta", "news_straddle"],
             },
             "enabled_strategies": ["smc_confluence"],
             "use_smc_confluence": True,
@@ -296,7 +296,7 @@ def test_strategies_button_is_read_only_catalog(bot: TelegramControlBot) -> None
     text = bot.send.call_args.args[1]
     assert "دلتا" in text
     assert "XAUUSD" in text
-    assert "اسکلپ M1" in text
+    assert "استرادل خبر" in text
     assert "ذخیره استراتژی" not in text
     kb = bot.send.call_args.kwargs.get("reply_markup") or {}
     labels = {b["text"] for row in kb.get("keyboard", []) for b in row}
@@ -309,7 +309,7 @@ def test_status_lists_per_symbol_catalog(bot: TelegramControlBot) -> None:
     assert "استراتژی" in text
     assert "XAUUSD" in text
     assert "دلتا" in text
-    assert "اسکلپ M1" in text
+    assert "استرادل خبر" in text
     assert "پولبک VWAP" not in text
 
 
@@ -612,14 +612,14 @@ def test_status_warns_when_logs_show_mt5_ipc(bot: TelegramControlBot) -> None:
     assert "IPC timeout" in bot.send.call_args.args[1]
 
 
-def test_gold_and_eur_catalogs_are_delta_and_scalp(bot: TelegramControlBot) -> None:
+def test_gold_and_eur_catalogs_are_delta_and_news_straddle(bot: TelegramControlBot) -> None:
     bot.settings.symbols = ["XAUUSD", "EURUSD"]
     bot.handle(42, "استراتژی نمادها")
     text = bot.send.call_args.args[1]
     gold_line = next(line for line in text.splitlines() if line.startswith("• XAUUSD"))
     eur_line = next(line for line in text.splitlines() if line.startswith("• EURUSD"))
-    assert "دلتا" in gold_line and "اسکلپ M1" in gold_line
-    assert "دلتا" in eur_line and "اسکلپ M1" in eur_line
+    assert "دلتا" in gold_line and "استرادل خبر" in gold_line
+    assert "دلتا" in eur_line and "استرادل خبر" in eur_line
     assert "پولبک VWAP" not in text
     assert "SMC" not in gold_line
     assert 42 not in bot._pending

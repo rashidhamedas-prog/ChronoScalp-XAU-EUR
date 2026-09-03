@@ -47,23 +47,24 @@ strategy:
   # institutional = sweep+MSS+RVOL+SMC; legacy_macd = old MACD path
   entry_engine: institutional
   require_trend_alignment: true
-  # Selecting a symbol activates Delta + M1 scalp. Overlay enabled_strategies
-  # is ignored while this is true.
+  # Selecting a symbol activates Delta + news straddle. Overlay
+  # enabled_strategies is ignored while this is true. M1 ultra_scalp is off
+  # after the 2026-08-27..09-03 live week: 46 CS_ultra_scalp tickets, -$6.9k.
   derive_strategies_from_symbols: true
   symbol_catalogs:
     XAUUSD:
       - delta
-      - ultra_scalp
+      - news_straddle
     EURUSD:
       - delta
-      - ultra_scalp
+      - news_straddle
   enabled_strategies:
     - delta
-    - ultra_scalp
+    - news_straddle
   use_smc_confluence: false
   use_liquidity_volume: false
-  use_ultra_scalp: true
-  use_news_straddle: false
+  use_ultra_scalp: false
+  use_news_straddle: true
   use_xau_vwap_pullback: false
   liquidity_rvol_min: 1.5
   # Shared institutional floor; per-symbol books override via symbol_overrides.
@@ -235,7 +236,9 @@ sessions:
   # london_ny = only London + New York windows; always_on_24h = trade any time
   trading_hours_mode: london_ny
   windows:
-    london: { start: "08:00", end: "11:00" }
+    # London extended to 13:00 local so Iran 13:00-15:30 (operator gold bursts)
+    # is not stuck in the London/NY gap. NY still covers NFP 08:30 ET.
+    london: { start: "08:00", end: "13:00" }
     new_york: { start: "08:30", end: "11:30" }
   market_timezones:
     london: Europe/London

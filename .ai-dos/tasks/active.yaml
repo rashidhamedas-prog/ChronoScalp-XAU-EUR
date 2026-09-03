@@ -1,8 +1,53 @@
 schema_version: 1
 tasks:
+  - id: "TASK-005"
+    title: "Delta + news straddle; halt M1 ultra_scalp after live-week bleed"
+    status: "in_progress"
+    risk: "critical"
+    owner: "cursor:grok-4.6"
+    roles:
+      architect: "cursor:grok-4.6"
+      implementer: "cursor:grok-4.6"
+      reviewer: "independent-agent-required-before-merge"
+      security: "independent-agent-required-before-merge"
+    branch: "ai/TASK-005-delta-news-straddle"
+    worktree: "D:/proje/ChronoScalp s3"
+    claimed_at: "2026-09-03T20:45:00Z"
+    heartbeat_at: "2026-09-03T20:50:00Z"
+    depends_on: []
+    file_claims:
+      - "config/settings.yaml"
+      - "config/news_events.yaml"
+      - "src/chronoscalp/strategy/symbol_catalog.py"
+      - "src/chronoscalp/filters/news_filter.py"
+      - "src/chronoscalp/telegram/control_bot.py"
+      - "src/chronoscalp/telegram/keyboards.py"
+      - "scripts/app.py"
+      - "tests/test_symbol_catalog.py"
+      - "tests/test_telegram_control_bot.py"
+      - "tests/test_news_filter.py"
+      - "docs/TELEGRAM_BOT_FA.md"
+      - "docs/ROADMAP.md"
+      - "docs/11-changelog.md"
+      - "CLAUDE.md"
+      - ".ai-dos/tasks/active.yaml"
+      - ".ai-dos/tasks/handoff.md"
+      - ".ai-dos/project/status.md"
+    acceptance_criteria:
+      - "XAUUSD and EURUSD catalogs are delta + news_straddle only."
+      - "use_ultra_scalp is false in settings.yaml; M1 scalp is not in the live book."
+      - "news_events.yaml contains NFP 2026-09-04 12:30 UTC; Finnhub 403 keeps YAML."
+      - "1%/1.5R/3% and CHRONOSCALP_CONFIRM_LIVE unchanged."
+      - "pytest and ruff pass on touched files."
+    validation:
+      - ".venv/Scripts/python.exe -m pytest -q --basetemp .tmp_pytest_task005"
+      - ".venv/Scripts/python.exe -m ruff check src tests"
+    notes: >-
+      Reclaimed stale TASK-004 (heartbeat 2026-08-31) overlapping catalog
+      and Telegram files after VPS week forensics.
   - id: "TASK-004"
     title: "Delta + M1 scalp only for XAUUSD and EURUSD"
-    status: "in_progress"
+    status: "done"
     risk: "critical"
     owner: "cursor:grok-4.6"
     roles:
