@@ -1,5 +1,39 @@
 schema_version: 1
 tasks:
+  - id: "TASK-UI-PANEL-CONTRAST"
+    title: "Fix Streamlit panel dark-theme unreadably low text contrast"
+    status: "done"
+    risk: "low"
+    owner: "cursor:cloud-agent"
+    roles:
+      implementer: "cursor:cloud-agent"
+      architect: "cursor:cloud-agent"
+    branch: "cursor/fix-panel-contrast-d91d"
+    worktree: "/workspace"
+    claimed_at: "2026-11-12T22:05:00Z"
+    heartbeat_at: "2026-11-12T22:20:00Z"
+    depends_on: []
+    file_claims:
+      - "scripts/panel_theme.py"
+      - ".streamlit/config.toml"
+      - "assets/chronoscalp-theme.css"
+      - "tests/test_panel_theme.py"
+      - "docs/11-changelog.md"
+      - ".ai-dos/tasks/active.yaml"
+      - ".ai-dos/tasks/handoff.md"
+      - ".ai-dos/project/status.md"
+    acceptance_criteria:
+      - "Widget labels/radios/captions meet WCAG 2.2 AA on OLED dark bg."
+      - ".streamlit/config.toml forces theme.base=dark with light textColor."
+      - "pytest tests/test_panel_theme.py and ruff on touched files pass."
+      - "Screenshot evidence of broker page readability."
+    validation:
+      - "pytest -q tests/test_panel_theme.py"
+      - "ruff check scripts/panel_theme.py tests/test_panel_theme.py"
+      - "pytest -q"
+    notes: >-
+      Done. DOM contrast on broker page ≥13:1. 21st theme file ready at
+      assets/chronoscalp-theme.css — publish only after operator confirm.
   - id: "TASK-PRO-P1"
     title: "Professional Edition Phase 1 quant validation framework"
     status: "in_progress"

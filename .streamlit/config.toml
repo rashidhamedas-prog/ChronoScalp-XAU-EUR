@@ -1,0 +1,26 @@
+# ChronoScalp control panel — force dark base so widget labels/options
+# inherit a light textColor (not Streamlit's light-theme near-black).
+# Custom CSS in scripts/panel_theme.py layers on top of these tokens.
+
+[theme]
+base = "dark"
+primaryColor = "#34d399"
+backgroundColor = "#020617"
+secondaryBackgroundColor = "#0b1220"
+textColor = "#e2e8f0"
+linkColor = "#38bdf8"
+borderColor = "#334155"
+font = "sans serif"
+
+[theme.sidebar]
+backgroundColor = "#07111f"
+secondaryBackgroundColor = "#0b1220"
+textColor = "#e2e8f0"
+primaryColor = "#34d399"
+
+[server]
+headless = true
+port = 8501
+
+[browser]
+gatherUsageStats = false

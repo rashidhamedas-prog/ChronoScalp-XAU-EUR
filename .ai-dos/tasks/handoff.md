@@ -2,6 +2,22 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-11-12 TASK-UI-PANEL-CONTRAST Streamlit unreadably dark labels
+
+- Time (UTC): 2026-11-12T22:10:00Z
+- Task / owner: TASK-UI-PANEL-CONTRAST / cursor:cloud-agent
+- Branch: `cursor/fix-panel-contrast-d91d`
+- Root cause: custom OLED CSS without `.streamlit/config.toml` `theme.base=dark`
+  left Streamlit on light textColor (~#31333F, ~1.6:1 on #020617). Widget
+  labels/radios/captions were nearly invisible.
+- Fix: dark `config.toml` + CSS failsafes on `stWidgetLabel`/radio/caption +
+  Vazirmatn; WCAG helpers; `assets/chronoscalp-theme.css` for optional 21st
+  publish (not published — public by default).
+- Validation: full `pytest -q` green; ruff green; Playwright DOM contrast on
+  broker page — labels/radios 16.36:1, captions 13.59:1, sidebar 14.48:1.
+  Screenshots under `/opt/cursor/artifacts/panel-*-contrast-after.png`.
+- Next: merge PR; ask operator before any `21st publish-theme`.
+
 ## 2026-11-12 TASK-PRO-P1 Phase 1 quant validation + Phase 0 merge
 
 - Time (UTC): 2026-11-12T14:05:00Z

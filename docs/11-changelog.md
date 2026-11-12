@@ -26,6 +26,13 @@
 
 ### اصلاح شد
 
+- **خوانایی پنل Streamlit (dark OLED):** تم پیش‌فرض بدون `base=dark`
+  لیبل/رادیو/کپشن را با رنگ متن light-theme (تقریباً سیاه) روی پس‌زمینه
+  تیره رندر می‌کرد. `.streamlit/config.toml` اکنون `base=dark` و
+  `textColor=#e2e8f0` دارد؛ `scripts/panel_theme.py` override سخت برای
+  `stWidgetLabel` / radio / caption + فونت Vazirmatn و WCAG AA روی
+  `--cs-muted`. خروجی توکن برای 21st در `assets/chronoscalp-theme.css`
+  (پابلیش نشده تا تأیید اپراتور).
 - کاتالوگ زنده طلا/یورو: دلتا + استرادل خبر. اسکلپ M1 از کتاب زنده حذف شد
   بعد از هفتهٔ دمو ۲۷ اوت تا ۳ سپتامبر ۲۰۲۶ (۴۶ تیکت، −۶۹۴۷ دلار MT5).
 - تقویم YAML برای NFP ۴ سپتامبر ۲۰۲۶ ۱۲:۳۰ UTC؛ Finnhub 403 دیگر تقویم
