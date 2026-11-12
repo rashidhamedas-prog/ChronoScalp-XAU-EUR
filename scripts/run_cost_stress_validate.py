@@ -8,6 +8,7 @@ Writes JSON under data/reports/ (gitignored).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from copy import deepcopy
@@ -169,15 +170,11 @@ def _stress_settings(settings, factor: float = 1.5):
         if not isinstance(spec, dict):
             continue
         if "typical_spread_pips" in spec:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 spec["typical_spread_pips"] = float(spec["typical_spread_pips"]) * factor
-            except (TypeError, ValueError):
-                pass
         if "commission_per_lot" in spec:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 spec["commission_per_lot"] = float(spec["commission_per_lot"]) * factor
-            except (TypeError, ValueError):
-                pass
     return stressed
 
 
