@@ -135,7 +135,9 @@ def test_state_store_tolerates_corrupt_main(tmp_path: Path) -> None:
     assert loaded._loaded_from_backup is True
 
 
-def test_instance_lock_blocks_second_live_pid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_instance_lock_blocks_second_live_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import os
 
     real_pid = os.getpid()

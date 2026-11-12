@@ -1678,9 +1678,7 @@ class TradingBot:
             comparison_mode = self._is_comparison_book()
             daily_dd_hit = False
             if not comparison_mode:
-                daily_dd_hit = self.daily_dd_guard.check(
-                    equity_now, realized, unrealized, at=now
-                )
+                daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
             # Keep DailyRiskTracker base equity aligned with the DD guard day seed.
             if self.daily_dd_guard.starting_equity > 0:
                 self.risk_manager.daily_tracker.starting_equity = float(
@@ -1689,8 +1687,7 @@ class TradingBot:
             daily_limit_hit = False
             if not comparison_mode:
                 daily_limit_hit = (
-                    daily_dd_hit
-                    or self.risk_manager.daily_tracker.daily_loss_limit_hit(at=now)
+                    daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(at=now)
                 )
             if daily_dd_hit and self.daily_dd_close_all:
                 self._close_all_positions(now, reason="daily_drawdown")

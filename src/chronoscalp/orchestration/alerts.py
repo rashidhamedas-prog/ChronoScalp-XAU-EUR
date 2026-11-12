@@ -130,7 +130,9 @@ class AlertNotifier:
 
         if self._cfg.enabled:
             if self._cfg.telegram_enabled and self._telegram_token and self._telegram_chat_id:
-                self._enqueue(_QueuedAlert(kind="telegram", body=body, chat_id=self._telegram_chat_id))
+                self._enqueue(
+                    _QueuedAlert(kind="telegram", body=body, chat_id=self._telegram_chat_id)
+                )
             if self._cfg.discord_enabled and self._discord_url:
                 self._enqueue(_QueuedAlert(kind="discord", body=discord_body))
 

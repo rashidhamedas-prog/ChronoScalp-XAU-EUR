@@ -351,4 +351,3 @@ def test_delta_only_does_not_run_institutional_path():
     )
     assert signal.signal_type == SignalType.NONE
     assert "delta:" in (signal.reason or "")
-

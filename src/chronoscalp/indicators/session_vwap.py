@@ -76,9 +76,7 @@ def session_open_timestamp(ts: pd.Timestamp) -> pd.Timestamp:
         # Fail closed to UTC midnight rather than inventing GMT anchors.
         return ts.normalize()
     local = ts.tz_convert(zone)
-    open_local = local.replace(
-        hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0
-    )
+    open_local = local.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
     if local.timetz().replace(tzinfo=None) < open_t:
         open_local = open_local - pd.Timedelta(days=1)
     return open_local.tz_convert("UTC")

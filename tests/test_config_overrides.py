@@ -38,12 +38,15 @@ def test_demo_shadow_example_keeps_delta_enabled() -> None:
 
 def test_unenforced_override_keys_list_is_empty() -> None:
     assert UNENFORCED_OVERRIDE_KEYS == ()
-    assert unenforced_override_keys(
-        {
-            "risk": {"max_trades_portfolio_day": 3, "max_daily_loss_pct": 1.0},
-            "execution": {"single_instance": True, "broker": "paper"},
-        }
-    ) == []
+    assert (
+        unenforced_override_keys(
+            {
+                "risk": {"max_trades_portfolio_day": 3, "max_daily_loss_pct": 1.0},
+                "execution": {"single_instance": True, "broker": "paper"},
+            }
+        )
+        == []
+    )
 
 
 def test_unenforced_keys_empty_for_enforced_only_overlay() -> None:

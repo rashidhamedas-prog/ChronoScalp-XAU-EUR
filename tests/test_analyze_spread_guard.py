@@ -56,8 +56,9 @@ def test_spread_share_of_the_skip_funnel(report: dict) -> None:
 def test_compound_skip_reasons_are_not_split_on_colons(report: dict) -> None:
     gold = report["symbols"]["XAUUSD"]
     assert (
-        gold["top_skip_reasons"]["scalp:scalp:symbol_blocked|inst:inst:trend_neutral"
-                                 "|delta:regime_neutral"]
+        gold["top_skip_reasons"][
+            "scalp:scalp:symbol_blocked|inst:inst:trend_neutral" "|delta:regime_neutral"
+        ]
         == 4
     )
     assert "XAUUSD" not in report["symbols"]["EURUSD"]["top_skip_reasons"]

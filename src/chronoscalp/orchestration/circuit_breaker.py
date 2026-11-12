@@ -67,8 +67,7 @@ class CircuitBreaker:
             self._half_open = True
             self._consecutive_successes = 0
             logger.info(
-                "Circuit breaker HALF_OPEN after min trip duration "
-                "({:.0f}s) — probing",
+                "Circuit breaker HALF_OPEN after min trip duration " "({:.0f}s) — probing",
                 self.min_trip_seconds,
             )
 

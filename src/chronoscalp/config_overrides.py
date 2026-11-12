@@ -269,9 +269,7 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
                 risk["max_concurrent_positions"], "risk.max_concurrent_positions"
             )
             if risk["max_concurrent_positions"] < 1:
-                raise RuntimeOverridesValidationError(
-                    "risk.max_concurrent_positions must be >= 1"
-                )
+                raise RuntimeOverridesValidationError("risk.max_concurrent_positions must be >= 1")
         for flag in (
             "independent_symbol_entries",
             "daily_loss_limit_enabled",
