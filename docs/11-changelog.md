@@ -7,6 +7,10 @@
 
 ### اضافه شد
 
+- **Phase 1 Quant Validation:** ماژول `chronoscalp.validation` (CPCV،
+  walk-forward با embargo، DSR، PBO)، حاکمیت هندسه با گزارش DSR>0،
+  ضرایب اسپرد سشن/اسلیپیج خبر/سوآپ شبانه، و
+  `python -m chronoscalp.validation.run --all`.
 - **Phase 0 Professional Edition stabilization:** مدل هزینهٔ مشترک
   (`execution/cost_model.py`)، قفل تک‌نمونه‌ای، ساعت بروکر در برابر UTC،
   JSON اتمیک، صف هشدار async، رد کلیدهای overlay بدون اجرای واقعی،

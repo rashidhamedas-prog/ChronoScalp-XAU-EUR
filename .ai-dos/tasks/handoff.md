@@ -2,6 +2,26 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-11-12 TASK-PRO-P1 Phase 1 quant validation + Phase 0 merge
+
+- Time (UTC): 2026-11-12T14:05:00Z
+- Task / owner: TASK-PRO-P1 / cursor:cloud-agent
+- Phase 0 PR #12 **merged to main** (CI green). VPS deploy **blocked**:
+  `VPS_SSH_KEY` rejected on 89.23.103.82 and 45.90.98.99. Operator must run
+  `scripts/_vps_safe_code_update.ps1` — see `docs/validation/phase0_vps_deploy.md`.
+
+### Phase 1 delivered
+
+- `chronoscalp.validation` (CPCV, purged WF, DSR, PBO, portfolio, governance)
+- Cost helpers: session spread mult, news slip, overnight swap
+- Deep `clone_settings_with`; CLI `python -m chronoscalp.validation.run --all`
+- Tests: `tests/test_phase1_validation.py`
+
+### Next
+
+Phase 2 intelligence layer (HMM + ML expectancy gate). Do not resume live
+until operator VPS safe-update + overlay review.
+
 ## 2026-11-12 TASK-PRO-P0 Phase 0 Professional stabilization
 
 - Time (UTC): 2026-11-12T13:35:00Z
