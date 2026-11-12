@@ -26,6 +26,10 @@ Append newest entries at the top. Never erase another agent's record.
 - First CI `lint-and-test` failed: `ruff check src tests scripts` SIM105 in
   `scripts/run_cost_stress_validate.py` (local gate had only checked
   `src tests`). Fixed with `contextlib.suppress`; pushed `a0eda98`.
+- Second failure: `black --check src tests scripts` (11 files). Ran
+  `black src tests scripts` including pre-existing drift; local
+  black/ruff/pytest green. Local gates now mirror CI scope including
+  `scripts/`.
 
 ### Next action
 
