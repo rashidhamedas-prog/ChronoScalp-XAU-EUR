@@ -27,6 +27,29 @@ Report: `docs/validation/phase0_pro_report.md` · Deploy: `docs/validation/phase
 
 Report: `docs/validation/phase1_pro_report.md`
 
+## Professional Edition — Phase 2 Intelligence 🟡
+
+- [x] Regime detector module + model card writer (hmmlearn or GMM fallback)
+- [x] Net-of-cost expectancy ranking helpers
+- [ ] Wire regime gate into live tick (default off until model card + OOS)
+- [ ] LightGBM gate with SHAP + population parity (uses existing ML pipeline; keep `ml.enabled=false`)
+- [ ] news_straddle live enable only after event-window validated report
+
+## Professional Edition — Phase 3 Packaging 🟡
+
+- [x] Bridge JSON protocol + MQ5 skeleton + FA/EN i18n + diagnostics API
+- [x] Windows packaging runbook
+- [ ] Inno Setup installer / NSSM service / tray app (Windows build box)
+- [ ] 7-day unattended soak acceptance
+
+## Professional Edition — Phase 4 RL manager 🟡
+
+- [x] Shadow RL position manager + kill-path revert (size ≤1.0)
+- [ ] SB3 train in cost-real paper; beat rule baseline (DSR>0, DD not worse)
+- [ ] 30d shadow → 30d demo → 30d half-size live ladder
+
+Report: `docs/validation/phase2_4_pro_report.md`
+
 ## Strategy Delta — implemented, validation pending
 
 - [x] Explainable M15/M5 regime + M1 sweep/retest entry engine
