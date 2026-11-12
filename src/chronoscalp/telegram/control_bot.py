@@ -1246,7 +1246,13 @@ class TelegramControlBot:
         self._set_hours(chat_id, "london_ny")
 
     def _cmd_hours_24h(self, chat_id: int, _text: str = "") -> None:
-        self._set_hours(chat_id, "always_on_24h")
+        apply_trading_hours_mode("london_ny")
+        self._reload_settings()
+        self.send(
+            chat_id,
+            "معاملهٔ ۲۴ساعته خاموش است. ساعات روی لندن و نیویورک می‌ماند.",
+            reply_markup=hours_keyboard(),
+        )
 
     def _cmd_hours(self, chat_id: int, text: str = "") -> None:
         args = self._args(text)

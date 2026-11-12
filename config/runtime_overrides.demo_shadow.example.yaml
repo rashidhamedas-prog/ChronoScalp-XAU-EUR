@@ -20,17 +20,20 @@ symbols:
 strategy:
   enabled_strategies:
     - delta
-    - ultra_scalp
   use_delta: true
   use_smc_confluence: false
   use_liquidity_volume: false
-  use_ultra_scalp: true
+  use_ultra_scalp: false
   use_news_straddle: false
   min_reward_risk_ratio: 1.5
   delta:
     # EURUSD gated off until redesign passes broker-native OOS/cost-stress.
     allowed_symbols: [XAUUSD]
   ultra_scalp:
+    # Kept off. No costed holdout in this repo justifies enabling it.
+    allow_without_costed_evidence: false
+    s15_allowed: false
+    use_s15_trigger: false
     min_reward_risk_ratio: 1.5
     net_rr_after_costs: 1.25
     disabled_symbols:

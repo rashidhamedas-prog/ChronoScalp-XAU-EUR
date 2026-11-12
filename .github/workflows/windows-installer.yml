@@ -1,0 +1,31 @@
+name: Windows installer
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-setup-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build ChronoScalp-Setup.exe
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build_installer.ps1
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChronoScalp-Setup
+          path: dist/ChronoScalp-Setup.exe
+          if-no-files-found: error

@@ -1,29 +1,27 @@
 # ChronoScalp XAU/EUR
 
-**Multi-timeframe algorithmic scalping system for Gold (XAUUSD) and EUR/USD**, built for autonomous session-based execution across the 1m / 3m / 5m / 10m timeframes.
+**Multi-timeframe research bot for Gold (XAUUSD) and EUR/USD**, installed on your own Windows PC and checked only during the London and New York sessions.
 
-> ⚠️ **Risk Disclaimer** — Trading leveraged FX/metals instruments carries a high risk of loss. This repository is a research/engineering scaffold, not financial advice, and does not guarantee profitability. Always validate on a **demo account** before risking real capital. Read [docs/RISK_DISCLAIMER.md](docs/RISK_DISCLAIMER.md) in full before running anything live.
+> ⚠️ **Risk Disclaimer** — Trading leveraged FX/metals instruments carries a high risk of loss. This repository is a research/engineering scaffold, not financial advice, and does not guarantee profitability or any win rate. The honest review is [docs/BAZRASI_SADEGHANE_FA.md](docs/BAZRASI_SADEGHANE_FA.md). Always validate on a **demo account** before risking real capital. Read [docs/RISK_DISCLAIMER.md](docs/RISK_DISCLAIMER.md) in full before running anything live.
 
 ---
 
 ## 1. What this project actually is
 
-The bot analyzes XAUUSD and EURUSD (and any broker-native cross such as `XAUEUR`, configurable) across four timeframes, requires **trend alignment on the higher timeframes (M10/M5)** before allowing **entries on the lower timeframes (M3/M1)**, and only trades inside defined liquidity windows (London / New York sessions), while pausing around high-impact news.
+The bot analyzes the symbols you select (the intended book is XAUUSD and EURUSD, including broker-native names). It requires higher-timeframe alignment before a lower-timeframe entry, and it only evaluates new entries inside the London and New York windows in `config/settings.yaml` (clocks: `Europe/London` and `America/New_York`). It pauses around configured high-impact news.
 
-Realistic target: **55–65% win rate**, not 90%+. Profitability comes from risk/reward discipline (≥1:1.5), strict position sizing (max 1% equity risk/trade), a hard spread filter, and consistent execution — not from a "magic" win rate. This is stated explicitly in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) so that no future prompt (human or AI) quietly regresses the risk model chasing an unrealistic win rate.
+No win-rate target is a measured result. Older notes used 55–65% as an unverified design hypothesis; that figure is not evidence. Risk stays capped at 1% per trade and at least 1:1.5 reward:risk. Ultra-short scalping stays off. See [docs/BAZRASI_SADEGHANE_FA.md](docs/BAZRASI_SADEGHANE_FA.md).
 
 ## 2. A design conflict we resolved up front
 
-The original brief asked for **"Linux VPS near broker servers"** *and* **"MetaTrader5 Python library"**. These are incompatible as stated: the official `MetaTrader5` PyPI package only works on Windows (it talks to a local MT5 terminal via DLL, there is no Linux build). Shipping code that assumes both silently would fail the first time someone deploys to a Linux box.
+The supported install is a Windows PC with MetaTrader 5 already logged in. The official `MetaTrader5` package talks to that local terminal and has no Linux build. A VPS is optional history, not the setup path: [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md) and [docs/VPS_TROUBLESHOOTING_FA.md](docs/VPS_TROUBLESHOOTING_FA.md).
 
-We resolved it with an abstraction, not a compromise:
+- `execution/broker.py` defines a `Broker` **interface**.
+- `execution/mt5_broker.py` implements **MetaTrader5** on Windows.
+- `execution/oanda_broker.py` remains an optional REST adapter. It is not part of the desktop installer.
+- `execution/paper_broker.py` simulates fills and is the default.
 
-- `execution/broker.py` defines a `Broker` **interface** (connect, get_balance, place_order, modify_sl_tp, close_position, get_open_positions).
-- `execution/mt5_broker.py` implements it against **MetaTrader5** — requires a **Windows VPS** (or a Windows box running the MT5 terminal) near the broker's servers (London/NY).
-- `execution/oanda_broker.py` implements **OANDA v20 REST** — runs on **Linux VPS** (e.g. Netherlands/Amsterdam). See [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md).
-- `execution/paper_broker.py` is a fully working **simulated broker** — runs anywhere (including Linux), used for dry-runs, CI, and strategy validation without touching a real account.
-
-Pick your deployment target once (Windows VPS + MT5, **or** Linux VPS + OANDA) — the strategy/risk/filter code above the broker layer does not change either way.
+Build and install: [docs/WINDOWS_INSTALL_FA.md](docs/WINDOWS_INSTALL_FA.md). The installer is per-user (`%LOCALAPPDATA%\ChronoScalp`), stores `.env` in `%APPDATA%\ChronoScalp`, registers an interactive logon task, and leaves `CHRONOSCALP_CONFIRM_LIVE=no`.
 
 ## 3. Tech stack
 
@@ -37,7 +35,7 @@ Pick your deployment target once (Windows VPS + MT5, **or** Linux VPS + OANDA) �
 | Logging | `loguru` + optional `sentry-sdk` | Structured logs, remote error tracking |
 | Backtesting | Custom event-driven engine (`backtest/engine.py`) | Freqtrade/Jesse are crypto/CCXT-oriented and don't model MT5 spread/swap mechanics well; a small purpose-built engine is more correct for this use case |
 | ML (Phase 6) | `scikit-learn` / `xgboost` | Setup-probability scoring, optional and off by default |
-| Packaging | Docker (`docker/`) | Reproducible deployment, auto-restart |
+| Packaging | PyInstaller onedir + Inno Setup | Per-user Windows install. See `scripts/windows/build_installer.ps1` |
 | CI | GitHub Actions | Lint (ruff) + tests (pytest) on every push |
 
 ## 4. Project structure
@@ -68,12 +66,16 @@ ChronoScalp-XAU-EUR/
 
 ## 5. Getting started
 
+Windows install (primary): build `dist\ChronoScalp-Setup.exe` with `scripts\windows\build_installer.ps1` on a Windows machine, or download the `ChronoScalp-Setup` artifact from the `Windows installer` GitHub Actions workflow. Steps, MT5, the logon task, stop, and uninstall are in [docs/WINDOWS_INSTALL_FA.md](docs/WINDOWS_INSTALL_FA.md). Persian walkthrough: [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md).
+
+Source checkout (tests and research on any OS):
+
 ```bash
 git clone https://github.com/rashidhamedas-prog/ChronoScalp-XAU-EUR.git
 cd ChronoScalp-XAU-EUR
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in MT5 credentials / API keys
+cp .env.example .env   # placeholders only; live confirmation stays no
 ```
 
 ### Run a backtest (works on any OS, no broker needed)
@@ -97,10 +99,11 @@ python scripts/run_live.py --mode live
 
 `--mode live` refuses to start unless `CHRONOSCALP_CONFIRM_LIVE=yes` is set in `.env` — a deliberate friction point so nobody flips to real money by accident.
 
-**راهنمای فارسی قدم‌به‌قدم:** [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md)  
-**عیب‌یابی VPS ویندوز:** [docs/VPS_TROUBLESHOOTING_FA.md](docs/VPS_TROUBLESHOOTING_FA.md)
-**فروش لایسنس + IB:** [docs/FOROOSH_FA.md](docs/FOROOSH_FA.md)  
-**VPS هلند (انگلیسی):** [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md)
+**نصب ویندوز:** [docs/WINDOWS_INSTALL_FA.md](docs/WINDOWS_INSTALL_FA.md)  
+**بررسی صادقانه (بدون وعدهٔ سود):** [docs/BAZRASI_SADEGHANE_FA.md](docs/BAZRASI_SADEGHANE_FA.md)  
+**راهنمای فارسی:** [docs/RAHNAMA_FA.md](docs/RAHNAMA_FA.md)  
+**آرشیو VPS (اختیاری، مسیر اصلی نیست):** [docs/VPS_TROUBLESHOOTING_FA.md](docs/VPS_TROUBLESHOOTING_FA.md) · [docs/DEPLOY_NL_VPS.md](docs/DEPLOY_NL_VPS.md)  
+**فروش لایسنس + IB:** [docs/FOROOSH_FA.md](docs/FOROOSH_FA.md)
 
 ### Control panel (recommended for end users)
 

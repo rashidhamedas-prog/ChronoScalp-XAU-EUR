@@ -16,7 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from chronoscalp.backtest.engine import run_backtest  # noqa: E402
+from chronoscalp.backtest.engine import (  # noqa: E402
+    evaluate_chronological_holdout,
+    run_backtest,
+)
 from chronoscalp.config import get_settings  # noqa: E402
 from chronoscalp.data.mt5_connector import load_history_csv  # noqa: E402
 from chronoscalp.indicators.technical import enrich_with_indicators  # noqa: E402
@@ -36,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--report", default=None, help="Optional path to write a JSON summary report"
+    )
+    parser.add_argument(
+        "--no-holdout",
+        action="store_true",
+        help="Report one window only. Default prints a development head and an untouched tail separately.",
     )
     return parser.parse_args()
 
@@ -81,17 +89,30 @@ def main() -> None:
     start = datetime.fromisoformat(args.date_from) if args.date_from else None
     end = datetime.fromisoformat(args.date_to) if args.date_to else None
 
-    result = run_backtest(
-        symbol=args.symbol,
-        data_by_timeframe=data_by_tf,
-        higher_timeframes=higher_tfs,
-        trigger_timeframe=trigger_tf,
-        settings=settings,
-        start=start,
-        end=end,
-    )
-
-    summary = result.summary()
+    common = {
+        "symbol": args.symbol,
+        "data_by_timeframe": data_by_tf,
+        "higher_timeframes": higher_tfs,
+        "trigger_timeframe": trigger_tf,
+        "settings": settings,
+        "start": start,
+        "end": end,
+    }
+    if args.no_holdout:
+        result = run_backtest(**common)
+        summary = result.summary()
+        trades = result.trades
+    else:
+        try:
+            summary = evaluate_chronological_holdout(**common)
+        except ValueError as exc:
+            logger.warning("Chronological holdout skipped: {}", exc)
+            result = run_backtest(**common)
+            summary = result.summary()
+            summary["holdout_skipped"] = str(exc)
+            trades = result.trades
+        else:
+            trades = []
     print(json.dumps(summary, indent=2, default=str))
 
     if args.report:
@@ -113,7 +134,7 @@ def main() -> None:
                             "r_multiple": t.r_multiple,
                             "exit_reason": t.exit_reason,
                         }
-                        for t in result.trades
+                        for t in trades
                     ],
                 },
                 f,

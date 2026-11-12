@@ -3,6 +3,11 @@ description: ChronoScalp XAU/EUR project rules — always apply
 alwaysApply: true
 ---
 
+The primary install path is the per-user Windows app in
+`docs/WINDOWS_INSTALL_FA.md` (PyInstaller onedir + Inno Setup, paper logon
+task). A VPS is optional archive. Never describe results as guaranteed; the
+honest review is `docs/BAZRASI_SADEGHANE_FA.md`.
+
 Strategy Delta lives in `src/chronoscalp/strategy/delta.py`; its specification
 and required validation gates are in `docs/STRATEGY_DELTA.md`. Never describe
 it as guaranteed or live-ready before those gates pass.

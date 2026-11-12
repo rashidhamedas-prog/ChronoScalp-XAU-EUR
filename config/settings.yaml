@@ -187,9 +187,13 @@ strategy:
   min_signal_confidence: 0.55
   ultra_scalp:
     # M1 impulse scalp as a per-symbol candidate — NOT the old S15 mode that
-    # switched the whole bot to 15-second bars. S15 + 1:1 R:R is what produced
-    # the −$24k journal bleed. 1.5 R:R and cost-aware geometry stay on.
+    # switched the whole bot to 15-second bars. S15 + about 1:1 R:R is what
+    # the live journal bled on. Both flags below stay false until a
+    # symbol-by-symbol backtest with spread, slippage, and commission shows
+    # a held-out sample. Turning use_ultra_scalp on is not enough.
     use_s15_trigger: false
+    s15_allowed: false
+    allow_without_costed_evidence: false
     atr_stop_multiple: 2.5
     atr_target_multiple: 4.0
     min_reward_risk_ratio: 1.5
@@ -286,21 +290,23 @@ strategy:
 
 sessions:
   timezone: "UTC"
-  # london_ny = only London + New York windows; always_on_24h = trade any time
+  # london_ny is the only trading mode. always_on_24h is ignored unless
+  # allow_unconstrained_24h is true (research tests only; overlays cannot set it).
   trading_hours_mode: london_ny
+  allow_unconstrained_24h: false
   windows:
-    # London extended to 13:00 local so Iran 13:00-15:30 (operator gold bursts)
-    # is not stuck in the London/NY gap. NY still covers NFP 08:30 ET.
+    # Clock is the market timezone below, not the PC clock and not Tehran.
+    # London 08:00-13:00 Europe/London (BST/GMT). Extended to 13:00 local so
+    # 13:00-15:30 Tehran is not stuck in the London/NY gap.
+    # New York 08:30-11:30 America/New_York (EDT/EST), covering the 08:30 ET news hour.
     london: { start: "08:00", end: "13:00" }
     new_york: { start: "08:30", end: "11:30" }
   market_timezones:
     london: Europe/London
     new_york: America/New_York
   trade_outside_sessions: false
-  # Legacy per-symbol bypass — ignored when trading_hours_mode is explicitly london_ny
-  always_on_symbols:
-    - "BTCUSD"
-    - "ETHUSD"
+  # Ignored. Per-symbol 24h bypasses are not a trading mode.
+  always_on_symbols: []
 
 news_filter:
   enabled: true
@@ -431,7 +437,17 @@ backtest:
   # pause, and bar-time daily loss limit that main.py applies. Off means the
   # summary lists them as not modelled.
   model_live_gates: true
-  commission_per_lot: 7.0
+  # Round-turn costs charged by backtest/engine.py. Spread comes from
+  # symbols.yaml typical_spread_pips (half on entry, half on exit) plus
+  # execution.slippage_pips on each side. commission_per_lot is a flat
+  # fallback only when the symbol spec has no commission. 0 means "do not
+  # invent a fee". BTC/ETH specs carry commission_pct_notional instead.
+  # This 0 is not a measured XAUUSD/EURUSD broker invoice.
+  charge_round_turn_costs: true
+  commission_per_lot: 0.0
+  # Tail fraction for evaluate_chronological_holdout. A plain run_backtest
+  # does not hide this tail; the CLI --holdout path reports the windows apart.
+  holdout_fraction: 0.30
   default_spread_pips:
     XAUUSD: 20
     XAUUSD_o: 20

@@ -175,11 +175,13 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
                 raise RuntimeOverridesValidationError(
                     f"sessions.trading_hours_mode must be one of {sorted(KNOWN_HOURS)}"
                 )
+            if mode_s == "always_on_24h":
+                mode_s = "london_ny"
             sessions["trading_hours_mode"] = mode_s
         if "trade_outside_sessions" in sessions:
-            sessions["trade_outside_sessions"] = _as_bool(
-                sessions["trade_outside_sessions"], "sessions.trade_outside_sessions"
-            )
+            sessions["trade_outside_sessions"] = False
+        sessions["allow_unconstrained_24h"] = False
+        sessions["always_on_symbols"] = []
         out["sessions"] = sessions
 
     news = _require_mapping(out.get("news_filter"), "news_filter")

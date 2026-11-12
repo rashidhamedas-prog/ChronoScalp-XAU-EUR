@@ -91,6 +91,7 @@ def _make_bot(
     settings.raw["execution"]["multi_strategy_mode"] = multi_strategy_mode
     settings.raw["sessions"]["trading_hours_mode"] = "always_on_24h"
     settings.raw["sessions"]["trade_outside_sessions"] = True
+    settings.raw["sessions"]["allow_unconstrained_24h"] = True
     settings.raw["risk"]["three_strikes"] = {"enabled": False}
     settings.raw["risk"]["spread_ma_guard"] = {"enabled": False}
     settings.raw["risk"]["volatility_guard"] = {"enabled": False}

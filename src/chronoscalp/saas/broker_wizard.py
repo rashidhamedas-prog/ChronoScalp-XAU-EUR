@@ -357,27 +357,37 @@ def apply_trading_hours_mode(
     *,
     overrides_path: Path = OVERRIDES_PATH,
 ) -> str:
-    """Persist ``sessions.trading_hours_mode`` (london_ny | always_on_24h)."""
+    """Persist London/New York hours. Unconstrained 24h requests are refused."""
     from chronoscalp.filters.session_filter import (
         TRADING_HOURS_ALWAYS_ON_24H,
         TRADING_HOURS_LONDON_NY,
         normalize_trading_hours_mode,
     )
 
-    normalized = normalize_trading_hours_mode(mode)
+    requested = normalize_trading_hours_mode(mode)
+    if requested == TRADING_HOURS_ALWAYS_ON_24H:
+        logger.warning(
+            "Refusing unconstrained 24h trading; saving london_ny instead of {}",
+            mode,
+        )
+    normalized = TRADING_HOURS_LONDON_NY
     payload = _load_overrides(overrides_path)
     sessions = dict(payload.get("sessions") or {})
     sessions["trading_hours_mode"] = normalized
-    sessions["trade_outside_sessions"] = normalized == TRADING_HOURS_ALWAYS_ON_24H
-    if normalized == TRADING_HOURS_LONDON_NY:
-        # Keep windows; disable outside trading for session-only mode.
-        sessions.setdefault(
-            "windows",
-            {
-                "london": {"start": "08:00", "end": "11:00"},
-                "new_york": {"start": "13:30", "end": "16:30"},
-            },
-        )
+    sessions["trade_outside_sessions"] = False
+    sessions["allow_unconstrained_24h"] = False
+    sessions["always_on_symbols"] = []
+    sessions.setdefault(
+        "windows",
+        {
+            "london": {"start": "08:00", "end": "13:00"},
+            "new_york": {"start": "08:30", "end": "11:30"},
+        },
+    )
+    sessions.setdefault(
+        "market_timezones",
+        {"london": "Europe/London", "new_york": "America/New_York"},
+    )
     payload["sessions"] = sessions
     _write_overrides(overrides_path, payload)
     logger.info("Trading hours mode saved: {}", normalized)

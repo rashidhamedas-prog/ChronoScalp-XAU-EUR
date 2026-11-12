@@ -44,9 +44,28 @@ def test_session_filter_trade_outside_sessions_true_always_allows():
     cfg = {
         "windows": {"london": {"start": "08:00", "end": "11:00"}},
         "trade_outside_sessions": True,
+        "allow_unconstrained_24h": True,
+        "market_timezones": {"london": "UTC"},
     }
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(20, 0))
+
+
+def test_unconstrained_hours_are_ignored_by_default():
+    cfg = {
+        "trading_hours_mode": "always_on_24h",
+        "trade_outside_sessions": True,
+        "always_on_symbols": ["BTCUSD"],
+        "windows": {
+            "london": {"start": "08:00", "end": "11:00"},
+            "new_york": {"start": "13:30", "end": "16:30"},
+        },
+        "market_timezones": {"london": "UTC", "new_york": "UTC"},
+    }
+    session_filter = SessionFilter.from_config(cfg)
+    assert session_filter.trading_hours_mode == "london_ny"
+    assert not session_filter.is_within_session(_dt(3, 0), symbol="BTCUSD")
+    assert session_filter.is_within_session(_dt(9, 0), symbol="EURUSD")
 
 
 def test_session_filter_always_on_symbol_bypasses_windows():
@@ -54,6 +73,7 @@ def test_session_filter_always_on_symbol_bypasses_windows():
         "windows": {"london": {"start": "08:00", "end": "11:00"}},
         "trade_outside_sessions": False,
         "always_on_symbols": ["BTCUSD"],
+        "allow_unconstrained_24h": True,
     }
     session_filter = SessionFilter.from_config(cfg)
     assert not session_filter.is_within_session(_dt(20, 0))
@@ -81,7 +101,9 @@ def test_trading_hours_mode_london_ny_blocks_outside_all_symbols():
 def test_trading_hours_mode_always_on_24h():
     cfg = {
         "trading_hours_mode": "always_on_24h",
+        "allow_unconstrained_24h": True,
         "windows": {"london": {"start": "08:00", "end": "11:00"}},
+        "market_timezones": {"london": "UTC"},
     }
     session_filter = SessionFilter.from_config(cfg)
     assert session_filter.is_within_session(_dt(3, 0), symbol="EURUSD")
