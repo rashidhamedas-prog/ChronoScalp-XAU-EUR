@@ -35,7 +35,7 @@ Source: "..\..\dist\ChronoScalpRunner\*"; DestDir: "{app}\runner"; Flags: ignore
 Source: "..\..\dist\ChronoScalpPanel\*"; DestDir: "{app}\panel"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\scripts\windows\*"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\..\config\*"; DestDir: "{app}\bundled\config"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\..env.example"; DestDir: "{app}\bundled"; Flags: ignoreversion
+Source: "..\..\.env.example"; DestDir: "{app}\bundled"; Flags: ignoreversion
 Source: "..\..\docs\WINDOWS_INSTALL_FA.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\docs\BAZRASI_SADEGHANE_FA.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\docs\RISK_DISCLAIMER.md"; DestDir: "{app}\docs"; Flags: ignoreversion

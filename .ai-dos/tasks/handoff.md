@@ -41,12 +41,11 @@ enable live. Linux agents must not commit a fake exe.
 
 - `pytest -q` → 452 passed, exit 0
 - `ruff check src tests scripts` → All checks passed
-- `black --check src tests scripts` → fails on 4 files that this change does
-  not touch: `scripts/list_mt5_symbols.py`,
-  `tests/test_analyze_spread_guard.py`,
-  `src/chronoscalp/strategy/operator_style.py`,
-  `tests/test_delta_strategy.py`. Pre-existing. Not reformatted.
-- No Windows exe was built here. The build script and workflow are the path.
+- CI 2026-11-12: `lint-and-test` failed `black --check` on four
+  pre-existing files. Those four were reformatted in the one allowed CI fix.
+  `Windows installer` failed because Inno read `..env.example` (the
+  backslash before `.env` was missing). The source line is now
+  `..\..\.env.example`. No further CI loop after this push.
 
 ### Next action
 
