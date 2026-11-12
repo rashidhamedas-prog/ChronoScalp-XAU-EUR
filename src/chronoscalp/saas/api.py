@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from chronoscalp.bridge.protocol import HEARTBEAT_DEGRADED_SECONDS, SCHEMA_VERSION
 from chronoscalp.config import get_settings
 from chronoscalp.logging_setup import logger
 from chronoscalp.orchestration.kill_switch import KillSwitch
@@ -32,6 +33,7 @@ from chronoscalp.saas.broker_wizard import (
     disable_live_confirm,
     enable_live_confirm,
 )
+from chronoscalp.saas.i18n import catalog as i18n_catalog
 from chronoscalp.saas.process_control import PID_FILE, bot_is_running, start_bot, stop_bot
 from chronoscalp.saas.user_config import UserConfigStore
 from chronoscalp.strategy.symbol_catalog import strategies_for_symbol
@@ -145,6 +147,22 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "ts": datetime.now(tz=UTC).isoformat()}
+
+    @app.get("/i18n/{lang}", dependencies=[Depends(_require_token)])
+    def i18n(lang: str) -> dict[str, Any]:
+        if lang not in {"fa", "en"}:
+            raise HTTPException(status_code=400, detail="lang must be fa|en")
+        return {"lang": lang, "strings": i18n_catalog(lang)}  # type: ignore[arg-type]
+
+    @app.get("/diagnostics/bridge", dependencies=[Depends(_require_token)])
+    def bridge_diagnostics() -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "heartbeat_degraded_seconds": HEARTBEAT_DEGRADED_SECONDS,
+            "bind": "127.0.0.1",
+            "status": "skeleton",
+            "note": "Full EA socket loop ships with Windows packaging",
+        }
 
     @app.get("/status", dependencies=[Depends(_require_token)])
     def status() -> dict[str, Any]:

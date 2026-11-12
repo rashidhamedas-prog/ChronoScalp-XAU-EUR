@@ -7,6 +7,9 @@
 
 ### اضافه شد
 
+- **Phases 2–4 scaffolds:** لایهٔ `intelligence` (رژیم، رتبه‌بندی expectancy
+  خالص، RL شَدو با kill-path)، پروتکل بریج MT5 + اسکلت MQ5، i18n فارسی/انگلیسی
+  برای داشبورد، و راهنمای بسته‌بندی ویندوز.
 - **Phase 1 Quant Validation:** ماژول `chronoscalp.validation` (CPCV،
   walk-forward با embargo، DSR، PBO)، حاکمیت هندسه با گزارش DSR>0،
   ضرایب اسپرد سشن/اسلیپیج خبر/سوآپ شبانه، و
