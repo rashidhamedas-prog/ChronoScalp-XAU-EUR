@@ -21,11 +21,17 @@ Append newest entries at the top. Never erase another agent's record.
   `docs/validation/phase0_pro_report.md`, ROADMAP Phase 0 section,
   changelog + BUG-002 update.
 
+### CI follow-up (2026-11-12T13:28Z)
+
+- First CI `lint-and-test` failed: `ruff check src tests scripts` SIM105 in
+  `scripts/run_cost_stress_validate.py` (local gate had only checked
+  `src tests`). Fixed with `contextlib.suppress`; pushed `a0eda98`.
+
 ### Next action
 
-Independent Reviewer + Security before merge to main/VPS. Do **not** start
-Pro Phase 1–4 until that gate passes. Risk 1%/1.5R/3% and
-`CHRONOSCALP_CONFIRM_LIVE` unchanged.
+Wait for green CI on PR #12. Independent Reviewer + Security before merge
+to main/VPS. Do **not** start Pro Phase 1–4 until that gate passes. Risk
+1%/1.5R/3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
 
 ## 2026-09-03 TASK-005 standalone operator_style engine
 
