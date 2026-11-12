@@ -41,6 +41,7 @@ class Secrets(BaseSettings):
     sentry_dsn: str = Field(default="")
     telegram_bot_token: str = Field(default="")
     telegram_chat_id: str = Field(default="")
+    telegram_control_pin: str = Field(default="")
     discord_webhook_url: str = Field(default="")
     oanda_api_token: str = Field(default="")
     oanda_account_id: str = Field(default="")

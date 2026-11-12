@@ -20,6 +20,11 @@ from typing import Any
 import pandas as pd
 
 from chronoscalp.logging_setup import agent_debug_log, logger
+from chronoscalp.utils.broker_clock import (
+    BrokerClockOffset,
+    assert_bar_freshness,
+    measure_offset_from_tick,
+)
 from chronoscalp.utils.types import Timeframe
 
 OHLCV_COLUMNS = ["time", "open", "high", "low", "close", "tick_volume", "spread"]
@@ -106,10 +111,61 @@ class MT5Connector:
         self._last_warn_at: dict[str, float] = {}
         self._consecutive_empty = 0
         self.last_successful_fetch_at: datetime | None = None
+        self.broker_clock: BrokerClockOffset | None = None
 
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    def _detect_broker_clock(self, symbol: str | None = None) -> BrokerClockOffset | None:
+        """Measure server-vs-UTC offset from a fresh tick (session hours only)."""
+        try:
+            import MetaTrader5 as mt5
+
+            probe = symbol
+            if not probe:
+                # Prefer a liquid FX major for clock detection.
+                for candidate in ("EURUSD", "XAUUSD", "GBPUSD"):
+                    info = getattr(mt5, "symbol_info", lambda _s: None)(candidate)
+                    if info is not None:
+                        probe = candidate
+                        break
+            if not probe:
+                return None
+            tick_fn = getattr(mt5, "symbol_info_tick", None)
+            if tick_fn is None:
+                return None
+            tick = tick_fn(probe)
+            if tick is None:
+                return None
+            epoch = float(getattr(tick, "time_msc", 0) or 0) / 1000.0
+            if epoch <= 0:
+                epoch = float(getattr(tick, "time", 0) or 0)
+            if epoch <= 0:
+                return None
+            offset = measure_offset_from_tick(epoch)
+        except Exception as exc:  # noqa: BLE001 - never block connect on clock probe
+            logger.warning("Broker clock detection skipped: {}", exc)
+            return None
+        self.broker_clock = offset
+        logger.info(
+            "MT5 broker clock offset={:+.2f}h source={} stale={}",
+            offset.offset_hours,
+            offset.source,
+            offset.stale,
+        )
+        return offset
+
+    def _normalize_bar_index(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Convert broker-server bar epochs already parsed as UTC-naive labels."""
+        if df.empty or self.broker_clock is None:
+            return df
+        if self.broker_clock.offset_seconds == 0:
+            return df
+        out = df.copy()
+        # Bars were parsed with utc=True from server epochs; subtract offset.
+        out.index = out.index - pd.Timedelta(seconds=self.broker_clock.offset_seconds)
+        return out
 
     def _process_link_matches(self, mt5: Any) -> bool:
         """True when this process already holds a live link to *our* account.
@@ -252,6 +308,7 @@ class MT5Connector:
 
             self._connected = True
             self._consecutive_empty = 0
+            self._detect_broker_clock()
             logger.info(
                 "Connected to MT5 server={} login={} elapsed={:.1f}s",
                 self._server,
@@ -403,9 +460,17 @@ class MT5Connector:
                 if c in df.columns
             ]
         ]
+        df = self._normalize_bar_index(df)
         # Position 0 from copy_rates_from_pos is the still-forming candle —
         # drop it so strategy iloc[-1] matches the bar-close gate.
-        return self._drop_forming_bar(df)
+        out = self._drop_forming_bar(df)
+        if not out.empty and timeframe == Timeframe.M1:
+            try:
+                assert_bar_freshness(out.index[-1].to_pydatetime())
+            except RuntimeError as exc:
+                logger.error("{}", exc)
+                raise
+        return out
 
     def _broker_time_now(self, symbol: str) -> datetime:
         """Latest tick timestamp for ``symbol`` (server-stamped pseudo-UTC).

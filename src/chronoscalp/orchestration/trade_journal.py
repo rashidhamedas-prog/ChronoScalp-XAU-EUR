@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.atomic_json import write_json_atomic
 from chronoscalp.utils.strategy_tags import (
     STRATEGY_REPORT_ORDER,
     STRATEGY_UNKNOWN,
@@ -535,8 +536,7 @@ class TradeJournal:
             "open_trades": [t.to_dict() for t in self.open_trades.values()],
             "closed_trades": [t.to_dict() for t in self.closed_trades],
         }
-        with self.path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+        write_json_atomic(self.path, payload)
 
     def _pop_open(
         self,

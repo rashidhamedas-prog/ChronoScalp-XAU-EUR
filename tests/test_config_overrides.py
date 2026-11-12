@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from chronoscalp.config_overrides import (
+    REJECTED_UNTIL_IMPLEMENTED,
     UNENFORCED_OVERRIDE_KEYS,
     RuntimeOverridesValidationError,
     unenforced_override_keys,
@@ -35,14 +36,17 @@ def test_demo_shadow_example_keeps_delta_enabled() -> None:
     assert out["strategy"]["delta"]["allowed_symbols"] == ["XAUUSD"]
 
 
-def test_unenforced_keys_reported_when_present() -> None:
-    found = unenforced_override_keys(
-        {
-            "risk": {"max_trades_portfolio_day": 3, "max_daily_loss_pct": 1.0},
-            "execution": {"single_instance": True, "broker": "paper"},
-        }
+def test_unenforced_override_keys_list_is_empty() -> None:
+    assert UNENFORCED_OVERRIDE_KEYS == ()
+    assert (
+        unenforced_override_keys(
+            {
+                "risk": {"max_trades_portfolio_day": 3, "max_daily_loss_pct": 1.0},
+                "execution": {"single_instance": True, "broker": "paper"},
+            }
+        )
+        == []
     )
-    assert found == ["execution.single_instance", "risk.max_trades_portfolio_day"]
 
 
 def test_unenforced_keys_empty_for_enforced_only_overlay() -> None:
@@ -50,9 +54,25 @@ def test_unenforced_keys_empty_for_enforced_only_overlay() -> None:
     assert unenforced_override_keys(None) == []
 
 
-def test_every_unenforced_key_is_dotted_and_sorted() -> None:
-    assert list(UNENFORCED_OVERRIDE_KEYS) == sorted(UNENFORCED_OVERRIDE_KEYS)
-    assert all(key.count(".") == 1 for key in UNENFORCED_OVERRIDE_KEYS)
+def test_rejected_until_implemented_keys_fail_validation() -> None:
+    with pytest.raises(RuntimeOverridesValidationError, match="not enforced yet"):
+        validate_runtime_overrides({"risk": {"max_trades_portfolio_day": 3}})
+    assert all(key.count(".") == 1 for key in REJECTED_UNTIL_IMPLEMENTED)
+
+
+def test_single_instance_and_news_staleness_keys_are_accepted() -> None:
+    out = validate_runtime_overrides(
+        {
+            "execution": {"single_instance": True, "broker": "paper"},
+            "news_filter": {
+                "fail_closed_when_stale": True,
+                "max_calendar_age_minutes": 120,
+            },
+        }
+    )
+    assert out["execution"]["single_instance"] is True
+    assert out["news_filter"]["fail_closed_when_stale"] is True
+    assert out["news_filter"]["max_calendar_age_minutes"] == 120.0
 
 
 def test_rejects_risk_above_hard_ceiling() -> None:

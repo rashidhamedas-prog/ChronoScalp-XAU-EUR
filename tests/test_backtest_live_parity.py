@@ -32,7 +32,10 @@ SYMBOLS_CFG = {
     "XAUUSD": {
         "pip_size": 0.1,
         "pip_value_per_lot": 1.0,
-        "typical_spread_pips": 2.0,
+        # Geometry/path parity tests isolate SL/trail behaviour; costs are
+        # covered by Phase 0 cost-model tests separately.
+        "typical_spread_pips": 0.0,
+        "commission_per_lot": 0.0,
         "min_lot": 0.01,
         "max_lot": 10.0,
         "lot_step": 0.01,

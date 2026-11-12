@@ -9,10 +9,38 @@ from typing import Any
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.model_selection import train_test_split
 
 from chronoscalp.logging_setup import logger
 from chronoscalp.ml.features import FEATURE_COLUMNS
+
+
+def chronological_train_test_split(
+    dataset: pd.DataFrame,
+    *,
+    test_size: float = 0.25,
+    embargo: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split a chronologically ordered dataset without shuffling.
+
+    ``embargo`` drops the last ``embargo`` training rows immediately before the
+    test window so overlapping label horizons cannot leak (AFML purge/embargo).
+    """
+    if not 0.0 < float(test_size) < 1.0:
+        raise ValueError("test_size must be in (0, 1)")
+    n = len(dataset)
+    if n < 4:
+        raise ValueError("Need at least 4 samples for a chronological split")
+    test_n = max(1, int(round(n * float(test_size))))
+    train_end = n - test_n
+    if train_end <= 0:
+        raise ValueError("test_size leaves no training samples")
+    embargo_n = max(0, int(embargo))
+    usable_train_end = max(1, train_end - embargo_n)
+    train = dataset.iloc[:usable_train_end]
+    test = dataset.iloc[train_end:]
+    if train.empty or test.empty:
+        raise ValueError("Chronological split produced an empty fold")
+    return train, test
 
 
 @dataclass
@@ -61,19 +89,28 @@ class SetupClassifier:
         joblib.dump({"model": self._model, "feature_columns": self.feature_columns}, path)
         logger.info("Saved setup classifier to {}", path)
 
-    def train(self, dataset: pd.DataFrame, test_size: float = 0.25) -> TrainReport:
+    def train(
+        self,
+        dataset: pd.DataFrame,
+        test_size: float = 0.25,
+        *,
+        embargo: int = 0,
+    ) -> TrainReport:
         if dataset.empty or "label" not in dataset.columns:
             raise ValueError("Dataset is empty or missing 'label' column")
 
-        x = dataset[self.feature_columns].astype(float)
-        y = dataset["label"].astype(int)
-
-        if y.nunique() < 2:
+        if dataset["label"].nunique() < 2:
             raise ValueError("Need both win and loss labels to train a classifier")
 
-        x_train, x_test, y_train, y_test = train_test_split(
-            x, y, test_size=test_size, random_state=42, stratify=y
+        # Rows from build_labeled_dataset are chronological; never shuffle.
+        train_df, test_df = chronological_train_test_split(
+            dataset, test_size=test_size, embargo=embargo
         )
+        x_train = train_df[self.feature_columns].astype(float)
+        y_train = train_df["label"].astype(int)
+        x_test = test_df[self.feature_columns].astype(float)
+        y_test = test_df["label"].astype(int)
+
         self._model.fit(x_train, y_train)
         preds = self._model.predict(x_test)
         accuracy = float(accuracy_score(y_test, preds))
@@ -90,7 +127,7 @@ class SetupClassifier:
             test_samples=len(x_test),
             accuracy=accuracy,
             roc_auc=roc,
-            positive_rate=float(y.mean()),
+            positive_rate=float(dataset["label"].astype(int).mean()),
         )
 
     def predict_proba(self, features: dict[str, float]) -> float:

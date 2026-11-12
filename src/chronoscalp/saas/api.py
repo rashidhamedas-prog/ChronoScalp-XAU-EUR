@@ -44,9 +44,7 @@ load_dotenv(ROOT / ".env")
 def _require_token(authorization: str | None = Header(default=None)) -> None:
     expected = os.getenv("CHRONOSCALP_API_TOKEN", "").strip()
     if not expected:
-        # Dev convenience: allow open API only when token unset AND env=development.
-        if os.getenv("CHRONOSCALP_ENV", "development").lower() == "development":
-            return
+        # Fail closed in every environment — no open API when the token is unset.
         raise HTTPException(status_code=503, detail="CHRONOSCALP_API_TOKEN not configured")
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
@@ -131,11 +129,17 @@ def _read_positions_snapshot(mode: str) -> dict[str, Any]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="ChronoScalp Control API", version="1.1.0")
+    # Restrict CORS to local dashboard origins; never wildcard with credentials.
+    cors_raw = os.getenv(
+        "CHRONOSCALP_CORS_ORIGINS",
+        "http://127.0.0.1:8501,http://localhost:8501,http://127.0.0.1:8510,http://localhost:8510",
+    )
+    allow_origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=allow_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     @app.get("/health")

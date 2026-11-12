@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from chronoscalp.logging_setup import logger
+from chronoscalp.utils.atomic_json import read_json_with_fallback, write_json_atomic
 
 
 def canonical_symbol(symbol: str) -> str:
@@ -331,17 +332,19 @@ class MistakeMemory:
         return count >= int(self.config.max_repeats)
 
     def load(self) -> None:
-        """Load lessons from disk; missing/corrupt files start empty."""
-        if not self.path.exists():
+        """Load lessons from disk; missing/corrupt files fall back to .bak then empty."""
+        bak = self.path.with_suffix(self.path.suffix + ".bak")
+        if not self.path.exists() and not bak.exists():
             self.lessons = []
             return
         try:
-            with self.path.open(encoding="utf-8-sig") as fh:
-                raw = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
+            raw, source = read_json_with_fallback(self.path, default={"lessons": []})
+        except (OSError, FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
             logger.warning("MistakeMemory load failed {}: {}", self.path, exc)
             self.lessons = []
             return
+        if source == "backup":
+            logger.warning("MistakeMemory restored from backup at {}", bak)
         rows = raw.get("lessons") if isinstance(raw, dict) else raw
         if not isinstance(rows, list):
             self.lessons = []
@@ -360,5 +363,4 @@ class MistakeMemory:
             "updated_at": datetime.now(tz=UTC).isoformat(),
             "lessons": [lesson.to_dict() for lesson in self.lessons],
         }
-        with self.path.open("w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
+        write_json_atomic(self.path, payload)

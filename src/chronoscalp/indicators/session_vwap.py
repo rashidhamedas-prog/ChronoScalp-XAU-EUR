@@ -1,18 +1,35 @@
-"""Session VWAP and Asian-range helpers for institutional trend bias."""
+"""Session VWAP and Asian-range helpers for institutional trend bias.
+
+Session boundaries use IANA zones (DST-aware), matching ``SessionFilter``.
+Timestamps must already be true UTC before calling these helpers.
+"""
 
 from __future__ import annotations
 
 from datetime import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
-# Session opens in GMT (UTC).
-SESSION_OPENS_GMT: dict[str, time] = {
-    "asia": time(0, 0),
-    "london": time(7, 0),
-    "new_york": time(12, 0),
+from chronoscalp.logging_setup import logger
+
+# Local wall-clock opens in each session's IANA zone (DST-aware).
+SESSION_OPENS_LOCAL: dict[str, tuple[str, time]] = {
+    "asia": ("Asia/Tokyo", time(9, 0)),  # Tokyo morning ≈ prior FX Asia open
+    "london": ("Europe/London", time(8, 0)),
+    "new_york": ("America/New_York", time(8, 0)),
 }
-ASIAN_RANGE_END_GMT = time(7, 0)
+# Asian range ends at London open (Europe/London 08:00).
+ASIAN_RANGE_END_ZONE = "Europe/London"
+ASIAN_RANGE_END_LOCAL = time(8, 0)
+
+
+def _zone(name: str) -> ZoneInfo | None:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, KeyError, Exception):
+        logger.error("Session VWAP timezone {!r} invalid — failing closed", name)
+        return None
 
 
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -33,37 +50,66 @@ def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
 
 
 def active_session_name(ts: pd.Timestamp) -> str:
-    """Return asia / london / new_york for a UTC timestamp."""
-    t = ts.timetz().replace(tzinfo=None) if hasattr(ts, "timetz") else ts.time()
-    if t >= SESSION_OPENS_GMT["new_york"]:
+    """Return asia / london / new_york for a true-UTC timestamp."""
+    ts = _as_utc(ts)
+    # Evaluate in priority NY > London > Asia using each zone's local clock.
+    ny_zone = _zone(SESSION_OPENS_LOCAL["new_york"][0])
+    lon_zone = _zone(SESSION_OPENS_LOCAL["london"][0])
+    if ny_zone is None or lon_zone is None:
+        return "asia"
+    local_ny = ts.tz_convert(ny_zone).timetz().replace(tzinfo=None)
+    local_lon = ts.tz_convert(lon_zone).timetz().replace(tzinfo=None)
+    if local_ny >= SESSION_OPENS_LOCAL["new_york"][1]:
         return "new_york"
-    if t >= SESSION_OPENS_GMT["london"]:
+    if local_lon >= SESSION_OPENS_LOCAL["london"][1]:
         return "london"
     return "asia"
 
 
 def session_open_timestamp(ts: pd.Timestamp) -> pd.Timestamp:
-    """UTC timestamp of the current session open on the same calendar day."""
+    """UTC timestamp of the current session open (IANA-local wall clock)."""
     ts = _as_utc(ts)
     name = active_session_name(ts)
-    open_t = SESSION_OPENS_GMT[name]
-    return pd.Timestamp(
-        year=ts.year, month=ts.month, day=ts.day, hour=open_t.hour, minute=open_t.minute, tz="UTC"
-    )
+    zone_name, open_t = SESSION_OPENS_LOCAL[name]
+    zone = _zone(zone_name)
+    if zone is None:
+        # Fail closed to UTC midnight rather than inventing GMT anchors.
+        return ts.normalize()
+    local = ts.tz_convert(zone)
+    open_local = local.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
+    if local.timetz().replace(tzinfo=None) < open_t:
+        open_local = open_local - pd.Timedelta(days=1)
+    return open_local.tz_convert("UTC")
 
 
 def asian_range_midpoint(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> float | None:
-    """Midpoint of Asian session high/low (00:00–07:00 GMT) for the as_of day."""
+    """Midpoint of Asian session high/low until London open for the as_of day."""
     if df.empty:
         return None
     frame = _ensure_utc_index(df)
     as_of = _as_utc(as_of or frame.index[-1])
-    day_start = as_of.normalize()
-    asian_end = day_start + pd.Timedelta(hours=7)
-    window = frame[(frame.index >= day_start) & (frame.index < asian_end)]
+    lon_zone = _zone(ASIAN_RANGE_END_ZONE)
+    if lon_zone is None:
+        return None
+    local = as_of.tz_convert(lon_zone)
+    london_open_local = local.replace(
+        hour=ASIAN_RANGE_END_LOCAL.hour,
+        minute=ASIAN_RANGE_END_LOCAL.minute,
+        second=0,
+        microsecond=0,
+    )
+    if local.timetz().replace(tzinfo=None) < ASIAN_RANGE_END_LOCAL:
+        london_open_local = london_open_local - pd.Timedelta(days=1)
+        day_start_local = london_open_local - pd.Timedelta(hours=8)
+    else:
+        day_start_local = london_open_local - pd.Timedelta(hours=8)
+    # Approximate Asia window as the 8 hours before London open.
+    start_utc = day_start_local.tz_convert("UTC")
+    end_utc = london_open_local.tz_convert("UTC")
+    window = frame[(frame.index >= start_utc) & (frame.index < end_utc)]
     if window.empty:
-        prev_start = day_start - pd.Timedelta(days=1)
-        prev_end = prev_start + pd.Timedelta(hours=7)
+        prev_end = end_utc - pd.Timedelta(days=1)
+        prev_start = start_utc - pd.Timedelta(days=1)
         window = frame[(frame.index >= prev_start) & (frame.index < prev_end)]
     if window.empty:
         return None
@@ -82,7 +128,9 @@ def session_vwap(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> float |
         return None
     typical = (window["high"] + window["low"] + window["close"]) / 3.0
     if "tick_volume" in window.columns:
-        vol = window["tick_volume"].astype(float).clip(lower=1.0)
+        vol = window["tick_volume"].astype(float).clip(lower=0.0)
+    elif "volume" in window.columns:
+        vol = window["volume"].astype(float).clip(lower=0.0)
     else:
         vol = pd.Series(1.0, index=window.index)
     denom = float(vol.sum())
@@ -94,7 +142,7 @@ def session_vwap(df: pd.DataFrame, as_of: pd.Timestamp | None = None) -> float |
 def previous_day_high_low(
     df: pd.DataFrame, as_of: pd.Timestamp | None = None
 ) -> tuple[float | None, float | None]:
-    """Previous calendar-day high/low from OHLCV bars."""
+    """Previous calendar-day high/low from OHLCV bars (UTC day boundary)."""
     if df.empty:
         return None, None
     frame = _ensure_utc_index(df)

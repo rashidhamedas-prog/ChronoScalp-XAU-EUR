@@ -70,8 +70,17 @@ def agent_debug_log(
     hypothesis_id: str,
     run_id: str = "pre-fix",
 ) -> None:
-    """Append one NDJSON debug line for the ece9a8 session (no secrets)."""
+    """Append one NDJSON debug line for the ece9a8 session (no secrets).
+
+    Compiled out of production: only writes when ``CHRONOSCALP_ENV`` is
+    ``development`` or ``test``.
+    """
     try:
+        import os
+
+        env = os.getenv("CHRONOSCALP_ENV", "development").strip().lower()
+        if env not in {"development", "dev", "test"}:
+            return
         import json
         import time
 

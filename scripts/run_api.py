@@ -18,7 +18,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ChronoScalp control API")
-    parser.add_argument("--host", default="0.0.0.0")
+    # Security default: loopback only. Explicitly pass 0.0.0.0 only behind a
+    # reverse proxy with network controls — never as the product default.
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8510)
     args = parser.parse_args()
 

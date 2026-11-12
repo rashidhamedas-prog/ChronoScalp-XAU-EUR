@@ -2,6 +2,41 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-11-12 TASK-PRO-P0 Phase 0 Professional stabilization
+
+- Time (UTC): 2026-11-12T13:35:00Z
+- Task / owner / role: TASK-PRO-P0 / cursor:cloud-agent / implementer
+- Reclaimed stale TASK-005 (heartbeat 2026-09-03; already merged) claims
+  overlapping `main.py`, `news_filter.py`, `telegram/control_bot.py`,
+  `config_overrides.py`, `settings.yaml`, ROADMAP/changelog/status/handoff.
+
+### Delivered
+
+- Cost-real paper (`cost_model` + broker wiring), SL-first ML labels,
+  atomic JSON, broker clock + M1 freshness, instance lock, circuit breaker
+  hold, API/Telegram fail-closed + PIN, rejected unenforced overlay keys,
+  alert queue, persistence bounds.
+- Gates: `pytest -q` green; `ruff check src tests` green.
+- Docs: `tasks/phase0-pro-stabilization.md`,
+  `docs/validation/phase0_pro_report.md`, ROADMAP Phase 0 section,
+  changelog + BUG-002 update.
+
+### CI follow-up (2026-11-12T13:28Z)
+
+- First CI `lint-and-test` failed: `ruff check src tests scripts` SIM105 in
+  `scripts/run_cost_stress_validate.py` (local gate had only checked
+  `src tests`). Fixed with `contextlib.suppress`; pushed `a0eda98`.
+- Second failure: `black --check src tests scripts` (11 files). Ran
+  `black src tests scripts` including pre-existing drift; local
+  black/ruff/pytest green. Local gates now mirror CI scope including
+  `scripts/`.
+
+### Next action
+
+Wait for green CI on PR #12. Independent Reviewer + Security before merge
+to main/VPS. Do **not** start Pro Phase 1–4 until that gate passes. Risk
+1%/1.5R/3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged.
+
 ## 2026-09-03 TASK-005 standalone operator_style engine
 
 - Time (UTC): 2026-09-03T23:40:00Z

@@ -55,18 +55,29 @@ class NewsFilter:
         blackout_after: timedelta,
         high_impact_only: bool = True,
         enabled: bool = True,
+        *,
+        fail_closed_when_stale: bool = True,
+        max_calendar_age_minutes: int = 360,
+        fetched_at: datetime | None = None,
+        source: str = "yaml",
     ) -> None:
         self.events = [_normalize_event(e) for e in events]
         self.blackout_before = blackout_before
         self.blackout_after = blackout_after
         self.high_impact_only = high_impact_only
         self.enabled = enabled
+        self.fail_closed_when_stale = bool(fail_closed_when_stale)
+        self.max_calendar_age_minutes = int(max_calendar_age_minutes)
+        self.fetched_at = fetched_at or datetime.now(tz=UTC)
+        self.source = source
 
     @classmethod
     def from_config(
         cls, news_cfg: dict[str, Any], events_yaml_path: str | Path, api_key: str = ""
     ) -> NewsFilter:
         events = _load_manual_events(events_yaml_path)
+        source = "yaml"
+        fetched_at = datetime.now(tz=UTC)
         if api_key:
             try:
                 api_events = _fetch_events_from_api(api_key)
@@ -79,6 +90,8 @@ class NewsFilter:
                 api_events = None
             if api_events:
                 events = api_events
+                source = "api"
+                fetched_at = datetime.now(tz=UTC)
             else:
                 logger.warning(
                     "News API returned no events; using {} YAML calendar rows",
@@ -91,12 +104,34 @@ class NewsFilter:
             blackout_after=timedelta(minutes=int(news_cfg.get("blackout_minutes_after", 30))),
             high_impact_only=bool(news_cfg.get("high_impact_only", True)),
             enabled=bool(news_cfg.get("enabled", True)),
+            fail_closed_when_stale=bool(news_cfg.get("fail_closed_when_stale", True)),
+            max_calendar_age_minutes=int(news_cfg.get("max_calendar_age_minutes", 360)),
+            fetched_at=fetched_at,
+            source=source,
         )
+
+    def is_stale(self, moment: datetime | None = None) -> bool:
+        """True when the calendar snapshot is older than ``max_calendar_age_minutes``."""
+        wall = _ensure_utc(moment or datetime.now(tz=UTC))
+        age = wall - _ensure_utc(self.fetched_at)
+        return age > timedelta(minutes=max(0, self.max_calendar_age_minutes))
 
     def is_blackout(self, moment: datetime, currency: str | None = None) -> bool:
         if not self.enabled:
             return False
         moment = _ensure_utc(moment)
+        if self.is_stale(moment):
+            if self.fail_closed_when_stale:
+                logger.warning(
+                    "News calendar stale (age > {}m, source={}) — fail-closed blackout",
+                    self.max_calendar_age_minutes,
+                    self.source,
+                )
+                return True
+            logger.warning(
+                "News calendar stale (source={}) but fail_closed_when_stale=false",
+                self.source,
+            )
         for event in self.events:
             if self.high_impact_only and event.impact != "high":
                 continue

@@ -43,10 +43,11 @@ def _label_outcome(
     for i in range(entry_idx + 1, len(trigger_df)):
         bar = trigger_df.iloc[i]
         hit = check_sl_tp_hit(position, float(bar["high"]), float(bar["low"]))
-        if hit.hit_tp:
-            return 1
+        # Must match live/paper: when both SL and TP pierce the same bar, SL wins.
         if hit.hit_sl:
             return 0
+        if hit.hit_tp:
+            return 1
     return None
 
 

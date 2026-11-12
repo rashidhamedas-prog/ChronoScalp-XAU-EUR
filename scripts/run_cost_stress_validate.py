@@ -8,6 +8,7 @@ Writes JSON under data/reports/ (gitignored).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from copy import deepcopy
@@ -142,10 +143,15 @@ def _load_enriched(
 
 
 def _stress_settings(settings, factor: float = 1.5):
-    """Return a Settings-like object with 1.5x execution/backtest costs in ``raw``."""
+    """Return a Settings-like object with 1.5x execution/backtest costs.
+
+    Scales slippage, ``backtest.default_spread_pips``, ``commission_per_lot``,
+    and per-symbol ``typical_spread_pips`` / ``commission_per_lot`` so the
+    paper cost model actually sees the stress (not a no-op).
+    """
     stressed = Settings.__new__(Settings)
     stressed.raw = deepcopy(settings.raw)
-    stressed.symbols_raw = settings.symbols_raw
+    stressed.symbols_raw = deepcopy(settings.symbols_raw)
     stressed.secrets = settings.secrets
     execution = dict(stressed.raw.get("execution") or {})
     execution["slippage_pips"] = float(execution.get("slippage_pips", 0.5)) * factor
@@ -160,6 +166,15 @@ def _stress_settings(settings, factor: float = 1.5):
     bt["default_spread_pips"] = spreads
     bt["commission_per_lot"] = float(bt.get("commission_per_lot", 7.0)) * factor
     stressed.raw["backtest"] = bt
+    for _sym, spec in stressed.symbols_raw.items():
+        if not isinstance(spec, dict):
+            continue
+        if "typical_spread_pips" in spec:
+            with contextlib.suppress(TypeError, ValueError):
+                spec["typical_spread_pips"] = float(spec["typical_spread_pips"]) * factor
+        if "commission_per_lot" in spec:
+            with contextlib.suppress(TypeError, ValueError):
+                spec["commission_per_lot"] = float(spec["commission_per_lot"]) * factor
     return stressed
 
 
