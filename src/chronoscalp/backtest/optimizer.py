@@ -91,16 +91,36 @@ class WalkForwardResult:
         }
 
 
+def clone_settings_with(
+    settings: Settings,
+    *,
+    indicator_overrides: dict[str, Any] | None = None,
+    strategy_overrides: dict[str, Any] | None = None,
+    risk_overrides: dict[str, Any] | None = None,
+    backtest_overrides: dict[str, Any] | None = None,
+) -> Settings:
+    """Deep-copy ``settings`` with optional section overrides (optimizer-safe)."""
+    cloned = Settings.__new__(Settings)
+    cloned.raw = copy.deepcopy(settings.raw)
+    cloned.symbols_raw = copy.deepcopy(settings.symbols_raw)
+    cloned.secrets = settings.secrets
+    cloned.runtime_overrides = copy.deepcopy(getattr(settings, "runtime_overrides", {}) or {})
+    if indicator_overrides:
+        cloned.raw["indicators"] = {**cloned.raw.get("indicators", {}), **indicator_overrides}
+    if strategy_overrides:
+        cloned.raw["strategy"] = {**cloned.raw.get("strategy", {}), **strategy_overrides}
+    if risk_overrides:
+        cloned.raw["risk"] = {**cloned.raw.get("risk", {}), **risk_overrides}
+    if backtest_overrides:
+        cloned.raw["backtest"] = {**cloned.raw.get("backtest", {}), **backtest_overrides}
+    return cloned
+
+
 def clone_settings_with_indicators(
     settings: Settings, indicator_overrides: dict[str, Any]
 ) -> Settings:
-    """Shallow clone of ``settings`` with overridden indicator parameters."""
-    cloned = Settings.__new__(Settings)
-    cloned.raw = copy.deepcopy(settings.raw)
-    cloned.raw["indicators"] = {**settings.indicators, **indicator_overrides}
-    cloned.symbols_raw = settings.symbols_raw
-    cloned.secrets = settings.secrets
-    return cloned
+    """Deep clone of ``settings`` with overridden indicator parameters."""
+    return clone_settings_with(settings, indicator_overrides=indicator_overrides)
 
 
 def enrich_data_by_timeframe(

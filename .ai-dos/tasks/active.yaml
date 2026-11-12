@@ -1,8 +1,46 @@
 schema_version: 1
 tasks:
+  - id: "TASK-PRO-P1"
+    title: "Professional Edition Phase 1 quant validation framework"
+    status: "in_progress"
+    risk: "critical"
+    owner: "cursor:cloud-agent"
+    roles:
+      architect: "cursor:cloud-agent"
+      implementer: "cursor:cloud-agent"
+      reviewer: "independent-agent-required-before-merge"
+      security: "independent-agent-required-before-merge"
+    branch: "cursor/pro-phase1-validation-b46a"
+    worktree: "/workspace"
+    claimed_at: "2026-11-12T13:40:00Z"
+    heartbeat_at: "2026-11-12T14:00:00Z"
+    depends_on: ["TASK-PRO-P0"]
+    file_claims:
+      - "src/chronoscalp/validation/"
+      - "src/chronoscalp/execution/cost_model.py"
+      - "src/chronoscalp/backtest/optimizer.py"
+      - "tests/test_phase1_validation.py"
+      - "tasks/phase1-quant-validation.md"
+      - "docs/validation/phase1_pro_report.md"
+      - "docs/validation/phase0_vps_deploy.md"
+      - "docs/ROADMAP.md"
+      - "docs/11-changelog.md"
+      - ".ai-dos/tasks/active.yaml"
+      - ".ai-dos/tasks/handoff.md"
+      - ".ai-dos/project/status.md"
+    acceptance_criteria:
+      - "validation.run --all emits JSON reports; DSR/PBO/CPCV unit-tested."
+      - "Geometry governance rejects DSR<=0; 1%/1.5R/3% unchanged."
+      - "pytest and ruff (incl. scripts) pass."
+    validation:
+      - "pytest -q"
+      - "ruff check src tests scripts"
+      - "black --check src tests scripts"
+    notes: >-
+      Phase 0 merged to main (PR #12). VPS deploy blocked: SSH key rejected.
   - id: "TASK-PRO-P0"
     title: "Professional Edition Phase 0 stabilization (fail-closed)"
-    status: "in_progress"
+    status: "done"
     risk: "critical"
     owner: "cursor:cloud-agent"
     roles:

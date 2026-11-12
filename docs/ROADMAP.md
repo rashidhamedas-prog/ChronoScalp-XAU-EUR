@@ -10,10 +10,22 @@
 - [x] API/Telegram fail-closed (token mandatory, localhost bind, control PIN)
 - [x] Reject unenforced runtime-override keys; alert async queue; persistence bounds
 - [x] Regression pack: `tests/test_phase0_stabilization.py` (+ API/Telegram/alerts/overrides)
-- [ ] Independent Reviewer + Security sign-off before VPS merge
-- [ ] Phase 1+ (CPCV / hybrid MQL5 / UI) **blocked** until Phase 0 verified
+- [x] Merged to `main` via PR #12 (CI green, 2026-11-12)
+- [ ] VPS safe code update (operator SSH — Cloud Agent key rejected)
+- [ ] Independent Reviewer + Security sign-off before live resume
 
-Report: `docs/validation/phase0_pro_report.md`
+Report: `docs/validation/phase0_pro_report.md` · Deploy: `docs/validation/phase0_vps_deploy.md`
+
+## Professional Edition — Phase 1 Quant Validation ✅ (core)
+
+- [x] Shared cost extensions: session spread mult, news slip, overnight swap helpers
+- [x] `chronoscalp.validation`: CPCV, purged WF, DSR, PBO, portfolio equity
+- [x] Geometry governance (`DSR > 0` report required)
+- [x] CLI `python -m chronoscalp.validation.run --all` (+ synthetic CI smoke)
+- [ ] Operator re-claim of historical reports on broker-native CSVs
+- [ ] P1-6 residual: RVOL prior-N hardening if volume gaps persist
+
+Report: `docs/validation/phase1_pro_report.md`
 
 ## Strategy Delta — implemented, validation pending
 
