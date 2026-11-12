@@ -1,8 +1,8 @@
 """In-memory simulated broker — runs on any OS, no MT5 terminal required.
 
 Used for paper trading (live data feed, simulated fills) and as the fill
-model reused by backtest/engine.py. Applies configured spread + slippage so
-paper results are a meaningful approximation of live execution costs.
+model reused by backtest/engine.py. Applies configured spread + commission +
+slippage so paper results are a meaningful approximation of live execution costs.
 """
 
 from __future__ import annotations
@@ -10,6 +10,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from chronoscalp.execution.account_mode import AccountMarginMode
+from chronoscalp.execution.cost_model import (
+    adverse_price_for_side,
+    resolve_effective_spread_pips,
+    side_fill_costs,
+)
 from chronoscalp.logging_setup import logger
 from chronoscalp.utils.strategy_tags import resolve_strategy_tag
 from chronoscalp.utils.types import (
@@ -34,14 +39,24 @@ class PaperBroker:
         starting_balance: float = 10_000.0,
         slippage_pips: float = 0.5,
         first_ticket: int = 1,
+        *,
+        commission_per_lot_override: float | None = None,
+        backtest_cfg: dict | None = None,
     ) -> None:
-        self.symbols_cfg = symbols_cfg
+        self.symbols_cfg = {
+            sym: dict(spec) for sym, spec in (symbols_cfg or {}).items() if isinstance(spec, dict)
+        }
+        if commission_per_lot_override is not None:
+            for spec in self.symbols_cfg.values():
+                spec["commission_per_lot"] = float(commission_per_lot_override)
         self.balance = starting_balance
         self.slippage_pips = slippage_pips
+        self.backtest_cfg = dict(backtest_cfg or {})
         self._positions: dict[int, Position] = {}
         self._pending: dict[int, PendingOrder] = {}
         self._quotes: dict[str, Quote] = {}
         self._next_ticket = max(1, int(first_ticket))
+        self._entry_costs_paid: dict[int, float] = {}
 
     def connect(self) -> bool:
         logger.info("PaperBroker ready (starting_balance={:.2f})", self.balance)
@@ -66,7 +81,7 @@ class PaperBroker:
         return positions
 
     def get_current_spread_pips(self, symbol: str) -> float:
-        return float(self.symbols_cfg[symbol]["typical_spread_pips"])
+        return resolve_effective_spread_pips(symbol, self.symbols_cfg, self.backtest_cfg)
 
     def set_quote(self, symbol: str, bid: float, ask: float, at: datetime | None = None) -> None:
         """Test/paper helper — inject a live quote for pending fill simulation."""
@@ -191,6 +206,15 @@ class PaperBroker:
             if is_news:
                 tag = "news_straddle"
                 filled_news = True
+            spec = self.symbols_cfg[symbol]
+            spread_pips = self.get_current_spread_pips(symbol)
+            entry_costs = side_fill_costs(
+                spec,
+                entry_price=fill_price,
+                volume=order.volume,
+                spread_pips=spread_pips,
+            )
+            self.balance -= entry_costs.total
             position = Position(
                 ticket=self._next_ticket,
                 symbol=symbol,
@@ -205,24 +229,38 @@ class PaperBroker:
                 strategy=tag,
             )
             self._positions[position.ticket] = position
+            self._entry_costs_paid[position.ticket] = entry_costs.total
             self._next_ticket += 1
             logger.info(
-                "[paper] Pending filled {} {} @ {:.5f} (was order {} strategy={})",
+                "[paper] Pending filled {} {} @ {:.5f} (was order {} strategy={} entry_cost={:.2f})",
                 symbol,
                 direction.value,
                 fill_price,
                 ticket,
                 tag,
+                entry_costs.total,
             )
 
     def place_order(
         self, signal: Signal, volume: float, fill_price: float | None = None
     ) -> Position:
         spec = self.symbols_cfg[signal.symbol]
-        pip_size = spec["pip_size"]
-        slip = self.slippage_pips * pip_size
+        spread_pips = self.get_current_spread_pips(signal.symbol)
         base_price = fill_price if fill_price is not None else signal.entry_price
-        fill = base_price + slip if signal.signal_type == SignalType.BUY else base_price - slip
+        fill = adverse_price_for_side(
+            mid_price=float(base_price),
+            direction=signal.signal_type,
+            is_entry=True,
+            symbol_spec=spec,
+            spread_pips=spread_pips,
+            slippage_pips=self.slippage_pips,
+        )
+        entry_costs = side_fill_costs(
+            spec, entry_price=fill, volume=volume, spread_pips=spread_pips
+        )
+        # Entry-side cash costs are reserved against balance immediately so
+        # equity curves never ignore open-trade costs.
+        self.balance -= entry_costs.total
 
         position = Position(
             ticket=self._next_ticket,
@@ -238,15 +276,17 @@ class PaperBroker:
             strategy=resolve_strategy_tag(explicit=signal.strategy, reason=signal.reason),
         )
         self._positions[position.ticket] = position
+        self._entry_costs_paid[position.ticket] = entry_costs.total
         self._next_ticket += 1
         logger.info(
-            "[paper] Opened {} {} vol={} @ {:.5f} (SL={:.5f} TP={:.5f})",
+            "[paper] Opened {} {} vol={} @ {:.5f} (SL={:.5f} TP={:.5f} entry_cost={:.2f})",
             signal.symbol,
             signal.signal_type.value,
             volume,
             fill,
             signal.stop_loss,
             signal.take_profit,
+            entry_costs.total,
         )
         return position
 
@@ -270,22 +310,41 @@ class PaperBroker:
             raise RuntimeError(f"No open paper position for ticket {ticket}")
 
         spec = self.symbols_cfg[position.symbol]
-        close_price = exit_price if exit_price is not None else position.entry_price
-        pip_size = spec["pip_size"]
-        pip_value_per_lot = spec["pip_value_per_lot"]
+        spread_pips = self.get_current_spread_pips(position.symbol)
+        raw_exit = exit_price if exit_price is not None else position.entry_price
+        close_price = adverse_price_for_side(
+            mid_price=float(raw_exit),
+            direction=position.direction,
+            is_entry=False,
+            symbol_spec=spec,
+            spread_pips=spread_pips,
+            slippage_pips=self.slippage_pips,
+        )
+        pip_size = float(spec["pip_size"])
+        pip_value_per_lot = float(spec["pip_value_per_lot"])
 
         price_diff = (
             close_price - position.entry_price
             if position.direction == SignalType.BUY
             else position.entry_price - close_price
         )
-        pnl = (price_diff / pip_size) * pip_value_per_lot * position.volume
-        self.balance += pnl
+        gross_pnl = (price_diff / pip_size) * pip_value_per_lot * position.volume
+        exit_costs = side_fill_costs(
+            spec,
+            entry_price=position.entry_price,
+            volume=position.volume,
+            spread_pips=spread_pips,
+        )
+        entry_paid = float(self._entry_costs_paid.pop(ticket, 0.0))
+        # Entry costs already left the balance at open; debit exit costs now.
+        self.balance += gross_pnl - exit_costs.total
+        net_pnl = gross_pnl - entry_paid - exit_costs.total
 
         # Prefer initial SL so trailing/breakeven moves do not distort R.
         risk_stop = position.initial_stop_loss or position.stop_loss
         risk = abs(position.entry_price - risk_stop)
-        r_multiple = round(price_diff / risk, 3) if risk else 0.0
+        risk_cash = (risk / pip_size) * pip_value_per_lot * position.volume if risk else 0.0
+        r_multiple = round(net_pnl / risk_cash, 3) if risk_cash else 0.0
 
         result = TradeResult(
             symbol=position.symbol,
@@ -295,16 +354,20 @@ class PaperBroker:
             volume=position.volume,
             open_time=position.open_time,
             close_time=at or datetime.now(tz=UTC),
-            pnl=pnl,
+            pnl=net_pnl,
             r_multiple=r_multiple,
             exit_reason=reason,
+            commission_paid=exit_costs.commission * 2.0,
+            spread_cost=exit_costs.spread * 2.0,
+            gross_pnl=gross_pnl,
         )
         logger.info(
-            "[paper] Closed {} {} @ {:.5f} pnl={:.2f} r={:.2f} reason={}",
+            "[paper] Closed {} {} @ {:.5f} gross={:.2f} net={:.2f} r={:.2f} reason={}",
             position.symbol,
             position.direction.value,
             close_price,
-            pnl,
+            gross_pnl,
+            result.pnl,
             r_multiple,
             reason,
         )
@@ -325,22 +388,45 @@ class PaperBroker:
             raise ValueError("partial volume must be positive")
 
         spec = self.symbols_cfg[position.symbol]
-        close_price = exit_price if exit_price is not None else position.entry_price
-        pip_size = spec["pip_size"]
-        pip_value_per_lot = spec["pip_value_per_lot"]
+        spread_pips = self.get_current_spread_pips(position.symbol)
+        raw_exit = exit_price if exit_price is not None else position.entry_price
+        close_price = adverse_price_for_side(
+            mid_price=float(raw_exit),
+            direction=position.direction,
+            is_entry=False,
+            symbol_spec=spec,
+            spread_pips=spread_pips,
+            slippage_pips=self.slippage_pips,
+        )
+        pip_size = float(spec["pip_size"])
+        pip_value_per_lot = float(spec["pip_value_per_lot"])
         price_diff = (
             close_price - position.entry_price
             if position.direction == SignalType.BUY
             else position.entry_price - close_price
         )
-        pnl = (price_diff / pip_size) * pip_value_per_lot * close_vol
-        self.balance += pnl
+        gross_pnl = (price_diff / pip_size) * pip_value_per_lot * close_vol
+        exit_costs = side_fill_costs(
+            spec,
+            entry_price=position.entry_price,
+            volume=close_vol,
+            spread_pips=spread_pips,
+        )
+        fraction = close_vol / float(position.volume) if position.volume else 1.0
+        entry_paid_total = float(self._entry_costs_paid.get(ticket, 0.0))
+        entry_share = entry_paid_total * fraction
+        if ticket in self._entry_costs_paid:
+            self._entry_costs_paid[ticket] = max(0.0, entry_paid_total - entry_share)
+        self.balance += gross_pnl - exit_costs.total
+        net_pnl = gross_pnl - entry_share - exit_costs.total
         risk = abs(position.entry_price - (position.initial_stop_loss or position.stop_loss))
-        r_multiple = round(price_diff / risk, 3) if risk else 0.0
+        risk_cash = (risk / pip_size) * pip_value_per_lot * close_vol if risk else 0.0
+        r_multiple = round(net_pnl / risk_cash, 3) if risk_cash else 0.0
 
         remaining = round(position.volume - close_vol, 8)
         if remaining <= 0:
             self._positions.pop(ticket, None)
+            self._entry_costs_paid.pop(ticket, None)
         else:
             position.volume = remaining
             position.partial_taken = True
@@ -353,7 +439,10 @@ class PaperBroker:
             volume=close_vol,
             open_time=position.open_time,
             close_time=at or datetime.now(tz=UTC),
-            pnl=pnl,
+            pnl=net_pnl,
             r_multiple=r_multiple,
             exit_reason="partial_tp",
+            commission_paid=exit_costs.commission * 2.0,
+            spread_cost=exit_costs.spread * 2.0,
+            gross_pnl=gross_pnl,
         )

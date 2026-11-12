@@ -36,7 +36,8 @@ def test_status_requires_token_in_non_dev(monkeypatch):
 
 def test_journal_and_strategy_stats_endpoints(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("CHRONOSCALP_ENV", "development")
-    monkeypatch.delenv("CHRONOSCALP_API_TOKEN", raising=False)
+    monkeypatch.setenv("CHRONOSCALP_API_TOKEN", "secret-token")
+    headers = {"Authorization": "Bearer secret-token"}
 
     state = tmp_path / "state"
     state.mkdir()
@@ -76,28 +77,40 @@ def test_journal_and_strategy_stats_endpoints(tmp_path: Path, monkeypatch):
     )
 
     client = TestClient(create_app())
-    journal_resp = client.get("/journal")
+    assert client.get("/journal").status_code == 401
+    journal_resp = client.get("/journal", headers=headers)
     assert journal_resp.status_code == 200
     body = journal_resp.json()
     assert body["closed_trades"][0]["strategy"] == "ultra_scalp"
     assert body["strategy_stats"][0]["strategy"] == "ultra_scalp"
 
-    strat = client.get("/strategy-stats")
+    strat = client.get("/strategy-stats", headers=headers)
     assert strat.status_code == 200
     assert strat.json()["by_strategy"][0]["net_pnl"] == 25.0
 
-    positions = client.get("/positions")
+    positions = client.get("/positions", headers=headers)
     assert positions.status_code == 200
     assert positions.json()["account"]["equity"] == 10000
 
 
-def test_settings_strategies_is_ignored_in_favor_of_symbol_catalogs(tmp_path: Path, monkeypatch):
+def test_api_refuses_missing_token_even_in_development(monkeypatch):
     monkeypatch.setenv("CHRONOSCALP_ENV", "development")
     monkeypatch.delenv("CHRONOSCALP_API_TOKEN", raising=False)
+    client = TestClient(create_app())
+    assert client.get("/status").status_code == 503
+
+
+def test_settings_strategies_is_ignored_in_favor_of_symbol_catalogs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CHRONOSCALP_ENV", "development")
+    monkeypatch.setenv("CHRONOSCALP_API_TOKEN", "secret-token")
     overrides = tmp_path / "runtime_overrides.yaml"
     monkeypatch.setattr("chronoscalp.saas.broker_wizard.OVERRIDES_PATH", overrides)
     client = TestClient(create_app())
-    resp = client.post("/settings/strategies", json={"strategies": ["delta"]})
+    resp = client.post(
+        "/settings/strategies",
+        json={"strategies": ["delta"]},
+        headers={"Authorization": "Bearer secret-token"},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["ignored"] is True

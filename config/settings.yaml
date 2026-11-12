@@ -444,6 +444,11 @@ backtest:
     BTCUSD: 25
     ETHUSD: 25
 
+# Commercial installs set require_license: true and activate via the panel.
+# CI / personal research defaults to false so pytest can construct TradingBot.
+licensing:
+  require_license: false
+
 alerting:
   enabled: false
   telegram_enabled: true
@@ -458,7 +463,12 @@ alerting:
 
 resilience:
   max_consecutive_errors: 5
+  circuit_min_trip_seconds: 600
+  circuit_success_threshold: 20
   reconcile_interval_seconds: 60
+  reconcile_ghost_grace_polls: 3
   skip_heartbeat_seconds: 300
   alert_on_daily_loss_limit: true
+  alert_on_connection_loss: true
   stale_data_seconds: 120
+  data_starvation_alert_seconds: 300

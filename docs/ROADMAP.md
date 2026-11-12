@@ -1,5 +1,20 @@
 # Roadmap
 
+## Professional Edition — Phase 0 Stabilization ✅ (gate for Phases 1–4)
+
+- [x] Cost-real paper fills (½ spread + commission per side) shared with backtest books
+- [x] Shared SL-first intrabar semantics + ML chronological split with embargo
+- [x] Atomic JSON persistence (temp + fsync + replace + `.bak`)
+- [x] Broker clock offset / UTC normalize + M1 freshness fail-closed
+- [x] Instance lock, circuit-breaker hold (min trip + success threshold)
+- [x] API/Telegram fail-closed (token mandatory, localhost bind, control PIN)
+- [x] Reject unenforced runtime-override keys; alert async queue; persistence bounds
+- [x] Regression pack: `tests/test_phase0_stabilization.py` (+ API/Telegram/alerts/overrides)
+- [ ] Independent Reviewer + Security sign-off before VPS merge
+- [ ] Phase 1+ (CPCV / hybrid MQL5 / UI) **blocked** until Phase 0 verified
+
+Report: `docs/validation/phase0_pro_report.md`
+
 ## Strategy Delta — implemented, validation pending
 
 - [x] Explainable M15/M5 regime + M1 sweep/retest entry engine

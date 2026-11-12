@@ -26,16 +26,15 @@ KNOWN_STRATEGIES = frozenset(
 KNOWN_BROKERS = frozenset({"paper", "mt5", "oanda"})
 KNOWN_HOURS = frozenset({"london_ny", "always_on_24h"})
 
-# Keys this module accepts and type-checks but which no runtime code reads yet.
-# Setting them looks like a safety control and silently does nothing, so the
-# live loop warns about every one that is present. Remove an entry here as soon
-# as the corresponding enforcement lands.
-UNENFORCED_OVERRIDE_KEYS: tuple[str, ...] = (
+# Must stay empty: every validated override key needs a runtime reader.
+# Keys that are type-checked below but not yet enforced are listed in
+# ``REJECTED_UNTIL_IMPLEMENTED`` and fail validation instead of failing open.
+UNENFORCED_OVERRIDE_KEYS: tuple[str, ...] = ()
+
+# Accepted by older overlays but rejected until a real reader lands (P0-10).
+REJECTED_UNTIL_IMPLEMENTED: tuple[str, ...] = (
     "execution.max_entry_slippage_r_fraction",
     "execution.max_risk_overrun_pct",
-    "execution.single_instance",
-    "news_filter.fail_closed_when_stale",
-    "news_filter.max_calendar_age_minutes",
     "risk.cooldown_after_loss_minutes",
     "risk.max_monthly_loss_pct",
     "risk.max_trades_per_symbol_day",
@@ -105,6 +104,18 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
         raise RuntimeOverridesValidationError("runtime overrides root must be a mapping")
 
     out = dict(payload)
+
+    present_rejected = unenforced_override_keys(out)  # empty by design
+    for dotted in REJECTED_UNTIL_IMPLEMENTED:
+        section, _, key = dotted.partition(".")
+        block = out.get(section)
+        if isinstance(block, dict) and key in block:
+            present_rejected.append(dotted)
+    if present_rejected:
+        raise RuntimeOverridesValidationError(
+            "Override keys are not enforced yet and are refused (remove them): "
+            + ", ".join(present_rejected)
+        )
 
     if "symbols" in out:
         symbols = out["symbols"]
@@ -241,9 +252,6 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
         for key in (
             "max_portfolio_heat_pct",
             "max_daily_loss_pct",
-            "max_weekly_loss_pct",
-            "max_monthly_loss_pct",
-            "cooldown_after_loss_minutes",
         ):
             if key in risk:
                 risk[key] = _as_float(risk[key], f"risk.{key}")
@@ -256,15 +264,14 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
             raise RuntimeOverridesValidationError(
                 "risk.max_portfolio_heat_pct cannot exceed max_daily_loss_pct"
             )
-        for key in (
-            "max_concurrent_positions",
-            "max_trades_per_symbol_day",
-            "max_trades_portfolio_day",
-        ):
-            if key in risk:
-                risk[key] = _as_int(risk[key], f"risk.{key}")
-                if risk[key] < 1:
-                    raise RuntimeOverridesValidationError(f"risk.{key} must be >= 1")
+        if "max_concurrent_positions" in risk:
+            risk["max_concurrent_positions"] = _as_int(
+                risk["max_concurrent_positions"], "risk.max_concurrent_positions"
+            )
+            if risk["max_concurrent_positions"] < 1:
+                raise RuntimeOverridesValidationError(
+                    "risk.max_concurrent_positions must be >= 1"
+                )
         for flag in (
             "independent_symbol_entries",
             "daily_loss_limit_enabled",
@@ -314,11 +321,6 @@ def validate_runtime_overrides(payload: dict[str, Any] | None) -> dict[str, Any]
             execution["single_instance"] = _as_bool(
                 execution["single_instance"], "execution.single_instance"
             )
-        for key in ("max_entry_slippage_r_fraction", "max_risk_overrun_pct"):
-            if key in execution:
-                execution[key] = _as_float(execution[key], f"execution.{key}")
-                if execution[key] < 0:
-                    raise RuntimeOverridesValidationError(f"execution.{key} must be >= 0")
         out["execution"] = execution
 
     alerting = _require_mapping(out.get("alerting"), "alerting")

@@ -330,12 +330,50 @@ class OANDABroker:
         )
 
     def fetch_closed_pnl(self, ticket: int) -> float | None:
-        """Best-effort realized P&L for a recently closed trade."""
-        url = f"{self._base_url}/v3/accounts/{self._account_id}/trades/{ticket}"
-        response = requests.get(url, headers=self._headers(), timeout=self._timeout)
-        if response.status_code == 404:
+        """Recover realized P&L for a closed trade via transactions.
+
+        Broker-side SL/TP closes leave the trade endpoint empty/404; the
+        ORDER_FILL transaction that closed the trade still carries realizedPL.
+        """
+        trade_url = f"{self._base_url}/v3/accounts/{self._account_id}/trades/{ticket}"
+        trade_resp = requests.get(trade_url, headers=self._headers(), timeout=self._timeout)
+        if trade_resp.status_code < 400:
+            trade = trade_resp.json().get("trade") or {}
+            if trade.get("realizedPL") is not None:
+                try:
+                    return float(trade.get("realizedPL", 0))
+                except (TypeError, ValueError):
+                    pass
+
+        # Fall back to recent transactions and match by tradeID.
+        tx_url = f"{self._base_url}/v3/accounts/{self._account_id}/transactions"
+        params = {"type": "ORDER_FILL"}
+        tx_resp = requests.get(
+            tx_url, headers=self._headers(), params=params, timeout=self._timeout
+        )
+        if tx_resp.status_code >= 400:
             return None
-        if response.status_code >= 400:
-            return None
-        trade = response.json().get("trade") or {}
-        return float(trade.get("realizedPL", 0))
+        payload = tx_resp.json() or {}
+        transactions = payload.get("transactions") or []
+        ticket_s = str(ticket)
+        total = 0.0
+        matched = False
+        for tx in transactions:
+            trades_closed = tx.get("tradesClosed") or []
+            for closed in trades_closed:
+                if str(closed.get("tradeID") or "") == ticket_s:
+                    try:
+                        total += float(closed.get("realizedPL", 0) or 0)
+                        matched = True
+                    except (TypeError, ValueError):
+                        continue
+            # Some payloads nest the closed trade id on the fill itself.
+            if str(tx.get("tradeOpened", {}).get("tradeID") or "") == ticket_s:
+                continue
+            if str(tx.get("id") or "") and str(tx.get("tradeID") or "") == ticket_s:
+                try:
+                    total += float(tx.get("pl") or tx.get("realizedPL") or 0)
+                    matched = True
+                except (TypeError, ValueError):
+                    continue
+        return total if matched else None

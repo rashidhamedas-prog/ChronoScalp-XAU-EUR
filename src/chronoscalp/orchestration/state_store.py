@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +13,7 @@ from chronoscalp.orchestration.position_keys import (
     parse_position_key,
     position_key,
 )
+from chronoscalp.utils.atomic_json import read_json_with_fallback, write_json_atomic
 from chronoscalp.utils.strategy_tags import normalize_strategy_tag
 
 
@@ -70,19 +70,34 @@ class TradingStateStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.state = TradingState()
+        self._loaded_from_backup = False
 
     def load(self) -> TradingState:
-        if not self.path.exists():
+        if not self.path.exists() and not self.path.with_suffix(self.path.suffix + ".bak").exists():
             logger.info("No prior trading state at {} — starting fresh", self.path)
             self.state = TradingState()
             return self.state
 
-        # utf-8-sig strips an optional BOM (PowerShell/Windows editors often add one).
-        with self.path.open("r", encoding="utf-8-sig") as f:
-            raw = json.load(f)
-        self.state = TradingState.from_dict(raw)
+        def _require_mapping(payload: Any) -> None:
+            if not isinstance(payload, dict):
+                raise ValueError("state root must be a mapping")
+
+        raw, source = read_json_with_fallback(
+            self.path,
+            default={"open_tickets": {}, "processed_signals": [], "last_evaluated_bars": {}},
+            validate=_require_mapping,
+        )
+        self.state = TradingState.from_dict(raw if isinstance(raw, dict) else {})
+        if source == "backup":
+            logger.warning(
+                "Loaded trading state from .bak — forcing broker reconciliation recommended"
+            )
+            self._loaded_from_backup = True
+        else:
+            self._loaded_from_backup = False
         logger.info(
-            "Loaded trading state: {} open ticket(s), {} dedup key(s)",
+            "Loaded trading state ({}): {} open ticket(s), {} dedup key(s)",
+            source,
             len(self.state.open_tickets),
             len(self.state.processed_signals),
         )
@@ -91,8 +106,7 @@ class TradingStateStore:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.state.updated_at = datetime.now(tz=UTC).isoformat()
-        with self.path.open("w", encoding="utf-8") as f:
-            json.dump(self.state.to_dict(), f, indent=2)
+        write_json_atomic(self.path, self.state.to_dict())
 
     def reconcile_open_tickets(
         self,

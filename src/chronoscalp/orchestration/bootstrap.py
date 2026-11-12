@@ -63,10 +63,16 @@ def create_broker(
     starting = float(settings.backtest.get("initial_balance", 10_000))
 
     if mode == "paper":
+        bt_cfg = settings.backtest or {}
+        commission_override = bt_cfg.get("commission_per_lot")
         return PaperBroker(
             symbols_cfg=settings.symbols_raw,
             starting_balance=starting,
             slippage_pips=slippage,
+            commission_per_lot_override=(
+                float(commission_override) if commission_override is not None else None
+            ),
+            backtest_cfg=dict(bt_cfg),
         )
 
     if broker_kind == "paper":

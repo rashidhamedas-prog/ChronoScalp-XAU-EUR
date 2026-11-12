@@ -1,11 +1,15 @@
 """Best-effort alerting via Telegram and Discord webhooks.
 
-Alerts are fire-and-forget: failures are logged but never propagate to the
-trading loop. Secrets (tokens, webhook URLs) live only in .env.
+Alerts are queued onto a bounded background worker so the trading loop never
+blocks on network I/O. On overflow the oldest pending alert is dropped and a
+counter is incremented (surfaced via the next successful send).
 """
 
 from __future__ import annotations
 
+import queue
+import threading
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -38,10 +42,18 @@ class AlertConfig:
     prefix: str = "ChronoScalp"
     trade_open_copy_enabled: bool = True
     trade_open_copy_chat_id: str = DEFAULT_TRADE_OPEN_COPY_CHAT
+    queue_size: int = 64
+
+
+@dataclass(frozen=True)
+class _QueuedAlert:
+    kind: str  # telegram | discord
+    body: str
+    chat_id: str = ""
 
 
 class AlertNotifier:
-    """Sends formatted alerts to configured channels."""
+    """Sends formatted alerts to configured channels via a background queue."""
 
     def __init__(
         self,
@@ -55,6 +67,15 @@ class AlertNotifier:
         self._telegram_chat_id = telegram_chat_id.strip()
         self._discord_url = discord_webhook_url.strip()
         self._copy_chat_id = (cfg.trade_open_copy_chat_id or "").strip()
+        self._queue: queue.Queue[_QueuedAlert | None] = queue.Queue(
+            maxsize=max(1, int(cfg.queue_size))
+        )
+        self._dropped = 0
+        self._lock = threading.Lock()
+        self._worker = threading.Thread(
+            target=self._worker_loop, name="chronoscalp-alerts", daemon=True
+        )
+        self._worker.start()
 
     @classmethod
     def from_settings(cls, alerting_cfg: dict[str, Any], secrets: Any) -> AlertNotifier:
@@ -69,6 +90,7 @@ class AlertNotifier:
             prefix=str(alerting_cfg.get("prefix", "ChronoScalp")),
             trade_open_copy_enabled=bool(alerting_cfg.get("trade_open_copy_enabled", True)),
             trade_open_copy_chat_id=copy_chat or DEFAULT_TRADE_OPEN_COPY_CHAT,
+            queue_size=int(alerting_cfg.get("queue_size", 64)),
         )
         return cls(
             cfg=cfg,
@@ -89,6 +111,11 @@ class AlertNotifier:
         has_discord = self._cfg.discord_enabled and bool(self._discord_url)
         return has_telegram or has_discord
 
+    @property
+    def dropped_count(self) -> int:
+        with self._lock:
+            return self._dropped
+
     def notify(
         self,
         title: str,
@@ -103,9 +130,9 @@ class AlertNotifier:
 
         if self._cfg.enabled:
             if self._cfg.telegram_enabled and self._telegram_token and self._telegram_chat_id:
-                self._send_telegram(body, chat_id=self._telegram_chat_id)
+                self._enqueue(_QueuedAlert(kind="telegram", body=body, chat_id=self._telegram_chat_id))
             if self._cfg.discord_enabled and self._discord_url:
-                self._send_discord(discord_body)
+                self._enqueue(_QueuedAlert(kind="discord", body=discord_body))
 
         if copy_trade_open:
             self._copy_trade_open(body)
@@ -126,7 +153,58 @@ class AlertNotifier:
             and self._copy_chat_id == self._telegram_chat_id
         ):
             return
-        self._send_telegram(body, chat_id=self._copy_chat_id)
+        self._enqueue(_QueuedAlert(kind="telegram", body=body, chat_id=self._copy_chat_id))
+
+    def flush(self, timeout: float = 2.0) -> None:
+        """Block until the alert queue is empty (tests / shutdown)."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() < deadline:
+            if self._queue.empty():
+                # Give the worker a beat to finish the in-flight send.
+                time.sleep(0.01)
+                if self._queue.empty():
+                    return
+            time.sleep(0.01)
+
+    def _enqueue(self, item: _QueuedAlert) -> None:
+        try:
+            self._queue.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+        # Drop-oldest: reclaim one slot, then enqueue the new alert.
+        try:
+            self._queue.get_nowait()
+            with self._lock:
+                self._dropped += 1
+                dropped = self._dropped
+        except queue.Empty:
+            dropped = self._dropped
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            with self._lock:
+                self._dropped += 1
+                dropped = self._dropped
+            logger.warning("Alert queue full — dropped alert (total_dropped={})", dropped)
+            return
+        logger.warning(
+            "Alert queue overflow — dropped oldest (total_dropped={})",
+            dropped,
+        )
+
+    def _worker_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            try:
+                if item.kind == "telegram":
+                    self._send_telegram(item.body, chat_id=item.chat_id)
+                elif item.kind == "discord":
+                    self._send_discord(item.body)
+            except Exception:  # noqa: BLE001
+                logger.exception("Alert worker failed for kind={}", item.kind)
 
     def _send_telegram(self, text: str, *, chat_id: str) -> None:
         import requests
@@ -140,7 +218,6 @@ class AlertNotifier:
         }
         try:
             response = requests.post(url, json=payload, timeout=self._cfg.timeout_seconds)
-            # #region agent log
             desc = ""
             try:
                 desc = str((response.json() or {}).get("description") or "")[:120]
@@ -157,7 +234,6 @@ class AlertNotifier:
                 },
                 hypothesis_id="E",
             )
-            # #endregion
             if response.status_code >= 400:
                 logger.warning(
                     "Telegram alert failed: HTTP {} chat_id={} body={}",

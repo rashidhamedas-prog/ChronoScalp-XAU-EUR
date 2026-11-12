@@ -288,10 +288,16 @@ def run_backtest(
         trigger_df = trigger_df[trigger_df.index <= _to_utc_timestamp(end)]
 
     starting_equity = float(settings.backtest.get("initial_balance", 10_000))
+    backtest_cfg = settings.backtest or {}
+    commission_override = backtest_cfg.get("commission_per_lot")
     broker = PaperBroker(
         symbols_cfg=settings.symbols_raw,
         starting_balance=starting_equity,
         slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+        commission_per_lot_override=(
+            float(commission_override) if commission_override is not None else None
+        ),
+        backtest_cfg=dict(backtest_cfg),
     )
     session_filter = SessionFilter.from_config(settings.sessions)
     from chronoscalp.config import CONFIG_DIR
@@ -309,7 +315,6 @@ def run_backtest(
         starting_equity=starting_equity,
     )
 
-    backtest_cfg = settings.backtest or {}
     intrabar = bool(backtest_cfg.get("intrabar_stop_management", True))
     model_gates = bool(backtest_cfg.get("model_live_gates", True))
 
@@ -352,6 +357,10 @@ def run_backtest(
         symbols_cfg=settings.symbols_raw,
         starting_balance=starting_equity,
         slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+        commission_per_lot_override=(
+            float(commission_override) if commission_override is not None else None
+        ),
+        backtest_cfg=dict(backtest_cfg),
     )
     open_tickets: dict[str, int] = {}
     spread_median = RollingMedianSpread()

@@ -122,7 +122,11 @@ class Position:
 
 @dataclass
 class TradeResult:
-    """A closed trade, used by both live execution logging and the backtester."""
+    """A closed trade, used by both live execution logging and the backtester.
+
+    ``pnl`` is always **net of costs** (spread + commission) when produced by
+    the paper/backtest cost model. ``gross_pnl`` retains the raw price move.
+    """
 
     symbol: str
     direction: SignalType
@@ -135,6 +139,9 @@ class TradeResult:
     r_multiple: float = 0.0
     exit_reason: str = ""
     strategy: str = ""
+    commission_paid: float = 0.0
+    spread_cost: float = 0.0
+    gross_pnl: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -111,6 +111,9 @@ class TelegramControlBot:
         if not self.token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN missing in .env")
         self.allowed_chat = self.settings.secrets.telegram_chat_id.strip()
+        self.control_pin = str(
+            getattr(self.settings.secrets, "telegram_control_pin", "") or ""
+        ).strip()
         self.state_dir = Path(self.settings.execution.get("state_dir", "data/state"))
         self.pid_file = PID_FILE
         self.timeout = float(self.settings.alerting.get("timeout_seconds", 5))
@@ -121,6 +124,25 @@ class TelegramControlBot:
         )
         self.offset = 0
         self._pending: dict[int, dict[str, Any]] = {}
+        self._pin_gated_commands = frozenset(
+            {
+                "start_live",
+                "mode",
+                "mode_live",
+                "halt",
+                "resume",
+                "live_confirm",
+                "live_on",
+                "live_off",
+                "daily_loss_unlock",
+                "daily_loss_on",
+                "daily_loss_off",
+                "risk",
+                "risk_05",
+                "risk_10",
+                "risk_15",
+            }
+        )
         self._start_fn = start_fn or (lambda mode: start_bot(mode=mode, pid_file=self.pid_file))
         self._stop_fn = stop_fn or (lambda: stop_bot(pid_file=self.pid_file))
         self._running_fn = running_fn or (lambda: bot_is_running(self.pid_file))
@@ -238,23 +260,20 @@ class TelegramControlBot:
                 return
 
     def _authorized(self, chat_id: str | int) -> bool:
+        # Fail closed: refuse all chats until an explicit local binding exists.
         if not self.allowed_chat:
-            return True
+            return False
         return str(chat_id) == str(self.allowed_chat)
 
     def _bind_chat_if_needed(self, chat_id: int) -> None:
-        """Persist first controller chat id when TELEGRAM_CHAT_ID is empty."""
+        """No auto-bind. Operators must set TELEGRAM_CHAT_ID on the host."""
         if self.allowed_chat:
             return
-        chat_s = str(chat_id)
-        try:
-            from chronoscalp.saas.broker_wizard import save_telegram_credentials
-
-            save_telegram_credentials(self.token, chat_s)
-            self.allowed_chat = chat_s
-            logger.info("Bound TELEGRAM_CHAT_ID to {}", chat_s)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to persist TELEGRAM_CHAT_ID")
+        logger.warning(
+            "Telegram refuse chat_id={} — TELEGRAM_CHAT_ID is unset; "
+            "bind locally on the host (no first-chatter auto-bind)",
+            chat_id,
+        )
 
     def _resolve_command(self, text: str) -> str | None:
         raw = (text or "").strip()
@@ -1598,6 +1617,29 @@ class TelegramControlBot:
             self._save_trade_open_copy_chat(chat_id, raw)
             return True
 
+        if flow == "pin_confirm" and step == "pin":
+            expected = self.control_pin
+            if not expected:
+                self._pending.pop(chat_id, None)
+                self.send(
+                    chat_id,
+                    "⛔ TELEGRAM_CONTROL_PIN در .env تنظیم نشده — دستور حساس اجرا نمی‌شود.",
+                )
+                return True
+            if raw != expected:
+                self.send(chat_id, "❌ PIN نادرست. دوباره تلاش کنید یا /menu بزنید.")
+                return True
+            action = str(pending.get("action") or "")
+            original = str(pending.get("text") or "")
+            self._pending.pop(chat_id, None)
+            handlers = self._command_handlers()
+            handler = handlers.get(action)
+            if handler is None:
+                self.send(chat_id, "دستور حساس منقضی شد.")
+                return True
+            handler(chat_id, original)
+            return True
+
         return False
 
     def handle(self, chat_id: int, text: str) -> None:
@@ -1617,16 +1659,15 @@ class TelegramControlBot:
         )
         # #endregion
         if not self._authorized(chat_id):
+            self._bind_chat_if_needed(chat_id)
             self.send(
                 chat_id,
                 "⛔ این چت مجاز به کنترل ربات نیست.\n"
                 f"chat_id عددی شما: {chat_id}\n"
-                "اگر باید اعلان معامله بگیرید، این عدد را به اپراتور بدهید "
-                "و همین ربات را Start کرده باشید.",
+                "TELEGRAM_CHAT_ID را روی هاست به‌صورت محلی تنظیم کنید "
+                "(بایند خودکار غیرفعال است).",
             )
             return
-
-        self._bind_chat_if_needed(chat_id)
 
         if self._handle_menu_toggle(chat_id, text):
             return
@@ -1641,7 +1682,34 @@ class TelegramControlBot:
             )
             return
 
-        handlers: dict[str, Callable[[int, str], None]] = {
+        if cmd in self._pin_gated_commands:
+            if not self.control_pin:
+                self.send(
+                    chat_id,
+                    "⛔ دستور حساس بدون TELEGRAM_CONTROL_PIN اجرا نمی‌شود.\n"
+                    "PIN را در .env روی هاست تنظیم کنید.",
+                )
+                return
+            self._pending[chat_id] = {
+                "flow": "pin_confirm",
+                "step": "pin",
+                "action": cmd,
+                "text": text,
+            }
+            self.send(chat_id, "🔐 PIN کنترل را برای تأیید این دستور بفرستید:")
+            return
+
+        handlers = self._command_handlers()
+        handler = handlers.get(cmd)
+        if handler is None:
+            self.send(
+                chat_id, "دستور ناشناخته. /help یا /settings را بزنید.", reply_markup=MAIN_KEYBOARD
+            )
+            return
+        handler(chat_id, text)
+
+    def _command_handlers(self) -> dict[str, Callable[[int, str], None]]:
+        return {
             "help": self._cmd_help,
             "menu": self._cmd_menu,
             "settings": self._cmd_settings,
@@ -1707,7 +1775,6 @@ class TelegramControlBot:
             "trade_notify_set_id": self._cmd_trade_notify_set_id,
             "trade_notify_test": self._cmd_trade_notify_test,
         }
-        handlers[cmd](chat_id, text)
 
     def run_forever(self) -> None:
         """Block forever, long-polling Telegram updates."""
@@ -1719,7 +1786,7 @@ class TelegramControlBot:
 
         logger.info(
             "Telegram control bot started (allow_chat={})",
-            self.allowed_chat or "*",
+            self.allowed_chat or "<unbound-fail-closed>",
         )
         while True:
             try:

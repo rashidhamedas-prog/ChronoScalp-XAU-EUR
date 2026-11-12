@@ -7,6 +7,11 @@
 
 ### اضافه شد
 
+- **Phase 0 Professional Edition stabilization:** مدل هزینهٔ مشترک
+  (`execution/cost_model.py`)، قفل تک‌نمونه‌ای، ساعت بروکر در برابر UTC،
+  JSON اتمیک، صف هشدار async، رد کلیدهای overlay بدون اجرای واقعی،
+  PIN کنترل تلگرام، و گارد تازگی M1. جزئیات در
+  `docs/validation/phase0_pro_report.md` و `tasks/phase0-pro-stabilization.md`.
 - سبک معاملات دستی اپراتور به‌صورت استراتژی مستقل `operator_style`
   (نه فیلتر روی دلتا). طلا: فید اسپایک (استوک **و** RSI) / رول‌اوور /
   پولبک HTF داخل سشن ۱۳:۰۰–۱۸:۳۰ تهران. یورو: فید استوک‌محور. هندسه

@@ -24,6 +24,7 @@ def test_alert_notifier_sends_telegram_when_configured():
     with patch("requests.post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200)
         notifier.notify("Trade opened", "XAUUSD buy", AlertLevel.INFO)
+        notifier.flush()
 
     mock_post.assert_called_once()
     call_kwargs = mock_post.call_args
@@ -46,6 +47,7 @@ def test_trade_open_copy_sends_even_when_alerting_disabled():
     with patch("requests.post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200)
         notifier.notify_trade_opened("Trade opened", "XAUUSD buy")
+        notifier.flush()
 
     mock_post.assert_called_once()
     assert mock_post.call_args.kwargs["json"]["chat_id"] == "@taranomrashid"
@@ -81,6 +83,7 @@ def test_trade_open_copy_does_not_duplicate_operator_chat():
     with patch("requests.post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200)
         notifier.notify_trade_opened("Trade opened", "XAUUSD buy")
+        notifier.flush()
     mock_post.assert_called_once()
     assert mock_post.call_args.kwargs["json"]["chat_id"] == "chat456"
 
@@ -94,6 +97,7 @@ def test_alert_notifier_sends_discord_when_configured():
     with patch("requests.post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200)
         notifier.notify("Error", "something failed", AlertLevel.ERROR)
+        notifier.flush()
 
     mock_post.assert_called_once()
     assert mock_post.call_args.args[0] == "https://discord.com/api/webhooks/test"

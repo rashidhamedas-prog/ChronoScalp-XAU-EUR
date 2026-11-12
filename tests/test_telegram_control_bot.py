@@ -23,6 +23,7 @@ def _fake_settings(tmp_path: Path, *, live_confirmed: bool = False) -> SimpleNam
     secrets = SimpleNamespace(
         telegram_bot_token="token-test",
         telegram_chat_id="42",
+        telegram_control_pin="1234",
         chronoscalp_stop_trading="no",
         live_trading_confirmed=live_confirmed,
         mt5_login=0,
@@ -81,6 +82,17 @@ def bot(tmp_path: Path) -> TelegramControlBot:
     ctrl.send = MagicMock()  # type: ignore[method-assign]
     ctrl._started = started  # type: ignore[attr-defined]
     ctrl._stopped = stopped  # type: ignore[attr-defined]
+
+    def handle_with_pin(chat_id: int, text: str) -> None:
+        """Auto-confirm PIN for gated commands in unit tests."""
+        cmd = ctrl._resolve_command(text)
+        if cmd in ctrl._pin_gated_commands:
+            ctrl.handle(chat_id, text)
+            ctrl.handle(chat_id, "1234")
+            return
+        ctrl.handle(chat_id, text)
+
+    ctrl.handle_with_pin = handle_with_pin  # type: ignore[attr-defined]
     return ctrl
 
 
@@ -126,6 +138,7 @@ def test_start_paper_restarts_when_already_running(
 
 def test_start_live_blocked_without_confirm(bot: TelegramControlBot) -> None:
     bot.handle(42, "/start_live")
+    bot.handle(42, "1234")
     assert bot._started == []  # type: ignore[attr-defined]
     assert "CHRONOSCALP_CONFIRM_LIVE" in bot.send.call_args.args[1]
 
@@ -143,6 +156,7 @@ def test_start_live_allowed_when_confirmed(tmp_path: Path) -> None:
     )
     ctrl.send = MagicMock()  # type: ignore[method-assign]
     ctrl.handle(42, "/start_live")
+    ctrl.handle(42, "1234")
     assert started == ["live"]
 
 
@@ -151,8 +165,10 @@ def test_bot_stop_and_halt_resume(bot: TelegramControlBot, tmp_path: Path) -> No
     assert bot._stopped == [True]  # type: ignore[attr-defined]
 
     bot.handle(42, "/halt")
+    bot.handle(42, "1234")
     assert bot.kill.is_active()
     bot.handle(42, "/resume")
+    bot.handle(42, "1234")
     assert not bot.kill.is_active()
 
 
@@ -174,6 +190,7 @@ def test_stop_alias_stops_process_not_kill_switch(bot: TelegramControlBot) -> No
 
 def test_halt_button_is_kill_switch_not_process_stop(bot: TelegramControlBot) -> None:
     bot.handle(42, "توقف ورود")
+    bot.handle(42, "1234")
     assert bot.kill.is_active()
     assert bot._stopped == []  # type: ignore[attr-defined]
     assert "فرآیند ربات هنوز روشن است" in bot.send.call_args.args[1]
@@ -184,7 +201,7 @@ def test_stop_persian_alias(bot: TelegramControlBot) -> None:
     assert bot._stopped == [True]  # type: ignore[attr-defined]
 
 
-def test_bind_chat_persists_when_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unbind_chat_is_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     saved: dict[str, str] = {}
 
     def fake_save(token: str, chat_id: str, env_path=None) -> None:  # noqa: ANN001
@@ -209,8 +226,10 @@ def test_bind_chat_persists_when_empty(tmp_path: Path, monkeypatch: pytest.Monke
     ctrl.allowed_chat = ""
     ctrl.send = MagicMock()  # type: ignore[method-assign]
     ctrl.handle(777, "/whoami")
-    assert saved["chat_id"] == "777"
-    assert ctrl.allowed_chat == "777"
+    assert saved == {}
+    assert ctrl.allowed_chat == ""
+    ctrl.send.assert_called()
+    assert "مجاز" in ctrl.send.call_args[0][1]
 
 
 def test_mt5_wizard_flow(bot: TelegramControlBot, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,6 +279,7 @@ def test_risk_preset_button(bot: TelegramControlBot, monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(bot, "_reload_settings", lambda: None)
     bot.handle(42, "ریسک ۱٫۵٪")
+    bot.handle(42, "1234")
     assert (
         "1.0%" in bot.send.call_args.args[1]
         or "۱" in bot.send.call_args.args[1]

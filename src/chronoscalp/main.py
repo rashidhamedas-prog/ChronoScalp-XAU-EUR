@@ -40,6 +40,7 @@ from chronoscalp.filters.news_filter import NewsFilter
 from chronoscalp.filters.session_filter import SessionFilter
 from chronoscalp.filters.spread_shield import RollingMedianSpread
 from chronoscalp.indicators.technical import enrich_with_indicators
+from chronoscalp.licensing import require_valid_license
 from chronoscalp.logging_setup import logger
 from chronoscalp.ml.scorer import configure_scorer
 from chronoscalp.orchestration.alerts import AlertLevel, AlertNotifier
@@ -57,6 +58,7 @@ from chronoscalp.orchestration.bootstrap import (
 )
 from chronoscalp.orchestration.circuit_breaker import CircuitBreaker
 from chronoscalp.orchestration.comparison_books import ComparisonBooks
+from chronoscalp.orchestration.instance_lock import InstanceLock, InstanceLockError
 from chronoscalp.orchestration.kill_switch import KillSwitch
 from chronoscalp.orchestration.position_keys import parse_position_key, position_key
 from chronoscalp.orchestration.state_store import TradingStateStore
@@ -114,6 +116,8 @@ class TradingBot:
     def __init__(self, settings: Settings, mode: str) -> None:
         if mode not in ("paper", "live"):
             raise ValueError("mode must be 'paper' or 'live'")
+        # Server-side license gate — no local bypass in TradingBot itself.
+        require_valid_license(settings)
         if mode == "live" and not settings.secrets.live_trading_confirmed:
             raise RuntimeError(
                 "Refusing to start --mode live: set CHRONOSCALP_CONFIRM_LIVE=yes "
@@ -276,15 +280,24 @@ class TradingBot:
         )
         self.circuit_breaker = CircuitBreaker(
             max_consecutive_errors=int(resilience_cfg.get("max_consecutive_errors", 5)),
+            min_trip_seconds=float(resilience_cfg.get("circuit_min_trip_seconds", 600)),
+            success_threshold=int(resilience_cfg.get("circuit_success_threshold", 20)),
         )
         self.alerts = AlertNotifier.from_settings(settings.alerting, settings.secrets)
         self._alert_on_daily_loss = bool(resilience_cfg.get("alert_on_daily_loss_limit", True))
         self._alert_on_connection_loss = bool(resilience_cfg.get("alert_on_connection_loss", True))
         self._reconcile_interval = int(resilience_cfg.get("reconcile_interval_seconds", 60))
+        self._ghost_grace_polls = int(resilience_cfg.get("reconcile_ghost_grace_polls", 3))
+        self._empty_broker_polls = 0
+        self._pre_loop_alerted = False
         self._last_reconcile_at: datetime | None = None
         self._daily_loss_alerted = False
         self._connection_loss_alerted = False
         self._kill_switch_alerted = False
+        magic = int(settings.execution.get("magic_number", 0) or 0)
+        single_instance = bool(settings.execution.get("single_instance", True))
+        self.instance_lock = InstanceLock(self.state_dir, enabled=single_instance)
+        self.magic_number = magic
         self._skip_counts: dict[str, int] = {}
         self._last_skip_log_at: datetime | None = None
         self._data_starvation_alerted = False
@@ -307,10 +320,16 @@ class TradingBot:
             self.multi_strategy_mode = default_mode
         self.comparison_books: ComparisonBooks | None = None
         if mode == "paper" and self.multi_strategy_mode == "comparison":
+            bt_cfg = settings.backtest or {}
+            commission_override = bt_cfg.get("commission_per_lot")
             self.comparison_books = ComparisonBooks(
                 symbols_cfg=settings.symbols_raw,
-                starting_balance=float(settings.backtest.get("initial_balance", 10_000)),
+                starting_balance=float(bt_cfg.get("initial_balance", 10_000)),
                 slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+                commission_per_lot_override=(
+                    float(commission_override) if commission_override is not None else None
+                ),
+                backtest_cfg=dict(bt_cfg),
             )
         self._heat_reservations: dict[str, dict] = {}
         self._heat_unknown = False
@@ -1227,12 +1246,18 @@ class TradingBot:
             self._persist_state()
 
     def start(self) -> None:
+        try:
+            self.instance_lock.acquire(magic=self.magic_number or None)
+        except InstanceLockError:
+            raise
         if not self.connector.connect():
+            self.instance_lock.release()
             raise RuntimeError(
                 f"Failed to connect to {connector_label(self.connector)} for market data. "
                 "Check credentials in .env and docs/DEPLOY_NL_VPS.md for OANDA setup."
             )
         if not self.broker.connect():
+            self.instance_lock.release()
             raise RuntimeError("Failed to connect broker")
 
         self._reconcile_state_with_broker()
@@ -1242,10 +1267,12 @@ class TradingBot:
 
         poll_seconds = int(self.poll_interval)
         logger.info(
-            "ChronoScalp started in {} mode (data={}, broker={}), polling every {}s (bar_close_only={})",
+            "ChronoScalp started in {} mode (data={}, broker={}, magic={}), "
+            "polling every {}s (bar_close_only={})",
             self.mode,
             self.data_source,
             self.settings.execution.get("broker", "paper"),
+            self.magic_number,
             poll_seconds,
             self.trade_on_bar_close,
         )
@@ -1277,8 +1304,11 @@ class TradingBot:
         except KeyboardInterrupt:
             logger.info("Shutdown requested, stopping.")
         finally:
-            self._persist_state()
-            self.connector.shutdown()
+            with contextlib.suppress(Exception):
+                self._persist_state()
+            with contextlib.suppress(Exception):
+                self.connector.shutdown()
+            self.instance_lock.release()
 
     def _reconcile_state_with_broker(self, *, alert_on_change: bool = False) -> None:
         previous = dict(self.open_tickets)
@@ -1291,6 +1321,22 @@ class TradingBot:
             key = position_key(pos.symbol, tag)
             broker_map[key] = pos.ticket
             ticket_strategies[pos.ticket] = tag
+
+        # Ghost-grace: one empty positions_get must not fabricate closes (H-01).
+        if previous and not broker_map:
+            self._empty_broker_polls += 1
+            if self._empty_broker_polls < max(1, self._ghost_grace_polls):
+                logger.warning(
+                    "Reconcile: broker returned 0 positions while {} local ticket(s) "
+                    "tracked — ghost grace {}/{}",
+                    len(previous),
+                    self._empty_broker_polls,
+                    self._ghost_grace_polls,
+                )
+                return
+        else:
+            self._empty_broker_polls = 0
+
         # Match by (symbol, strategy), not raw ticket: comparison books can reuse ticket ids.
         for key, ticket in list(previous.items()):
             if broker_map.get(key) != ticket:
@@ -1599,74 +1645,105 @@ class TradingBot:
 
     def tick(self) -> None:
         now = datetime.now(tz=UTC)
-        self._maybe_reconcile(now)
-        self._restore_pending_heat_reservations()
-        self._check_data_health(now)
         tick_had_failure = False
         failure_context = ""
-
-        if not self.connector.is_connected:
-            tick_had_failure = True
-            failure_context = "data_disconnect"
-            if self._alert_on_connection_loss and not self._connection_loss_alerted:
-                self.alerts.notify(
-                    f"{connector_label(self.connector)} connection lost",
-                    "Market data connector is disconnected — skipping new entries",
-                    AlertLevel.ERROR,
-                )
-                self._connection_loss_alerted = True
-        else:
-            self._connection_loss_alerted = False
-
         kill_active = self.kill_switch.is_active()
         circuit_tripped = self.circuit_breaker.is_tripped
-        equity_now = self.broker.get_balance()
-        unrealized = self._estimate_unrealized_pnl()
-        realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
-        comparison_mode = self._is_comparison_book()
-        daily_dd_hit = False
-        if not comparison_mode:
-            daily_dd_hit = self.daily_dd_guard.check(equity_now, realized, unrealized, at=now)
-        # Keep DailyRiskTracker base equity aligned with the DD guard day seed.
-        if self.daily_dd_guard.starting_equity > 0:
-            self.risk_manager.daily_tracker.starting_equity = float(
-                self.daily_dd_guard.starting_equity
-            )
         daily_limit_hit = False
-        if not comparison_mode:
-            daily_limit_hit = daily_dd_hit or self.risk_manager.daily_tracker.daily_loss_limit_hit(
-                at=now
-            )
-        if daily_dd_hit and self.daily_dd_close_all:
-            self._close_all_positions(now, reason="daily_drawdown")
-        if comparison_mode:
-            self._apply_comparison_book_guards(now)
-        if daily_limit_hit and self._alert_on_daily_loss and not self._daily_loss_alerted:
-            self.alerts.notify(
-                "Daily loss limit hit",
-                "No new entries until the next trading day",
-                AlertLevel.WARNING,
-            )
-            self._daily_loss_alerted = True
-        if not daily_limit_hit:
-            self._daily_loss_alerted = False
+        allow_new_entries = False
 
-        allow_new_entries = (
-            self.connector.is_connected
-            and not kill_active
-            and not circuit_tripped
-            and not daily_limit_hit
-            and not self.daily_dd_guard.blocked
-        )
+        try:
+            self._maybe_reconcile(now)
+            self._restore_pending_heat_reservations()
+            self._check_data_health(now)
+
+            if not self.connector.is_connected:
+                tick_had_failure = True
+                failure_context = "data_disconnect"
+                if self._alert_on_connection_loss and not self._connection_loss_alerted:
+                    self.alerts.notify(
+                        f"{connector_label(self.connector)} connection lost",
+                        "Market data connector is disconnected — skipping new entries",
+                        AlertLevel.ERROR,
+                    )
+                    self._connection_loss_alerted = True
+            else:
+                self._connection_loss_alerted = False
+
+            kill_active = self.kill_switch.is_active()
+            circuit_tripped = self.circuit_breaker.is_tripped
+            equity_now = self.broker.get_balance()
+            unrealized = self._estimate_unrealized_pnl()
+            realized = float(self.risk_manager.daily_tracker._realized_pnl_today)
+            comparison_mode = self._is_comparison_book()
+            daily_dd_hit = False
+            if not comparison_mode:
+                daily_dd_hit = self.daily_dd_guard.check(
+                    equity_now, realized, unrealized, at=now
+                )
+            # Keep DailyRiskTracker base equity aligned with the DD guard day seed.
+            if self.daily_dd_guard.starting_equity > 0:
+                self.risk_manager.daily_tracker.starting_equity = float(
+                    self.daily_dd_guard.starting_equity
+                )
+            daily_limit_hit = False
+            if not comparison_mode:
+                daily_limit_hit = (
+                    daily_dd_hit
+                    or self.risk_manager.daily_tracker.daily_loss_limit_hit(at=now)
+                )
+            if daily_dd_hit and self.daily_dd_close_all:
+                self._close_all_positions(now, reason="daily_drawdown")
+            if comparison_mode:
+                self._apply_comparison_book_guards(now)
+            if daily_limit_hit and self._alert_on_daily_loss and not self._daily_loss_alerted:
+                self.alerts.notify(
+                    "Daily loss limit hit",
+                    "No new entries until the next trading day",
+                    AlertLevel.WARNING,
+                )
+                self._daily_loss_alerted = True
+            if not daily_limit_hit:
+                self._daily_loss_alerted = False
+
+            allow_new_entries = (
+                self.connector.is_connected
+                and not kill_active
+                and not circuit_tripped
+                and not daily_limit_hit
+                and not self.daily_dd_guard.blocked
+            )
+            self._pre_loop_alerted = False
+        except Exception:  # noqa: BLE001 - never let pre-loop failures kill the process
+            tick_had_failure = True
+            failure_context = "pre_symbol_loop"
+            allow_new_entries = False
+            logger.exception("Pre-symbol tick section failed — skipping new entries")
+            if self.circuit_breaker.record_failure(failure_context):
+                self.alerts.notify(
+                    "Circuit breaker tripped",
+                    "Pre-symbol loop exception — new entries halted",
+                    AlertLevel.CRITICAL,
+                )
+            elif not self._pre_loop_alerted:
+                self.alerts.notify(
+                    "Tick pre-loop error",
+                    "Entries blocked this tick; management continues — see logs",
+                    AlertLevel.ERROR,
+                )
+                self._pre_loop_alerted = True
+
         if not allow_new_entries:
             if not self.connector.is_connected:
                 self._note_skip("data_disconnect")
             if kill_active:
                 self._note_skip("kill_switch")
-            if circuit_tripped:
+            if circuit_tripped or self.circuit_breaker.is_tripped:
                 self._note_skip("circuit_breaker")
             if daily_limit_hit:
                 self._note_skip("daily_loss_limit")
+            if failure_context == "pre_symbol_loop":
+                self._note_skip("pre_loop_exception")
 
         for symbol in self.settings.symbols:
             try:

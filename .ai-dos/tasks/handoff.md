@@ -2,6 +2,31 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-11-12 TASK-PRO-P0 Phase 0 Professional stabilization
+
+- Time (UTC): 2026-11-12T13:35:00Z
+- Task / owner / role: TASK-PRO-P0 / cursor:cloud-agent / implementer
+- Reclaimed stale TASK-005 (heartbeat 2026-09-03; already merged) claims
+  overlapping `main.py`, `news_filter.py`, `telegram/control_bot.py`,
+  `config_overrides.py`, `settings.yaml`, ROADMAP/changelog/status/handoff.
+
+### Delivered
+
+- Cost-real paper (`cost_model` + broker wiring), SL-first ML labels,
+  atomic JSON, broker clock + M1 freshness, instance lock, circuit breaker
+  hold, API/Telegram fail-closed + PIN, rejected unenforced overlay keys,
+  alert queue, persistence bounds.
+- Gates: `pytest -q` green; `ruff check src tests` green.
+- Docs: `tasks/phase0-pro-stabilization.md`,
+  `docs/validation/phase0_pro_report.md`, ROADMAP Phase 0 section,
+  changelog + BUG-002 update.
+
+### Next action
+
+Independent Reviewer + Security before merge to main/VPS. Do **not** start
+Pro Phase 1–4 until that gate passes. Risk 1%/1.5R/3% and
+`CHRONOSCALP_CONFIRM_LIVE` unchanged.
+
 ## 2026-09-03 TASK-005 standalone operator_style engine
 
 - Time (UTC): 2026-09-03T23:40:00Z

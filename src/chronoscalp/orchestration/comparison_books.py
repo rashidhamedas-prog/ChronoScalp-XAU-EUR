@@ -83,10 +83,14 @@ class ComparisonBooks:
         symbols_cfg: dict,
         starting_balance: float,
         slippage_pips: float,
+        commission_per_lot_override: float | None = None,
+        backtest_cfg: dict | None = None,
     ) -> None:
         self.symbols_cfg = symbols_cfg
         self.starting_balance = float(starting_balance)
         self.slippage_pips = float(slippage_pips)
+        self.commission_per_lot_override = commission_per_lot_override
+        self.backtest_cfg = dict(backtest_cfg or {})
         self._books: dict[str, StrategyBook] = {}
         self._last_quotes: dict[str, tuple[float, float, datetime | None]] = {}
         self._next_ticket_origin = 1
@@ -100,6 +104,8 @@ class ComparisonBooks:
                 starting_balance=self.starting_balance,
                 slippage_pips=self.slippage_pips,
                 first_ticket=self._next_ticket_origin,
+                commission_per_lot_override=self.commission_per_lot_override,
+                backtest_cfg=self.backtest_cfg,
             )
             self._next_ticket_origin += 1_000_000
             for symbol, (bid, ask, at) in self._last_quotes.items():

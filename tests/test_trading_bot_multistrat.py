@@ -119,6 +119,15 @@ def _make_bot(
         settings.raw["strategy"]["xau_vwap_pullback"] = xau
     if confirm_live:
         settings.secrets.chronoscalp_confirm_live = "yes"
+    # Unit tests here assert heat/booking geometry, not fill economics.
+    # Zero costs on the shared Settings so comparison books inherit them too.
+    settings.raw.setdefault("backtest", {})["commission_per_lot"] = 0.0
+    settings.raw.setdefault("backtest", {})["slippage_pips"] = 0.0
+    for _sym, _spec in settings.symbols_raw.items():
+        if isinstance(_spec, dict):
+            _spec["typical_spread_pips"] = 0.0
+            _spec["commission_per_lot"] = 0.0
+            _spec.pop("commission_pct_notional", None)
 
     connector = FakeConnector(frames)
     if broker is None:
@@ -126,6 +135,7 @@ def _make_bot(
             symbols_cfg=settings.symbols_raw,
             starting_balance=10_000.0,
             slippage_pips=0.0,
+            commission_per_lot_override=0.0,
         )
         broker.set_quote("XAUUSD", 1999.5, 2000.5)
 
