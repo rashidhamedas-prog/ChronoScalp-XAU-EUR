@@ -175,9 +175,7 @@ def evaluate_operator_style(
     m5_x = _with_timing_columns(m5 if m5 is not None else m15)
     adx_value = _last_float(m15_x, "adx") if m15_x is not None else None
     if adx_value is None or adx_value < min_adx:
-        return OperatorStyleVerdict(
-            False, "", TrendDirection.NEUTRAL, "weak_adx", adx=adx_value
-        )
+        return OperatorStyleVerdict(False, "", TrendDirection.NEUTRAL, "weak_adx", adx=adx_value)
 
     stoch_k = _last_float(m5_x, "stoch_k")
     rsi_m5 = _last_float(m5_x, "rsi")
@@ -185,9 +183,7 @@ def evaluate_operator_style(
     stoch_m15 = _last_float(m15_x, "stoch_k")
     close_m15 = _last_float(m15_x, "close")
     ema20_m15 = _last_float(m15_x, "ema_20")
-    above_fast = (
-        close_m15 is not None and ema20_m15 is not None and close_m15 > ema20_m15
-    )
+    above_fast = close_m15 is not None and ema20_m15 is not None and close_m15 > ema20_m15
 
     stoch_high = stoch_k is not None and stoch_k >= fade_stoch
     stoch_low = stoch_k is not None and stoch_k <= (100.0 - fade_stoch)
@@ -336,9 +332,7 @@ def generate_operator_style_signal(
     if needs_confirm and not _m5_confirms(m5, verdict.direction):
         return _none(symbol, "no_confirmation")
 
-    signal_type = (
-        SignalType.BUY if verdict.direction == TrendDirection.BULLISH else SignalType.SELL
-    )
+    signal_type = SignalType.BUY if verdict.direction == TrendDirection.BULLISH else SignalType.SELL
     lookback = max(2, int(cfg.get("structure_lookback", 3)))
     structural_stop = _structural_stop(m5, signal_type, lookback)
     close = float(last["close"])

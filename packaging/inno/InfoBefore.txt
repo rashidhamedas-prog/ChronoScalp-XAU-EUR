@@ -1,0 +1,14 @@
+ChronoScalp installs for the current Windows user into %LOCALAPPDATA%\ChronoScalp.
+Administrator rights are not required.
+
+Before you trade, even on a demo account:
+
+- MetaTrader 5 is installed and you are logged into the account you intend to use.
+- XAUUSD and EURUSD are visible in Market Watch.
+- Turn off sleep and hibernate while the runner should stay connected.
+
+The installer does not enable live trading. CHRONOSCALP_CONFIRM_LIVE stays no
+in the new %APPDATA%\ChronoScalp\.env. The logon task starts paper mode only,
+and only while this user is signed in. It is not a Windows service.
+
+There is no promise of profit. Read docs\BAZRASI_SADEGHANE_FA.md after install.

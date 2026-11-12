@@ -8,6 +8,11 @@ Multi-timeframe algorithmic scalping bot for XAUUSD / EURUSD (and broker-native 
 
 ## Current build status
 
+The primary install path is a per-user Windows app (PyInstaller + Inno Setup).
+See `docs/WINDOWS_INSTALL_FA.md`. A VPS is optional archive, not the default.
+The logon task starts paper mode. Do not describe results as guaranteed; the
+honest review is `docs/BAZRASI_SADEGHANE_FA.md`.
+
 Strategy Delta is implemented in `strategy/delta.py` for XAUUSD/EURUSD. Treat
 `docs/STRATEGY_DELTA.md` as its specification. Do not enable it for live money
 until the validation checklist there is complete.

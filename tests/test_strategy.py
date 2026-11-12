@@ -305,6 +305,7 @@ def test_ultra_scalp_skips_smc_when_confluence_not_required():
                 "min_reward_risk_ratio": 1.0,
                 "atr_stop_multiple": 1.0,
                 "atr_target_multiple": 1.0,
+                "allow_without_costed_evidence": True,
             },
             "min_signal_confidence": 0.0,
         },
@@ -319,6 +320,23 @@ def test_ultra_scalp_skips_smc_when_confluence_not_required():
     )
     assert signal.signal_type == SignalType.BUY
     assert "ultra_scalp" in signal.reason
+
+
+def test_ultra_scalp_stays_off_without_costed_evidence() -> None:
+    from chronoscalp.strategy.multi_timeframe import MultiTimeframeStrategy
+
+    strategy = MultiTimeframeStrategy(
+        {"enabled_strategies": ["ultra_scalp"], "ultra_scalp": {"use_s15_trigger": True}},
+        {},
+    )
+    signal = strategy.evaluate(
+        "XAUUSD",
+        {},
+        higher_timeframes=[],
+        trigger_timeframe=Timeframe.M1,
+    )
+    assert signal.signal_type == SignalType.NONE
+    assert "ultra_scalp" not in (signal.reason or "")
 
 
 def test_ultra_scalp_reports_weak_impulse_reason():
@@ -519,7 +537,11 @@ def test_strategies_run_independently_not_as_fallback(monkeypatch):
             "trend_engine": "ema_rsi",
             "entry_engine": "institutional",
             "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
-            "ultra_scalp": {"trend_mode": "primary", "rvol_min": 1.2},
+            "ultra_scalp": {
+                "trend_mode": "primary",
+                "rvol_min": 1.2,
+                "allow_without_costed_evidence": True,
+            },
             "min_signal_confidence": 0.0,
         },
         {"ema_period_trend": 50},
@@ -649,7 +671,7 @@ def test_institutional_still_runs_when_scalp_quiet(monkeypatch):
             "trend_engine": "ema_rsi",
             "entry_engine": "institutional",
             "enabled_strategies": ["smc_confluence", "liquidity_volume", "ultra_scalp"],
-            "ultra_scalp": {"trend_mode": "primary"},
+            "ultra_scalp": {"trend_mode": "primary", "allow_without_costed_evidence": True},
             "min_signal_confidence": 0.0,
         },
         {"ema_period_trend": 50},

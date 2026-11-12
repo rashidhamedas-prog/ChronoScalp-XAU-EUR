@@ -83,10 +83,14 @@ class ComparisonBooks:
         symbols_cfg: dict,
         starting_balance: float,
         slippage_pips: float,
+        charge_round_turn_costs: bool = False,
+        commission_per_lot_fallback: float = 0.0,
     ) -> None:
         self.symbols_cfg = symbols_cfg
         self.starting_balance = float(starting_balance)
         self.slippage_pips = float(slippage_pips)
+        self.charge_round_turn_costs = bool(charge_round_turn_costs)
+        self.commission_per_lot_fallback = float(commission_per_lot_fallback or 0.0)
         self._books: dict[str, StrategyBook] = {}
         self._last_quotes: dict[str, tuple[float, float, datetime | None]] = {}
         self._next_ticket_origin = 1
@@ -100,6 +104,8 @@ class ComparisonBooks:
                 starting_balance=self.starting_balance,
                 slippage_pips=self.slippage_pips,
                 first_ticket=self._next_ticket_origin,
+                charge_round_turn_costs=self.charge_round_turn_costs,
+                commission_per_lot_fallback=self.commission_per_lot_fallback,
             )
             self._next_ticket_origin += 1_000_000
             for symbol, (bid, ask, at) in self._last_quotes.items():

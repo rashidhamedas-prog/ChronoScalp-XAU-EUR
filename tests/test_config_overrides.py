@@ -23,7 +23,8 @@ def test_demo_shadow_example_validates() -> None:
     assert out["execution"]["broker"] == "paper"
     assert out["risk"]["active_risk_per_trade_pct"] == 0.25
     assert 1.5 in out["risk"]["risk_presets_pct"]
-    assert "ultra_scalp" in out["strategy"]["enabled_strategies"]
+    assert "ultra_scalp" not in out["strategy"]["enabled_strategies"]
+    assert out["strategy"]["use_ultra_scalp"] is False
     assert len(out["symbols"]) >= 2
 
 

@@ -124,9 +124,9 @@ UI = {
         "strategy_scalp": "اسکلپ M1",
         "strategy_news": "استرادل خبر",
         "hours_label": "ساعات معامله",
-        "hours_hint": "لندن+نیویورک = فقط سشن‌های نقدشوندگی | ۲۴ ساعته = همیشه فعال",
+        "hours_hint": "فقط پنجرهٔ لندن (Europe/London) و نیویورک (America/New_York). معاملهٔ ۲۴ساعته خاموش است.",
         "hours_london_ny": "فقط سشن لندن و آمریکا",
-        "hours_24h": "۲۴ ساعته (همیشه)",
+        "hours_24h": "۲۴ ساعته غیرفعال است",
         "hours_save": "اعمال ساعات معامله",
         "need_restart": "برای اعمال کامل، ربات را Stop سپس Start کنید.",
         "live_confirm_title": "تأیید معامله Live",
@@ -217,9 +217,9 @@ UI = {
         "strategy_scalp": "M1 scalp",
         "strategy_news": "News straddle",
         "hours_label": "Trading hours",
-        "hours_hint": "London+NY = session windows only | 24h = always allow entries",
+        "hours_hint": "London (Europe/London) and New York (America/New_York) only. 24h trading is off.",
         "hours_london_ny": "London & New York sessions only",
-        "hours_24h": "24 hours (always on)",
+        "hours_24h": "24h trading is disabled",
         "hours_save": "Apply trading hours",
         "need_restart": "Stop then Start the bot for changes to fully apply.",
         "live_confirm_title": "Confirm live trading",
@@ -273,9 +273,9 @@ def page_home(settings) -> None:
         hero_html(
             title=_t("welcome") + " · ChronoScalp",
             subtitle=(
-                "کنسول عملیات اسکالپ چندتایم‌فریم — لایسنس، بروکر، کنترل ربات و آمار زنده."
+                "نرم‌افزار پژوهشی روی رایانهٔ خودتان. سود تضمین نمی‌شود. پیش‌فرض Paper است و ورود فقط داخل سشن لندن/نیویورک بررسی می‌شود."
                 if lang == "fa"
-                else "Multi-timeframe scalping ops console — license, broker, control, live stats."
+                else "Research app on your own PC. No profit is promised. Default is paper, and entries are checked only in the London/New York sessions."
             ),
             badge="DEMO · MT5 · PAPER-FIRST" if lang == "en" else "دمو · MT5 · اول Paper",
         ),
@@ -474,40 +474,13 @@ def page_control(settings) -> None:
     for line in format_catalog_lines(settings.strategy, settings.symbols, labels=strategy_labels):
         st.write(line)
 
-    from chronoscalp.filters.session_filter import (
-        TRADING_HOURS_ALWAYS_ON_24H,
-        TRADING_HOURS_LONDON_NY,
-        normalize_trading_hours_mode,
-    )
-
     st.markdown(f"#### {_t('hours_label')}")
     st.caption(_t("hours_hint"))
-    current_hours = normalize_trading_hours_mode(
-        (settings.sessions or {}).get("trading_hours_mode")
-        or (
-            TRADING_HOURS_ALWAYS_ON_24H
-            if (settings.sessions or {}).get("trade_outside_sessions")
-            else TRADING_HOURS_LONDON_NY
-        )
-    )
-    hours_options = [TRADING_HOURS_LONDON_NY, TRADING_HOURS_ALWAYS_ON_24H]
-    hours_labels = {
-        TRADING_HOURS_LONDON_NY: _t("hours_london_ny"),
-        TRADING_HOURS_ALWAYS_ON_24H: _t("hours_24h"),
-    }
-    selected_hours = st.radio(
-        _t("hours_label"),
-        options=hours_options,
-        index=hours_options.index(current_hours) if current_hours in hours_options else 0,
-        format_func=lambda k: hours_labels.get(k, k),
-        horizontal=True,
-        label_visibility="collapsed",
-        key="trading_hours_radio",
-    )
+    st.write(_t("hours_london_ny"))
     if st.button(_t("hours_save"), key="save_hours_btn"):
-        saved_mode = apply_trading_hours_mode(selected_hours)
+        saved_mode = apply_trading_hours_mode("london_ny")
         get_settings.cache_clear()
-        st.success(hours_labels.get(saved_mode, saved_mode))
+        st.success(_t("hours_london_ny") if saved_mode == "london_ny" else saved_mode)
         st.info(_t("need_restart"))
         st.rerun()
 

@@ -58,8 +58,9 @@ Implementations:
 
 - **`mt5_broker.py`** — wraps the `MetaTrader5` pip package. **Windows-only**
   (the package has no Linux/macOS build; it talks to a local MT5 terminal
-  process). Deploy this on a Windows VPS located near your broker's servers
-  (London/NY, per the session windows in `config/settings.yaml`).
+  process). The supported deployment is a Windows PC where that terminal is
+  already logged in. See `docs/WINDOWS_INSTALL_FA.md`. A VPS is optional and
+  documented separately.
 - **`oanda_broker.py`** — OANDA v20 REST. **Cross-platform** (Linux VPS /
   Netherlands deployment). See `docs/DEPLOY_NL_VPS.md`. Pairs with
   `data/oanda_connector.py` for candles and pricing without MT5.
@@ -70,21 +71,21 @@ Implementations:
 Pick one live deployment target; the pipeline above the broker layer is
 identical either way.
 
-## Win-rate expectations (why the risk model is fixed, not tunable)
+## Risk ceilings (fixed) and an old arithmetic sketch
 
-1-minute to 10-minute timeframes are dominated by market noise. A realistic,
-sustainable edge for a rules-based bot in this regime is **55–65% win rate**,
-not 90%+. This system is designed to be profitable at 60% win rate with a
-1:1.5+ R:R and 1% max risk per trade — the math:
+1-minute to 10-minute bars are noisy, and costs are large relative to the
+target. An older sketch said a 60% win rate at 1:1.5 R:R would be +0.50R
+before costs:
 
 ```
-EV per trade = (0.60 × 1.5R) − (0.40 × 1R) = 0.90R − 0.40R = +0.50R expectancy
+(0.60 × 1.5R) − (0.40 × 1R) = +0.50R
 ```
 
-This is why `config/settings.yaml → risk.max_risk_per_trade_pct` and
-`risk.min_reward_risk_ratio` are treated as fixed constraints throughout the
-codebase (see `CLAUDE.md` / `.cursor/rules/project.mdc`) rather than
-parameters to optimize away.
+That sketch is not a measured win rate, not a design promise, and not evidence
+that this repository has a stable edge. Costs move the result down. The fixed
+constraints are still `risk.max_risk_per_trade_pct` (1%) and
+`risk.min_reward_risk_ratio` (1.5). Do not tune them to chase a backtest win
+rate. The recorded samples are summarized in `docs/BAZRASI_SADEGHANE_FA.md`.
 
 ## Multi-timeframe alignment logic
 

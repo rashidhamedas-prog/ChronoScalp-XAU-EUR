@@ -5,11 +5,16 @@ York). This is a veto-only gate — it can suppress a signal, never generate
 or upgrade one. See docs/ARCHITECTURE.md data-flow diagram.
 
 ``trading_hours_mode``:
-- ``london_ny`` — only configured London / New York windows (all symbols)
-- ``always_on_24h`` — trade any time (all symbols)
+- ``london_ny`` — only configured London / New York windows (all symbols).
+  This is the only mode the desktop app will trade.
+- ``always_on_24h`` — legacy alias. Ignored unless
+  ``sessions.allow_unconstrained_24h`` is true. That flag is for research
+  tests, not for the installed app or runtime overlays.
 
 Windows are interpreted in each session's IANA timezone (DST-aware) when
 ``sessions.market_timezones`` is set. Invalid timezones fail closed.
+London uses ``Europe/London`` and New York uses ``America/New_York`` unless
+the config names another zone. Clocks follow daylight-saving time.
 """
 
 from __future__ import annotations
@@ -118,6 +123,29 @@ class SessionFilter:
         always_on = {str(s) for s in (sessions_cfg.get("always_on_symbols") or [])}
         raw_mode = sessions_cfg.get("trading_hours_mode")
         legacy_outside = bool(sessions_cfg.get("trade_outside_sessions", False))
+        allow_24h = bool(sessions_cfg.get("allow_unconstrained_24h", False))
+
+        if not allow_24h:
+            if raw_mode is not None and normalize_trading_hours_mode(raw_mode) == (
+                TRADING_HOURS_ALWAYS_ON_24H
+            ):
+                logger.warning(
+                    "sessions.trading_hours_mode=always_on_24h is disabled; "
+                    "entries stay inside London/New York windows"
+                )
+            elif legacy_outside or always_on:
+                logger.warning(
+                    "Unconstrained hours (trade_outside_sessions / always_on_symbols) "
+                    "are ignored; entries stay inside London/New York windows"
+                )
+            return cls(
+                windows=windows,
+                trade_outside_sessions=False,
+                always_on_symbols=set(),
+                trading_hours_mode=TRADING_HOURS_LONDON_NY,
+                strict_session_mode=True,
+                timezone_ok=timezone_ok,
+            )
 
         if raw_mode is None:
             mode = TRADING_HOURS_ALWAYS_ON_24H if legacy_outside else TRADING_HOURS_LONDON_NY

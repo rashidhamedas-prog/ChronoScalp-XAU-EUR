@@ -130,7 +130,12 @@ class TradingBot:
         self.use_news_straddle = use_news_straddle
         scalp_tf = (settings.raw.get("timeframes") or {}).get("ultra_scalp") or {}
         ultra_cfg = settings.strategy.get("ultra_scalp") or {}
-        use_s15_trigger = bool(use_ultra_scalp and ultra_cfg.get("use_s15_trigger", False))
+        use_s15_trigger = bool(
+            use_ultra_scalp
+            and ultra_cfg.get("use_s15_trigger", False)
+            and ultra_cfg.get("s15_allowed") is True
+            and ultra_cfg.get("allow_without_costed_evidence") is True
+        )
         if use_s15_trigger:
             higher_raw = settings.higher_trend_names(ultra_scalp=True)
             trigger_raw = scalp_tf.get("entry_trigger") or ["S15"]

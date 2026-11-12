@@ -7,6 +7,8 @@ deliberate — see CLAUDE.md "Conventions".
 
 from __future__ import annotations
 
+import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -17,15 +19,54 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from chronoscalp.config_overrides import validate_runtime_overrides
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-CONFIG_DIR = ROOT_DIR / "config"
+
+def bundled_root() -> Path:
+    """Repository root, or the PyInstaller bundle directory when frozen."""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def user_data_dir() -> Path | None:
+    """Writable AppData directory when ``CHRONOSCALP_HOME`` is set.
+
+    Unset in a git checkout so tests and ``config/`` stay next to the source.
+    The Windows installer sets this to ``%APPDATA%\\ChronoScalp``.
+    """
+    raw = os.environ.get("CHRONOSCALP_HOME", "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
+def _default_config_dir() -> Path:
+    override = os.environ.get("CHRONOSCALP_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override)
+    return bundled_root() / "config"
+
+
+def _default_env_file() -> str:
+    home = user_data_dir()
+    if home is not None:
+        candidate = home / ".env"
+        if candidate.exists():
+            return str(candidate)
+    return str(bundled_root() / ".env")
+
+
+ROOT_DIR = bundled_root()
+CONFIG_DIR = _default_config_dir()
 
 
 class Secrets(BaseSettings):
     """Loaded from environment / .env. Never log these values directly."""
 
     model_config = SettingsConfigDict(
-        env_file=str(ROOT_DIR / ".env"),
+        env_file=_default_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

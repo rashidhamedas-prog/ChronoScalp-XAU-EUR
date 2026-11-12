@@ -43,7 +43,9 @@ def main() -> int:
         for cand in ("XAUUSD", "XAUUSD_o", "GOLD", "EURUSD", "EURUSD_o"):
             info = mt5.symbol_info(cand)
             selected = mt5.symbol_select(cand, True)
-            print(f"CANDIDATE {cand} info={info is not None} select={selected} err={mt5.last_error()}")
+            print(
+                f"CANDIDATE {cand} info={info is not None} select={selected} err={mt5.last_error()}"
+            )
     finally:
         connector.shutdown()
     return 0

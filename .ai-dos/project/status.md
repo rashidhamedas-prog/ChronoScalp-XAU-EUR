@@ -1,6 +1,15 @@
 # Project Status
 
-- Last verified: 2026-09-03T23:40:00Z
+- Last verified: 2026-11-12T00:40:00Z
+- TASK-006: Windows desktop install path. 24h trading and ultra-scalp without
+  an explicit costed-evidence flag are off. Backtest charges typical spread
+  plus slippage; flat commission fallback is 0. No new broker-native backtest
+  was run (no history in git). Prior gold/EUR numbers stay historical and do
+  not establish a stable edge under the new cost model. Live gate unchanged.
+- Primary branch: main. Implementer branch `cursor/windows-desktop-install-cfbb`.
+- Invariants: 1%/3% intact; `CHRONOSCALP_CONFIRM_LIVE` unchanged; installer seeds `no`.
+
+- Last verified (prior): 2026-09-03T23:40:00Z
 - TASK-005: standalone `operator_style` engine (ADX M15 + Stochastic M5 +
   Iran 13:00–18:30). Unplugged from Delta. Gold catalog: delta +
   operator_style + news_straddle. EUR catalog: operator_style +

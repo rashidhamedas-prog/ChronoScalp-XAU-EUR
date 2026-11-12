@@ -1,5 +1,12 @@
 # Roadmap
 
+## Windows desktop install (2026-11-12)
+
+- [x] Per-user installer spec (Inno Setup) and PyInstaller onedir specs for the runner and the control panel. Build script: `scripts/windows/build_installer.ps1`. GitHub Actions workflow `Windows installer` uploads `ChronoScalp-Setup.exe` when the Windows job succeeds.
+- [x] Logon task is interactive and per-user. It starts paper mode. `CHRONOSCALP_CONFIRM_LIVE` stays no in a newly seeded `.env`.
+- [x] Unconstrained 24h trading and ultra-scalp without a costed-evidence flag stay off. Backtest charges configured spread and slippage; holdout windows are reported separately.
+- [ ] A broker-native rerun with that cost model and an untouched tail is still required before any live claim. No such rerun was produced here. See `docs/BAZRASI_SADEGHANE_FA.md`.
+
 ## Strategy Delta — implemented, validation pending
 
 - [x] Explainable M15/M5 regime + M1 sweep/retest entry engine

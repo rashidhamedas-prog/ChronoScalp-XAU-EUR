@@ -580,11 +580,14 @@ class MultiTimeframeStrategy:
         enabled = resolve_enabled_strategies(self.strategy_cfg, symbol=symbol)
         use_smc = enabled.smc
         use_liq = enabled.liquidity
-        use_scalp = enabled.ultra_scalp
+        scalp_cfg = merge_symbol_overrides(self.strategy_cfg.get("ultra_scalp") or {}, symbol)
+        # S15/M1 ultra-scalp stays off unless a costed study explicitly opts in.
+        # Live and paper books must not inherit it from a stale strategy list.
+        requested_scalp = bool(enabled.ultra_scalp)
+        use_scalp = bool(requested_scalp and scalp_cfg.get("allow_without_costed_evidence") is True)
         use_delta = enabled.delta
         use_operator = enabled.operator_style
         use_xau = enabled.xau_vwap_pullback
-        scalp_cfg = merge_symbol_overrides(self.strategy_cfg.get("ultra_scalp") or {}, symbol)
         inst_cfg = merge_symbol_overrides(self.strategy_cfg, symbol)
         trend_engine = str(self.strategy_cfg.get("trend_engine", "session_vwap"))
         entry_engine = str(self.strategy_cfg.get("entry_engine", "institutional"))
@@ -592,7 +595,7 @@ class MultiTimeframeStrategy:
         want_scalp = bool(use_scalp and run_scalp and symbol_allows_scalp)
         # Institutional / SMC / liquidity when those modes are on — or the
         # legacy MACD path when nothing specialized is selected.
-        specialized = use_scalp or use_delta or use_operator or use_xau
+        specialized = requested_scalp or use_delta or use_operator or use_xau
         want_institutional = bool(run_institutional) and (use_smc or use_liq or not specialized)
         want_delta = bool(run_institutional and use_delta)
         want_operator = bool(run_institutional and use_operator)

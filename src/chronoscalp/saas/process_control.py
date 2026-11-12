@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PID_FILE = ROOT / "data" / "user" / "bot.pid"
 _BOT_STDOUT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB — rotate before VPS disk fills
 _RUN_LIVE_MARKER = "run_live.py"
+_RUNNER_EXE_MARKER = "ChronoScalpRunner"
 DEFAULT_MT5_TERMINAL_PATH = r"C:\Program Files\MetaTrader 5\terminal64.exe"
 # Private bytes, not working set: Windows trims the working set of an idle
 # background terminal to ~20–30 MiB, which made a healthy terminal look
@@ -144,12 +145,32 @@ def _python_executable() -> str:
     return sys.executable
 
 
+def data_root() -> Path:
+    """Writable runtime directory. ``CHRONOSCALP_HOME`` when the installer set it."""
+    home = os.environ.get("CHRONOSCALP_HOME", "").strip()
+    if home:
+        return Path(home)
+    return ROOT
+
+
 def resolve_pid_file(pid_file: Path | None = None) -> Path:
-    """Return an absolute pid-file path (relative paths resolve under ``ROOT``)."""
+    """Return an absolute pid-file path (relative paths resolve under the data root)."""
     path = PID_FILE if pid_file is None else Path(pid_file)
+    home = os.environ.get("CHRONOSCALP_HOME", "").strip()
+    if home and (pid_file is None or path == PID_FILE):
+        return (Path(home) / "data" / "user" / "bot.pid").resolve()
     if not path.is_absolute():
-        return (ROOT / path).resolve()
+        return (data_root() / path).resolve()
     return path
+
+
+def runner_command(mode: str) -> list[str]:
+    """Command that starts the paper/live loop. Frozen installs use the runner exe."""
+    runner = os.environ.get("CHRONOSCALP_RUNNER", "").strip()
+    if runner:
+        return [runner, "--mode", mode]
+    script = ROOT / "scripts" / "run_live.py"
+    return [_python_executable(), str(script), "--mode", mode]
 
 
 def stop_marker_path(pid_file: Path | None = None) -> Path:
@@ -203,7 +224,7 @@ def _list_run_live_pids() -> list[int]:
             cmd = (
                 "Get-CimInstance Win32_Process | "
                 "Where-Object { $_.CommandLine -and "
-                "($_.CommandLine -match 'run_live\\.py') -and "
+                "($_.CommandLine -match 'run_live\\.py|ChronoScalpRunner') -and "
                 "($_.CommandLine -notmatch 'telegram_control_bot') } | "
                 "ForEach-Object { $_.ProcessId }"
             )
@@ -220,7 +241,7 @@ def _list_run_live_pids() -> list[int]:
                     found.append(int(token))
         else:
             result = subprocess.run(
-                ["pgrep", "-f", _RUN_LIVE_MARKER],
+                ["pgrep", "-f", f"{_RUN_LIVE_MARKER}|{_RUNNER_EXE_MARKER}"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -330,14 +351,17 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
                 mt5_msg,
             )
 
-    script = ROOT / "scripts" / "run_live.py"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src")
     env["PYTHONUNBUFFERED"] = "1"
+    home = os.environ.get("CHRONOSCALP_HOME", "").strip()
+    if home:
+        env["CHRONOSCALP_HOME"] = home
+        env.setdefault("CHRONOSCALP_CONFIG_DIR", str(Path(home) / "config"))
     # Ensure child sees the same live-gate value the panel just validated (not a stale OS env).
     if mode == "live":
         env["CHRONOSCALP_CONFIRM_LIVE"] = "yes"
-    log_dir = ROOT / "logs"
+    log_dir = data_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = log_dir / "bot_stdout.log"
     _rotate_bot_stdout_if_needed(stdout_path)
@@ -348,8 +372,8 @@ def start_bot(mode: str = "paper", pid_file: Path = PID_FILE) -> tuple[bool, str
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
 
     proc = subprocess.Popen(
-        [_python_executable(), str(script), "--mode", mode],
-        cwd=str(ROOT),
+        runner_command(mode),
+        cwd=str(data_root()),
         env=env,
         stdout=stdout,
         stderr=subprocess.STDOUT,

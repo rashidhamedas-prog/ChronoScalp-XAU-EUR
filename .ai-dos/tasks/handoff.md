@@ -2,6 +2,57 @@
 
 Append newest entries at the top. Never erase another agent's record.
 
+## 2026-11-12 TASK-006 Windows desktop install
+
+- Time (UTC): 2026-11-12T00:40:00Z
+- Task / owner / role: TASK-006 / cursor:grok-4.7 / implementer
+- Reclaimed stale in-progress file claims (heartbeat older than 24h, in most
+  cases by months) from TASK-005 `cursor:grok-4.6` (heartbeat 2026-09-03),
+  TASK-003 `cursor:claude-opus-5` (heartbeat 2026-08-29), TASK-002
+  `cursor:grok-4.6` (heartbeat 2026-08-25), and TASK-001 `cursor:grok-4.5`
+  (heartbeat 2026-08-17). Reason: those claims blocked the operator-authorized
+  desktop redesign. Old task records were not deleted.
+
+### Product
+
+- Primary path is a per-user Windows install: PyInstaller onedir specs, Inno
+  Setup script, `scripts/windows/build_installer.ps1`, logon task (interactive,
+  not a service), shortcuts, AppData for `.env` and config.
+  `CHRONOSCALP_CONFIRM_LIVE` is seeded `no`. The logon process forces paper.
+- 24h trading is refused by the session filter unless
+  `allow_unconstrained_24h` is set in memory (tests only). Overlays and the
+  panel/Telegram cannot persist it.
+- Ultra-scalp does not run unless `allow_without_costed_evidence` is true.
+  S15 also needs `s15_allowed`. Both default false. No such evidence exists.
+- Backtest charges half of `typical_spread_pips` plus slippage on entry and
+  on exit, and symbol-spec commission when present. Flat
+  `commission_per_lot` fallback is 0 (the old unused 7.0 was not a measured
+  XAU/EUR fee). `evaluate_chronological_holdout` reports a tail separately.
+- No broker history is in git, so no new performance number was produced.
+  Prior gold/EUR figures stay in `docs/BAZRASI_SADEGHANE_FA.md` as historical
+  and are not a stable edge under this cost model.
+
+### Invariants
+
+1% / 1.5R / 3% and `CHRONOSCALP_CONFIRM_LIVE` unchanged. Do not merge. Do not
+enable live. Linux agents must not commit a fake exe.
+
+### Gates (this session, Linux)
+
+- `pytest -q` → 452 passed, exit 0
+- `ruff check src tests scripts` → All checks passed
+- CI 2026-11-12: `lint-and-test` failed `black --check` on four
+  pre-existing files. Those four were reformatted in the one allowed CI fix.
+  `Windows installer` failed because Inno read `..env.example` (the
+  backslash before `.env` was missing). The source line is now
+  `..\..\.env.example`. No further CI loop after this push.
+
+### Next action
+
+Independent review before merge. On a Windows machine, run
+`scripts/windows/build_installer.ps1` (or the `Windows installer` workflow
+once) and install `dist/ChronoScalp-Setup.exe`.
+
 ## 2026-09-03 TASK-005 standalone operator_style engine
 
 - Time (UTC): 2026-09-03T23:40:00Z

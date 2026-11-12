@@ -89,6 +89,7 @@ class BacktestResult:
     # Conservative defaults: a result built by hand has modelled nothing.
     unmodelled_gates: tuple[str, ...] = LIVE_ONLY_GATES + PARITY_GATES
     stop_management: str = "bar_close"
+    execution_costs: dict = field(default_factory=dict)
 
     @property
     def total_trades(self) -> int:
@@ -142,6 +143,7 @@ class BacktestResult:
             "live_only_gates_not_modelled": list(self.unmodelled_gates),
             "stop_management": self.stop_management,
             "strategy_reports": dict(self.strategy_reports),
+            "execution_costs": dict(self.execution_costs),
         }
 
 
@@ -266,6 +268,42 @@ def _to_utc_timestamp(value: datetime | pd.Timestamp) -> pd.Timestamp:
     return ts.tz_convert("UTC")
 
 
+def chronological_holdout_bounds(
+    index: pd.DatetimeIndex,
+    holdout_fraction: float = 0.30,
+) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+    """Split a bar index into a development head and an untouched tail.
+
+    Returns ``(start, development_end, holdout_start, end)``. The two windows
+    do not share a bar. Nothing here tunes parameters. Callers must not blend
+    the windows into one win-rate.
+    """
+    if not 0.0 < float(holdout_fraction) < 1.0:
+        raise ValueError("holdout_fraction must be between 0 and 1")
+    if len(index) < 2:
+        raise ValueError("holdout split needs at least two bars")
+    cut = int(len(index) * (1.0 - float(holdout_fraction)))
+    cut = min(max(cut, 1), len(index) - 1)
+    return index[0], index[cut - 1], index[cut], index[-1]
+
+
+def execution_cost_snapshot(settings) -> dict:
+    """Describe the cost model a backtest will charge. Not a measured result."""
+    backtest_cfg = settings.backtest or {}
+    return {
+        "charge_round_turn_costs": bool(backtest_cfg.get("charge_round_turn_costs", True)),
+        "slippage_pips_per_side": float(settings.execution.get("slippage_pips", 0.5)),
+        "spread_source": "config/symbols.yaml typical_spread_pips (half on entry and half on exit)",
+        "commission_per_lot_fallback": float(backtest_cfg.get("commission_per_lot", 0.0) or 0.0),
+        "commission_rule": (
+            "Symbol spec commission_per_lot / commission_pct_notional when set; "
+            "otherwise the fallback. A zero fallback means no invented flat fee."
+        ),
+        "holdout_fraction": float(backtest_cfg.get("holdout_fraction", 0.30) or 0.30),
+        "holdout_applied_in_single_run": False,
+    }
+
+
 def run_backtest(
     symbol: str,
     data_by_timeframe: dict[Timeframe, pd.DataFrame],
@@ -288,10 +326,16 @@ def run_backtest(
         trigger_df = trigger_df[trigger_df.index <= _to_utc_timestamp(end)]
 
     starting_equity = float(settings.backtest.get("initial_balance", 10_000))
+    cost_snapshot = execution_cost_snapshot(settings)
+    charge_costs = bool(cost_snapshot["charge_round_turn_costs"])
+    commission_fallback = float(cost_snapshot["commission_per_lot_fallback"])
+    slippage_pips = float(cost_snapshot["slippage_pips_per_side"])
     broker = PaperBroker(
         symbols_cfg=settings.symbols_raw,
         starting_balance=starting_equity,
-        slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+        slippage_pips=slippage_pips,
+        charge_round_turn_costs=charge_costs,
+        commission_per_lot_fallback=commission_fallback,
     )
     session_filter = SessionFilter.from_config(settings.sessions)
     from chronoscalp.config import CONFIG_DIR
@@ -345,13 +389,16 @@ def run_backtest(
         starting_equity=starting_equity,
         unmodelled_gates=LIVE_ONLY_GATES if model_gates else LIVE_ONLY_GATES + PARITY_GATES,
         stop_management="intrabar_ohlc_path" if intrabar else "bar_close",
+        execution_costs=cost_snapshot,
     )
     warmup = max(50, settings.indicators.get("ema_period_trend", 50) + 5)
 
     books = ComparisonBooks(
         symbols_cfg=settings.symbols_raw,
         starting_balance=starting_equity,
-        slippage_pips=float(settings.execution.get("slippage_pips", 0.5)),
+        slippage_pips=slippage_pips,
+        charge_round_turn_costs=charge_costs,
+        commission_per_lot_fallback=commission_fallback,
     )
     open_tickets: dict[str, int] = {}
     spread_median = RollingMedianSpread()
@@ -517,6 +564,57 @@ def run_backtest(
         result.total_trades,
     )
     return result
+
+
+def evaluate_chronological_holdout(
+    symbol: str,
+    data_by_timeframe: dict[Timeframe, pd.DataFrame],
+    higher_timeframes: list[Timeframe],
+    trigger_timeframe: Timeframe,
+    settings,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    holdout_fraction: float | None = None,
+) -> dict:
+    """Run the same backtest on a development head and an untouched tail.
+
+    Parameters are not refit between the windows. The returned object keeps
+    the two summaries separate.
+    """
+    trigger_df = data_by_timeframe[trigger_timeframe]
+    if start is not None:
+        trigger_df = trigger_df[trigger_df.index >= _to_utc_timestamp(start)]
+    if end is not None:
+        trigger_df = trigger_df[trigger_df.index <= _to_utc_timestamp(end)]
+    if holdout_fraction is None:
+        holdout_fraction = float((settings.backtest or {}).get("holdout_fraction", 0.30) or 0.30)
+    start_ts, dev_end, hold_start, end_ts = chronological_holdout_bounds(
+        trigger_df.index, holdout_fraction
+    )
+    common = {
+        "symbol": symbol,
+        "data_by_timeframe": data_by_timeframe,
+        "higher_timeframes": higher_timeframes,
+        "trigger_timeframe": trigger_timeframe,
+        "settings": settings,
+    }
+    development = run_backtest(
+        **common, start=start_ts.to_pydatetime(), end=dev_end.to_pydatetime()
+    )
+    holdout = run_backtest(**common, start=hold_start.to_pydatetime(), end=end_ts.to_pydatetime())
+    return {
+        "holdout_fraction": float(holdout_fraction),
+        "development_start": start_ts.isoformat(),
+        "development_end": dev_end.isoformat(),
+        "holdout_start": hold_start.isoformat(),
+        "window_end": end_ts.isoformat(),
+        "development": development.summary(),
+        "holdout": holdout.summary(),
+        "note": (
+            "These windows are not averaged. The holdout was not used to choose "
+            "parameters. A single run_backtest() call is not this split."
+        ),
+    }
 
 
 # Breakeven can fire once and trailing converges on the next call, so two

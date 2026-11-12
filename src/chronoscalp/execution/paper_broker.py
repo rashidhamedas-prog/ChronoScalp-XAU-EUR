@@ -34,14 +34,45 @@ class PaperBroker:
         starting_balance: float = 10_000.0,
         slippage_pips: float = 0.5,
         first_ticket: int = 1,
+        *,
+        charge_round_turn_costs: bool = False,
+        commission_per_lot_fallback: float = 0.0,
     ) -> None:
         self.symbols_cfg = symbols_cfg
         self.balance = starting_balance
         self.slippage_pips = slippage_pips
+        self.charge_round_turn_costs = bool(charge_round_turn_costs)
+        self.commission_per_lot_fallback = float(commission_per_lot_fallback or 0.0)
         self._positions: dict[int, Position] = {}
         self._pending: dict[int, PendingOrder] = {}
         self._quotes: dict[str, Quote] = {}
         self._next_ticket = max(1, int(first_ticket))
+
+    def _adverse_distance(
+        self, symbol: str, pip_size: float, *, include_half_spread: bool
+    ) -> float:
+        """Slippage, plus half the configured typical spread when costs are on."""
+        slip = self.slippage_pips * pip_size
+        if not self.charge_round_turn_costs:
+            return slip
+        extra = 0.0
+        if include_half_spread:
+            extra = self.get_current_spread_pips(symbol) * pip_size / 2.0
+        return slip + extra
+
+    def _round_turn_commission(self, spec: dict, entry_price: float, volume: float) -> float:
+        """Symbol-spec commission, else the explicit backtest fallback. Zero when costs are off."""
+        if not self.charge_round_turn_costs:
+            return 0.0
+        from chronoscalp.risk.position_sizing import commission_per_lot
+
+        priced = dict(spec)
+        own = float(priced.get("commission_per_lot") or 0.0) or float(
+            priced.get("commission_pct_notional") or 0.0
+        )
+        if not own and self.commission_per_lot_fallback:
+            priced["commission_per_lot"] = self.commission_per_lot_fallback
+        return float(commission_per_lot(priced, entry_price)) * float(volume)
 
     def connect(self) -> bool:
         logger.info("PaperBroker ready (starting_balance={:.2f})", self.balance)
@@ -220,7 +251,7 @@ class PaperBroker:
     ) -> Position:
         spec = self.symbols_cfg[signal.symbol]
         pip_size = spec["pip_size"]
-        slip = self.slippage_pips * pip_size
+        slip = self._adverse_distance(signal.symbol, pip_size, include_half_spread=True)
         base_price = fill_price if fill_price is not None else signal.entry_price
         fill = base_price + slip if signal.signal_type == SignalType.BUY else base_price - slip
 
@@ -270,9 +301,15 @@ class PaperBroker:
             raise RuntimeError(f"No open paper position for ticket {ticket}")
 
         spec = self.symbols_cfg[position.symbol]
+        pip_size = float(spec["pip_size"])
+        pip_value_per_lot = float(spec["pip_value_per_lot"])
         close_price = exit_price if exit_price is not None else position.entry_price
-        pip_size = spec["pip_size"]
-        pip_value_per_lot = spec["pip_value_per_lot"]
+        if self.charge_round_turn_costs and exit_price is not None:
+            adverse = self._adverse_distance(position.symbol, pip_size, include_half_spread=True)
+            if position.direction == SignalType.BUY:
+                close_price = exit_price - adverse
+            else:
+                close_price = exit_price + adverse
 
         price_diff = (
             close_price - position.entry_price
@@ -280,12 +317,18 @@ class PaperBroker:
             else position.entry_price - close_price
         )
         pnl = (price_diff / pip_size) * pip_value_per_lot * position.volume
+        commission = self._round_turn_commission(spec, position.entry_price, position.volume)
+        pnl -= commission
         self.balance += pnl
 
         # Prefer initial SL so trailing/breakeven moves do not distort R.
         risk_stop = position.initial_stop_loss or position.stop_loss
         risk = abs(position.entry_price - risk_stop)
-        r_multiple = round(price_diff / risk, 3) if risk else 0.0
+        risk_dollars = (risk / pip_size) * pip_value_per_lot * position.volume if risk else 0.0
+        if self.charge_round_turn_costs and risk_dollars:
+            r_multiple = round(pnl / risk_dollars, 3)
+        else:
+            r_multiple = round(price_diff / risk, 3) if risk else 0.0
 
         result = TradeResult(
             symbol=position.symbol,

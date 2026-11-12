@@ -67,10 +67,11 @@ def test_apply_active_symbols_and_strategies(tmp_path: Path):
     from chronoscalp.saas.broker_wizard import apply_trading_hours_mode
 
     mode = apply_trading_hours_mode("24h", overrides_path=overrides)
-    assert mode == "always_on_24h"
+    assert mode == "london_ny"
     data3 = yaml.safe_load(overrides.read_text(encoding="utf-8"))
-    assert data3["sessions"]["trading_hours_mode"] == "always_on_24h"
-    assert data3["sessions"]["trade_outside_sessions"] is True
+    assert data3["sessions"]["trading_hours_mode"] == "london_ny"
+    assert data3["sessions"]["trade_outside_sessions"] is False
+    assert data3["sessions"]["allow_unconstrained_24h"] is False
 
     mode2 = apply_trading_hours_mode("london_ny", overrides_path=overrides)
     assert mode2 == "london_ny"
